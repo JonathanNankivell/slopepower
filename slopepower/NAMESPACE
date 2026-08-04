@@ -1,0 +1,23 @@
+# Hand-maintained.
+
+export(slope_params)
+export(slope_params_manual)
+export(trial_design)
+export(slope_sigma)
+export(slope_var)
+export(slope_effect_size)
+export(slope_power)
+export(slope_power_grid)
+export(slope_bootstrap)
+export(dropout_rate)
+export(slopepower)
+
+S3method(print, slope_params)
+S3method(print, trial_design)
+S3method(print, slope_power)
+S3method(print, dropout_rate)
+S3method(print, slope_bootstrap)
+S3method(as.data.frame, slope_power)
+
+importFrom(nlme, lme, fixef, getVarCov, lmeControl, pdBlocked, pdSymm, pdIdent, varIdent)
+importFrom(stats, na.omit, sigma, coef, ave, qnorm, pnorm, terms, model.frame)

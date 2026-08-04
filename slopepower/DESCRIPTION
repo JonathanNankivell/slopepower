@@ -1,0 +1,19 @@
+Package: slopepower
+Title: Power and Sample Size for Trials Comparing Slopes Over Time
+Version: 0.1.0
+Authors@R: person("Jonathan", "Nankivell",
+                  email = "nankivelljonathan@gmail.com",
+                  role = c("aut", "cre"))
+Description: An R implementation of the Stata 'slopepower' command of Nash,
+    Morgan, Frost and Mulick (2021) <doi:10.1177/1536867X211045512>. Performs
+    sample size and power calculations for two-arm parallel trials in which the
+    outcome is a rate of change (slope) estimated by a linear mixed model.
+    Parameters are estimated in a first stage from previously collected
+    longitudinal data, or supplied directly, and combined in a second stage with
+    the design of a proposed trial.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1)
+Imports: nlme, stats, methods
+Suggests: testthat (>= 3.0.0), haven, lme4
+RoxygenNote: 7.3.2

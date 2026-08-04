@@ -1,0 +1,10 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+*.Rcheck/
+*.tar.gz
+
+# direnv / nix
+.direnv/
