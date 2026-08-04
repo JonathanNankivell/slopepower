@@ -51,6 +51,12 @@ if (requireNamespace("slopepower", quietly = TRUE)) {
     slpower3 = fit(slpower3, treated = treat)$slope
   )
   want <- c(slpower1 = -1.672, slpower2 = -1.715, slpower3 = -1.852)
-  stopifnot(all(abs(got - want) < 5e-4))
+  # The bound is 1e-3, not the 5e-4 that "agrees to 3 d.p." would suggest.
+  # slpower1 fits -1.67250000, which sits 2.3e-13 from the .0005 rounding
+  # boundary against the paper's -1.672 --- see the note in test-paper-parity.R.
+  # At 5e-4 this guard passes by about 1e-15, so any nlme or BLAS change that
+  # moved the REML slope by one ulp the wrong way would abort a routine
+  # regeneration with a message reading as "the packaged data are corrupt".
+  stopifnot(all(abs(got - want) < 1e-3))
   cat("paper slopes reproduced:", paste(sprintf("%.3f", got), collapse = " "), "\n")
 }
