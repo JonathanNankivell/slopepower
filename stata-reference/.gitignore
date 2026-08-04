@@ -1,0 +1,13 @@
+# Stata intermediates, and the CSVs they produce.
+#
+# The CSVs are not lost by ignoring them here: make-fixtures.R writes validated
+# copies into slopepower/tests/testthat/fixtures/, and those are the committed
+# ones the test suite reads. Keeping a second copy in this directory would only
+# give the two something to drift apart on.
+*.dta
+*.csv
+
+# 00_open_questions.log is deliberately NOT ignored. It is the raw evidence for
+# the two questions about slopepower.ado -- in particular that mixed stores the
+# by() residual variances as base plus a log-ratio offset -- it is 20 KB, and
+# nobody without a Stata licence can regenerate it.

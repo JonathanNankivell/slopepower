@@ -1,0 +1,462 @@
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /home/jon/Documents/Masters Documents/Summer project/transpilation/stata-reference/00_open_questions.log
+  log type:  text
+ opened on:   4 Aug 2026, 13:17:40
+
+. 
+. * ---------------------------------------------------------------------------
+. * QUESTION 1 --- is the schedule/dropout length guard vacuous?
+. *
+. * slopepower.ado:239 and :276 both read
+. *
+. *     local sched_length = `sched_length ' + 1
+. *
+. * with a space inside the macro name.  If Stata expands `sched_length ' to
+. * empty rather than trimming to `sched_length', the expression evaluates as
+. * " + 1" = 1 on every pass, both counters are stuck at 1, and the guard at :279
+. *
+. *     if `sched_length' != `drop_length'  ->  1 != 1  ->  never fires
+. *
+. * is dead code.  A dropouts() list of the wrong length would then be accepted
+. * silently, and the missing strata would be treated as completers --- which
+. * inflates N without warning.
+. *
+. * Test: give a 3-visit schedule a 2-element dropout list.  It must error 198
+. * with "Dropout list must correspond with visit schedule".  If it prints a
+. * result instead, the guard is vacuous and the R port's strict length check is
+. * a genuine fix rather than a restatement.
+. * ---------------------------------------------------------------------------
+. 
+. use "`data'/slpower1.dta", clear
+
+. 
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q1a: schedule(1 2 3) with dropouts(0.05 0.05) --- SHORT by one"
+Q1a: schedule(1 2 3) with dropouts(0.05 0.05) --- SHORT by one
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. capture noisily slopepower sdmt, subject(id) time(visit) obs nocont ///
+>         schedule(1 2 3) dropouts(0.05 0.05) effectiveness(0.33) power(0.8)
+
+Dropout list must correspond with visit schedule
+
+. display as text "Q1a _rc = " _rc
+Q1a _rc = 198
+
+. 
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q1b: schedule(1 2) with dropouts(0.05 0.05 0.05) --- LONG by one"
+Q1b: schedule(1 2) with dropouts(0.05 0.05 0.05) --- LONG by one
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. capture noisily slopepower sdmt, subject(id) time(visit) obs nocont ///
+>         schedule(1 2) dropouts(0.05 0.05 0.05) effectiveness(0.33) power(0.8)
+
+Dropout list must correspond with visit schedule
+
+. display as text "Q1b _rc = " _rc
+Q1b _rc = 198
+
+. 
+. * The direct probe, independent of slopepower: does a macro name with a
+. * trailing space still expand?
+. *
+. * Written without backticks in the display strings: a backtick-doublequote pair
+. * inside a display argument opens a compound quote and takes the rest of the
+. * file with it, which is how the first run of this file died at this line and
+. * left Q2 unreached.
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q1c: does a macro name with a trailing space expand?"
+Q1c: does a macro name with a trailing space expand?
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. local counter = 7
+
+. local probe = `counter ' + 1
+
+. display as text "counter = 7, then evaluating counter-with-a-trailing-space + 1 gives " ///
+>                 as result `probe'
+counter = 7, then evaluating counter-with-a-trailing-space + 1 gives 8
+
+. display as text "(8 => Stata trims the name, guard is live." _n ///
+>                 " 1 => the name does not expand, guard is vacuous.)"
+(8 => Stata trims the name, guard is live.
+ 1 => the name does not expand, guard is vacuous.)
+
+. 
+. * For reference: what does the correct 3-element dropout list give?
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q1d: the well-formed call, for comparison"
+Q1d: the well-formed call, for comparison
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. slopepower sdmt, subject(id) time(visit) obs nocont ///
+>         schedule(1 2 3) dropouts(0.05 0.05 0.05) effectiveness(0.33) power(0.8)
+
+Data characteristics:
+        Number of observations in model = 800
+                  Participants in model = 200
+                         Slope of cases = -1.673
+
+Parameters for planned study:
+                                  alpha = 0.050
+                                  power = 0.800
+                          effectiveness = 0.330
+  target treatment difference in slopes = 0.552
+             number of follow-up visits = 3
+                schedule (and dropouts) : 1 (0.05), 2 (0.05), 3 (0.05)
+                                  scale = 1
+
+  Estimated sample size:
+                                      N = 484
+                              N per arm = 242
+
+. return list
+
+scalars:
+  r(subjects_in_model) =  200
+       r(obs_in_model) =  800
+              r(alpha) =  .05
+              r(power) =  .8
+          r(fupvisits) =  3
+           r(sampsize) =  484
+      r(effectiveness) =  .33
+                r(tte) =  .5519250000000004
+            r(var_tte) =  9.392210641046807
+        r(slope_cases) =  -1.672500000000001
+     r(slope_controls) =  .
+
+matrices:
+              r(table) :  1 x 10
+
+. 
+. * ---------------------------------------------------------------------------
+. * QUESTION 2 --- how does residuals(independent, by(case)) store its two
+. * variances?
+. *
+. * slopepower.ado:371 computes the CASES' residual variance as
+. *
+. *     var_res = (exp(b[1,13] + b[1,14]))^2
+. *
+. * which is correct only if mixed stores a base log-SD in b[13] and a
+. * group-specific OFFSET in b[14].  If instead it stores two independent
+. * log-SDs, the right answer is exp(b[1,14])^2 and the shipped code is
+. * multiplying the two standard deviations together.
+. *
+. * The R port sidesteps this by extracting variance components by name, and it
+. * gets 10.354 for cases against 10.699 for controls --- close enough that the
+. * two readings differ by a factor of ~10.5 in variance, which would be
+. * impossible to miss in N.  Since the port reproduces the paper's N = 296
+. * exactly using 10.354, base+offset is the likely answer, but "likely" is not
+. * "checked".
+. *
+. * The coefficient NAMES in e(b) settle it outright:
+. *   lnsig_e:0b.case + lnsig_e:1.case      -> base and offset  -> :371 correct
+. *   lnsig_e:0.case  + lnsig_e:1.case      -> two log-SDs      -> :371 wrong
+. * and the arithmetic below confirms whichever the names imply.
+. * ---------------------------------------------------------------------------
+. 
+. use "`data'/slpower2.dta", clear
+
+. 
+. * Reproduce slopepower's own data preparation exactly (ado lines 305-325).
+. replace vdate = vdate / 365
+(2,000 real changes made)
+
+. drop if missing(sdmt)
+(0 observations deleted)
+
+. tempvar first_time
+
+. bysort id (vdate): gen `first_time' = vdate[1]
+
+. bysort id: replace vdate = vdate - `first_time'
+(2,000 real changes made)
+
+. drop if missing(case)
+(0 observations deleted)
+
+. gen byte cse      = (case != 0)
+
+. gen byte ctl      = (case == 0)
+
+. gen double tcase  = vdate * cse
+
+. gen double tctl   = vdate * ctl
+
+. 
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q2: model-1 mixed fit --- the exact call slopepower makes"
+Q2: model-1 mixed fit --- the exact call slopepower makes
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+. mixed sdmt cse##c.vdate ///
+>         || id: tcase cse, cov(uns) nocons ///
+>         || id: tctl ctl, cov(uns) nocons ///
+>         res(ind, by(cse)) reml iterate(16000)
+
+Obtaining starting values by EM: 
+
+Performing gradient-based optimization: 
+
+Iteration 0:  Log restricted-likelihood = -6224.5844  
+Iteration 1:  Log restricted-likelihood = -6221.3993  
+Iteration 2:  Log restricted-likelihood = -6221.3742  
+Iteration 3:  Log restricted-likelihood = -6221.3741  
+
+Computing standard errors:
+
+Mixed-effects REML regression                        Number of obs    =  2,000
+Group variable: id                                   Number of groups =    500
+                                                     Obs per group:
+                                                                  min =      4
+                                                                  avg =    4.0
+                                                                  max =      4
+                                                     Wald chi2(3)     = 759.68
+Log restricted-likelihood = -6221.3741               Prob > chi2      = 0.0000
+
+--------------------------------------------------------------------------------
+          sdmt | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+---------------+----------------------------------------------------------------
+         1.cse |  -20.12914   .9130336   -22.05   0.000    -21.91865   -18.33962
+         vdate |   .9748825   .0999959     9.75   0.000     .7788942    1.170871
+               |
+   cse#c.vdate |
+            1  |   -2.69023   .1652762   -16.28   0.000    -3.014165   -2.366294
+               |
+         _cons |   53.27716   .5975339    89.16   0.000     52.10602    54.44831
+--------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------
+  Random-effects parameters  |   Estimate   Std. err.     [95% conf. interval]
+-----------------------------+------------------------------------------------
+id: Unstructured             |
+                  var(tcase) |   2.259091   .4081815      1.585387    3.219083
+                    var(cse) |   111.9636   10.69719      92.84356    135.0213
+              cov(tcase,cse) |   3.752316   1.456617      .8973996    6.607232
+-----------------------------+------------------------------------------------
+id: Unstructured             |
+                   var(tctl) |   .3921494   .2649591       .104311    1.474257
+                    var(ctl) |    81.8319   8.012348      67.54288    99.14384
+               cov(tctl,ctl) |   2.092119   .9714289       .188153    3.996084
+-----------------------------+------------------------------------------------
+Residual: Independent,       |
+    by cse                   |
+                   0: var(e) |    10.6989   .6805266      9.444879    12.11941
+                   1: var(e) |   10.35425   .6545334      9.147681    11.71997
+------------------------------------------------------------------------------
+LR test vs. linear model: chi2(7) = 2815.73               Prob > chi2 = 0.0000
+
+Note: LR test is conservative and provided only for reference.
+
+. 
+. display as text _n "--- e(b), with names: look at the last two columns ---"
+
+--- e(b), with names: look at the last two columns ---
+
+. matrix b = e(b)
+
+. matrix list b, format(%12.8f)
+
+b[1,14]
+            sdmt:         sdmt:         sdmt:         sdmt:         sdmt:         sdmt:     lns1_1_1:     lns1_1_2:   atr1_1_1_2:     lns1_2_1:     lns1_2_2:
+              0b.            1.                     0b.cse#        1.cse#                                                                                    
+             cse           cse         vdate      co.vdate       c.vdate         _cons         _cons         _cons         _cons         _cons         _cons
+y1    0.00000000  -20.12913762    0.97488254    0.00000000   -2.69022981   53.27716258    0.40748130    2.35908710    0.24046603   -0.46805618    2.20233358
+
+      atr1_2_1_2:      lnsig_e:    r_lns2ose:
+                                             
+           _cons         _cons         _cons
+y1    0.38763190    1.18507024   -0.01637150
+
+. display as text _n "--- column names ---"
+
+--- column names ---
+
+. local names : colfullnames b
+
+. display as text "`names'"
+sdmt:0b.cse sdmt:1.cse sdmt:vdate sdmt:0b.cse#co.vdate sdmt:1.cse#c.vdate sdmt:_cons lns1_1_1:_cons lns1_1_2:_cons atr1_1_1_2:_cons lns1_2_1:_cons lns1_2_2:_cons atr1_
+> 2_1_2:_cons lnsig_e:_cons r_lns2ose:_cons
+
+. 
+. display as text _n "--- estat sd: the variances on the natural scale ---"
+
+--- estat sd: the variances on the natural scale ---
+
+. capture noisily estat sd
+
+------------------------------------------------------------------------------
+  Random-effects parameters  |   Estimate   Std. err.     [95% conf. interval]
+-----------------------------+------------------------------------------------
+id: Unstructured             |
+                   sd(tcase) |   1.503027   .1357864      1.259122     1.79418
+                     sd(cse) |   10.58129   .5054769      9.635537    11.61987
+             corr(tcase,cse) |   .2359359   .0944929      .0443171    .4108105
+-----------------------------+------------------------------------------------
+id: Unstructured             |
+                    sd(tctl) |   .6262183   .2115549      .3229721     1.21419
+                     sd(ctl) |   9.046099   .4428621      8.218447      9.9571
+              corr(tctl,ctl) |   .3693169   .2330331     -.1403083    .7242393
+-----------------------------+------------------------------------------------
+Residual: Independent,       |
+    by cse                   |
+                    0: sd(e) |   3.270917   .1040269      3.073252    3.481294
+                    1: sd(e) |   3.217803    .101705      3.024513    3.423445
+------------------------------------------------------------------------------
+
+. 
+. display as text _n "--- the two readings of the cases' residual variance ---"
+
+--- the two readings of the cases' residual variance ---
+
+. display as text "  exp(b13 + b14)^2 = " as result %12.6f (exp(b[1,13] + b[1,14]))^2 ///
+>                 as text "   <- what :371 computes"
+  exp(b13 + b14)^2 =    10.354254   <- what :371 computes
+
+. display as text "  exp(b14)^2       = " as result %12.6f (exp(b[1,14]))^2
+  exp(b14)^2       =     0.967787
+
+. display as text "  exp(b13)^2       = " as result %12.6f (exp(b[1,13]))^2
+  exp(b13)^2       =    10.698895
+
+. display as text _n "The R port reports 10.354 for cases and 10.699 for controls."
+
+The R port reports 10.354 for cases and 10.699 for controls.
+
+. display as text "Whichever line above lands on 10.354 is the parameterisation."
+Whichever line above lands on 10.354 is the parameterisation.
+
+. 
+. * Same question for the nocontvar branch, which reads b[11] and b[12].
+. display as text _n "{hline 70}"
+
+----------------------------------------------------------------------
+
+. display as text "Q2b: the nocontvar branch --- b[11], b[12]"
+Q2b: the nocontvar branch --- b[11], b[12]
+
+. display as text "{hline 70}"
+----------------------------------------------------------------------
+
+. 
+. mixed sdmt cse##c.vdate ///
+>         || id: tcase cse, cov(uns) nocons ///
+>         || id: ctl, cov(id) nocons ///
+>         res(ind, by(cse)) reml iterate(16000)
+
+Obtaining starting values by EM: 
+
+Performing gradient-based optimization: 
+
+Iteration 0:  Log restricted-likelihood = -6227.3116  
+Iteration 1:  Log restricted-likelihood = -6226.5049  
+Iteration 2:  Log restricted-likelihood = -6226.5041  
+Iteration 3:  Log restricted-likelihood = -6226.5041  
+
+Computing standard errors:
+
+Mixed-effects REML regression                        Number of obs    =  2,000
+Group variable: id                                   Number of groups =    500
+                                                     Obs per group:
+                                                                  min =      4
+                                                                  avg =    4.0
+                                                                  max =      4
+                                                     Wald chi2(3)     = 816.25
+Log restricted-likelihood = -6226.5041               Prob > chi2      = 0.0000
+
+--------------------------------------------------------------------------------
+          sdmt | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+---------------+----------------------------------------------------------------
+         1.cse |  -20.13027   .9291095   -21.67   0.000    -21.95129   -18.30925
+         vdate |   .9749845   .0944987    10.32   0.000     .7897705    1.160199
+               |
+   cse#c.vdate |
+            1  |  -2.690332   .1620094   -16.61   0.000    -3.007864   -2.372799
+               |
+         _cons |    53.2783   .6218202    85.68   0.000     52.05955    54.49704
+--------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------
+  Random-effects parameters  |   Estimate   Std. err.     [95% conf. interval]
+-----------------------------+------------------------------------------------
+id: Unstructured             |
+                  var(tcase) |   2.259092   .4081815      1.585387    3.219084
+                    var(cse) |   111.9638   10.69721      92.84366    135.0214
+              cov(tcase,cse) |    3.75231   1.456618      .8973901    6.607229
+-----------------------------+------------------------------------------------
+id: Identity                 |
+                    var(ctl) |   88.77939   8.212483      74.05806    106.4271
+-----------------------------+------------------------------------------------
+Residual: Independent,       |
+    by cse                   |
+                   0: var(e) |   11.36152   .5870976      10.26718     12.5725
+                   1: var(e) |   10.35426   .6545336      9.147683    11.71998
+------------------------------------------------------------------------------
+LR test vs. linear model: chi2(5) = 2805.47               Prob > chi2 = 0.0000
+
+Note: LR test is conservative and provided only for reference.
+
+. 
+. matrix b2 = e(b)
+
+. matrix list b2, format(%12.8f)
+
+b2[1,12]
+            sdmt:         sdmt:         sdmt:         sdmt:         sdmt:         sdmt:     lns1_1_1:     lns1_1_2:   atr1_1_1_2:     lns1_2_1:      lnsig_e:
+              0b.            1.                     0b.cse#        1.cse#                                                                                    
+             cse           cse         vdate      co.vdate       c.vdate         _cons         _cons         _cons         _cons         _cons         _cons
+y1    0.00000000  -20.13027145    0.97498450    0.00000000   -2.69033176   53.27829640    0.40748138    2.35908766    0.24046546    2.24307729    1.21511605
+
+       r_lns2ose:
+                 
+           _cons
+y1   -0.04641719
+
+. local names2 : colfullnames b2
+
+. display as text "`names2'"
+sdmt:0b.cse sdmt:1.cse sdmt:vdate sdmt:0b.cse#co.vdate sdmt:1.cse#c.vdate sdmt:_cons lns1_1_1:_cons lns1_1_2:_cons atr1_1_1_2:_cons lns1_2_1:_cons lnsig_e:_cons r_lns2
+> ose:_cons
+
+. display as text _n "  exp(b11 + b12)^2 = " as result %12.6f (exp(b2[1,11] + b2[1,12]))^2
+
+  exp(b11 + b12)^2 =    10.354257
+
+. display as text "  exp(b12)^2       = " as result %12.6f (exp(b2[1,12]))^2
+  exp(b12)^2       =     0.911344
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /home/jon/Documents/Masters Documents/Summer project/transpilation/stata-reference/00_open_questions.log
+  log type:  text
+ closed on:   4 Aug 2026, 13:17:53
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
