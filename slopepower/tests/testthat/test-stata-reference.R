@@ -253,25 +253,21 @@ test_that("the committed fixtures are the ones the manifest describes", {
 })
 
 test_that("grid 1: the stage-two arithmetic matches Stata", {
-  skip_without_paper_data()
   skip_without_stata_reference("01_grid_arithmetic")
   compare_stata_grid("01_grid_arithmetic")
 })
 
 test_that("grid 2: the comparator branches match Stata", {
-  skip_without_paper_data()
   skip_without_stata_reference("02_grid_comparators")
   compare_stata_grid("02_grid_comparators")
 })
 
 test_that("grid 3: scaled and subsetted fits match Stata", {
-  skip_without_paper_data()
   skip_without_stata_reference("03_grid_fits")
   compare_stata_grid("03_grid_fits")
 })
 
 test_that("grid 4: boundaries and guards match Stata where they should", {
-  skip_without_paper_data()
   skip_without_stata_reference("04_edge_cases")
   compare_stata_grid("04_edge_cases")
 })
@@ -308,7 +304,6 @@ TOL_FIT_MEDIAN <- c(intercept = 1e-5, slope_var = 1e-4, cov = 5e-4,
                     residual = 1e-4, slope = 1e-6)
 
 test_that("the fitted variance components match Stata's", {
-  skip_without_paper_data()
   skip_without_stata_reference("05_variance_components")
 
   fits <- read_stata_reference("05_variance_components")
@@ -350,7 +345,6 @@ test_that("the fitted variance components match Stata's", {
 })
 
 test_that("with Stata's own variance components the arithmetic is exact", {
-  skip_without_paper_data()
   skip_without_stata_reference("05_variance_components")
 
   fits <- read_stata_reference("05_variance_components")
@@ -411,8 +405,6 @@ test_that("with Stata's own variance components the arithmetic is exact", {
 # ---------------------------------------------------------------------------
 
 test_that("scale() has an exact analogue in real-valued visit times", {
-  skip_without_paper_data()
-
   d <- load_paper_data("slpower1")
   p_year <- slope_params(sdmt ~ time | id, d)
 

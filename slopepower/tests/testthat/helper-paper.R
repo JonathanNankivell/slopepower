@@ -1,9 +1,15 @@
 # Helpers for reproducing the published results of Nash et al. (2021),
 # Stata Journal 21(3): 575-601.
 #
-# The three .dta files live in the parent of the package root. They are the
-# simulated datasets whose generating code is given in the paper's appendix.
+# The paper's three simulated datasets ship with the package as slpower1,
+# slpower2 and slpower3, so these tests run from a built tarball and under
+# R CMD check rather than skipping. The .dta files they were built from still
+# live in the parent of the package root; test-packaged-data.R checks the two
+# against each other whenever those files are present.
 
+# Locates the repository root, for the things that are *not* packaged: the raw
+# .dta files and, as a fallback, ../stata-reference/. Returns NULL from a built
+# tarball, where neither is available.
 paper_data_dir <- function() {
   candidates <- c(
     file.path(testthat::test_path(), "..", "..", ".."),
@@ -16,19 +22,10 @@ paper_data_dir <- function() {
   NULL
 }
 
-have_paper_data <- function() {
-  !is.null(paper_data_dir()) && requireNamespace("haven", quietly = TRUE)
-}
-
-skip_without_paper_data <- function() {
-  testthat::skip_if_not(have_paper_data(),
-                        "slpower*.dta not found, or haven not installed")
-}
-
 #' Load and prepare one of the paper's datasets
 #'
-#' Applies the unit conventions the paper uses, so that visit schedules are
-#' expressed in the same units as the fitted time variable:
+#' Adds the `time` column in the units the paper works in, so that visit
+#' schedules are expressed in the same units as the fitted time variable:
 #'   slpower1  time = visit  (years)
 #'   slpower2  time = vdate converted from days to years
 #'   slpower3  time = visit  (years)
@@ -36,17 +33,11 @@ skip_without_paper_data <- function() {
 #' The per-subject re-origining of time is left to `slope_params(origin =)`.
 load_paper_data <- function(which = c("slpower1", "slpower2", "slpower3")) {
   which <- match.arg(which)
-  d <- as.data.frame(haven::read_dta(file.path(paper_data_dir(),
-                                               paste0(which, ".dta"))))
-  if (which == "slpower2") {
-    d$time <- as.numeric(d$vdate) / 365
-    d$case <- as.integer(haven::zap_labels(d$case))
-  } else {
-    d$time <- as.numeric(d$visit)
-    if (which == "slpower3") d$treat <- as.integer(haven::zap_labels(d$treat))
-  }
-  d$sdmt <- as.numeric(d$sdmt)
-  d$id <- as.integer(d$id)
+  d <- switch(which,
+              slpower1 = slopepower::slpower1,
+              slpower2 = slopepower::slpower2,
+              slpower3 = slopepower::slpower3)
+  d$time <- if (which == "slpower2") as.numeric(d$vdate) / 365 else d$visit
   d
 }
 

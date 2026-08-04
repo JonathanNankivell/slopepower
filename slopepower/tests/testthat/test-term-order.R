@@ -32,7 +32,6 @@ sp_prep3 <- function() {
 }
 
 test_that("reordering main effects leaves the fit and the extraction unchanged", {
-  skip_without_paper_data()
   d <- sp_prep3()
 
   forms <- list(
@@ -63,7 +62,6 @@ test_that("reordering main effects leaves the fit and the extraction unchanged",
 })
 
 test_that("an interaction resolves whichever way round R spells it", {
-  skip_without_paper_data()
   d <- sp_prep2()
 
   # `sp_case * sp_time` names the interaction sp_case:sp_time; `sp_time *
@@ -114,7 +112,6 @@ test_that("fixef_term is order-invariant where positional indexing is not", {
 })
 
 test_that("results do not depend on column or row order of the data", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   ref <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case))
 
@@ -135,7 +132,6 @@ test_that("results do not depend on column or row order of the data", {
 })
 
 test_that("a transformation of time is one term, but a covariate is rejected", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   d$vdays <- d$time * 365
   d$age <- rep(50, nrow(d))

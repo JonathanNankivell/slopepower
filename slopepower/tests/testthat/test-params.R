@@ -87,14 +87,12 @@ test_that("slope_params_manual() rejects an unknown comparator", {
 # --- slope_params(): scenario dispatch --------------------------------------
 
 test_that("the scenario follows which group argument is supplied", {
-  skip_without_paper_data()
   expect_identical(paper_fit("slpower1")$comparator, "none")
   expect_identical(paper_fit("slpower2")$comparator, "healthy")
   expect_identical(paper_fit("slpower3")$comparator, "treated")
 })
 
 test_that("healthy and treated are mutually exclusive", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   d$treat <- d$case
   expect_error(slope_params(sdmt ~ time | id, d, healthy = case, treated = treat),
@@ -102,13 +100,11 @@ test_that("healthy and treated are mutually exclusive", {
 })
 
 test_that("the formula must name a subject identifier", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   expect_error(slope_params(sdmt ~ time, d), "subject identifier")
 })
 
 test_that("a group variable must be binary and 0/1 coded", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   d$bad <- d$case + 1                      # coded 1/2
   expect_error(slope_params(sdmt ~ time | id, d, healthy = bad), "0/1")
@@ -118,7 +114,6 @@ test_that("a group variable must be binary and 0/1 coded", {
 })
 
 test_that("slope_params() reports the number of observations and subjects", {
-  skip_without_paper_data()
   expect_equal(paper_fit("slpower1")$n_obs, 800L)
   expect_equal(paper_fit("slpower1")$n_subjects, 200L)
   expect_equal(paper_fit("slpower2")$n_obs, 2000L)
@@ -128,7 +123,6 @@ test_that("slope_params() reports the number of observations and subjects", {
 })
 
 test_that("fitted variance components are positive and positive definite", {
-  skip_without_paper_data()
   for (nm in c("slpower1", "slpower2", "slpower3")) {
     p <- paper_fit(nm)
     expect_gt(p$sigma2_intercept, 0)
@@ -143,7 +137,6 @@ test_that("fitted variance components are positive and positive definite", {
 test_that("slpower1 variance components land near the simulation truth", {
   # Paper appendix: sigma2_a = 100, sigma2_b = 2, sigma_ab = 5, sigma2_e = 10.
   # Sampling noise over 200 subjects, so these are loose bounds.
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   expect_gt(p$sigma2_intercept, 70);  expect_lt(p$sigma2_intercept, 140)
   expect_gt(p$sigma2_slope, 1);       expect_lt(p$sigma2_slope, 4)
@@ -153,7 +146,6 @@ test_that("slpower1 variance components land near the simulation truth", {
 # --- per-subject time re-origining ------------------------------------------
 
 test_that("time is shifted so each subject starts at zero", {
-  skip_without_paper_data()
   # slpower2 records calendar visit dates, so every subject starts elsewhere.
   expect_true(paper_fit("slpower2")$time_shifted)
   # slpower1 and slpower3 already start at 0.
@@ -162,14 +154,12 @@ test_that("time is shifted so each subject starts at zero", {
 })
 
 test_that("the re-origining emits a message, as Stata warns", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   expect_message(slope_params(sdmt ~ time | id, d, healthy = case),
                  "shifted")
 })
 
 test_that('origin = "none" leaves time alone and changes the fit', {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   shifted   <- paper_fit("slpower2")
   unshifted <- suppressMessages(
@@ -182,7 +172,6 @@ test_that('origin = "none" leaves time alone and changes the fit', {
 })
 
 test_that("an explicit unit change rescales the slope proportionally", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   yearly <- paper_fit("slpower1")
   d$time <- d$time / 0.5                  # half-year axis
@@ -193,7 +182,6 @@ test_that("an explicit unit change rescales the slope proportionally", {
 # --- common_variance --------------------------------------------------------
 
 test_that("common_variance is ignored with a warning outside the healthy case", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   expect_warning(slope_params(sdmt ~ time | id, d, common_variance = TRUE),
                  "only when `healthy`")
@@ -202,7 +190,6 @@ test_that("common_variance is ignored with a warning outside the healthy case", 
 test_that("common_variance does not change the case estimates", {
   # The healthy model factorises into two independent per-group fits, so
   # reducing the controls' random-effects block cannot move the cases' numbers.
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   full    <- paper_fit("slpower2")
   reduced <- suppressMessages(
@@ -218,7 +205,6 @@ test_that("common_variance does not change the case estimates", {
 # --- printing ---------------------------------------------------------------
 
 test_that("print.slope_params() runs for each scenario", {
-  skip_without_paper_data()
   expect_output(print(paper_fit("slpower1")), "single group")
   expect_output(print(paper_fit("slpower2")), "healthy controls")
   expect_output(print(paper_fit("slpower3")), "previous randomised trial")

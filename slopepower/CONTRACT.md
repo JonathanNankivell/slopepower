@@ -306,14 +306,17 @@ exactly 1 in decimal and must be accepted; naive accumulation makes it `-6.7e-17
 
 ## 7. Published results the test suite must reproduce
 
-All from Nash et al. (2021). The test suite reads `../slpower1.dta`, `../slpower2.dta`,
-`../slpower3.dta` relative to the package root with `haven::read_dta()`, and skips when they are
-absent — so the parity tests do not run from a built tarball.
+All from Nash et al. (2021). The test suite reads the packaged datasets `slpower1`, `slpower2`
+and `slpower3` through `load_paper_data()`, which adds the `time` column in the paper's units.
+Because they ship inside the package, the parity tests run from a built tarball and under
+`R CMD check` rather than skipping.
 
-The same three datasets also ship with the package as `slpower1`, `slpower2` and `slpower3`
-(see `data-raw/make-data.R`), which is what the examples use. Those copies are checked against
-the published slopes at build time, but they are a second copy of the same numbers: if the `.dta`
-files in the repository root ever change, re-run `data-raw/make-data.R`.
+The packaged copies are built from `../slpower1.dta`, `../slpower2.dta`, `../slpower3.dta` by
+`data-raw/make-data.R`. That makes them a second copy of the same numbers, so
+`test-packaged-data.R` rebuilds the conversion from the `.dta` files and demands an exact match.
+It is the only file that still needs `haven` and the `.dta` files, and so the only one that
+skips outside a source checkout. If the `.dta` files ever change, re-run `data-raw/make-data.R`
+or that test will fail.
 
 Rows with an expected **N** are `slope_sample_size()` calls; the one row with an expected **power**
 is a `slope_power()` call.

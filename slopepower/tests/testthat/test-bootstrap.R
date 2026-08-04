@@ -9,7 +9,6 @@
 # R is kept small throughout; these test the machinery, not the coverage.
 
 test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
-  skip_without_paper_data()
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 15,
                                         statistic = "slope", seed = 1))
   expect_true(is.list(b))
@@ -21,7 +20,6 @@ test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
 })
 
 test_that("slope_bootstrap() is reproducible under a fixed seed", {
-  skip_without_paper_data()
   a <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10,
                                         statistic = "slope", seed = 42))
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10,
@@ -30,13 +28,11 @@ test_that("slope_bootstrap() is reproducible under a fixed seed", {
 })
 
 test_that("a sample-size statistic requires a trial design", {
-  skip_without_paper_data()
   expect_error(slope_bootstrap(paper_fit("slpower1"), R = 5, statistic = "n"),
                "design")
 })
 
 test_that("slope_bootstrap() can bootstrap the sample size itself", {
-  skip_without_paper_data()
   b <- suppressWarnings(slope_bootstrap(
     paper_fit("slpower1"), R = 15, statistic = "n", seed = 7,
     design = trial_design(c(0, 1, 2)), effectiveness = 0.33))
@@ -46,7 +42,6 @@ test_that("slope_bootstrap() can bootstrap the sample size itself", {
 })
 
 test_that("slope_bootstrap() validates R and level", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   expect_error(slope_bootstrap(p, R = 0, statistic = "slope"), "R")
   expect_error(slope_bootstrap(p, R = 5, statistic = "slope", level = 1), "level")
@@ -56,7 +51,6 @@ test_that("slope_bootstrap() validates R and level", {
 test_that("slope_bootstrap() warns when the slope is weak relative to its error", {
   # Paper section 2.6: if |slope| / se(slope) < 2.5 the replicate slopes can
   # straddle zero and the resulting interval is meaningless.
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   d$sdmt <- d$sdmt + 1.66 * d$time         # flatten the slope, keep the structure
   flat <- slope_params(sdmt ~ time | id, d)

@@ -37,7 +37,6 @@ test_that("print.dropout_rate() runs", {
 # --- slope_power_grid() -----------------------------------------------------
 
 test_that("slope_power_grid() returns one row per design/dropout combination", {
-  skip_without_paper_data()
   out <- suppressWarnings(slope_power_grid(
     paper_fit("slpower1"),
     visits  = table1_visits,
@@ -53,7 +52,6 @@ test_that("slope_power_grid() returns one row per design/dropout combination", {
 })
 
 test_that("slope_power_grid() agrees with slope_power() cell by cell", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   out <- suppressWarnings(slope_power_grid(
     p, visits = table1_visits, dropout = list(none = NULL),
@@ -67,7 +65,6 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
 })
 
 test_that("slope_power_grid() reproduces all nine Table 1 powers in one call", {
-  skip_without_paper_data()
   out <- suppressWarnings(slope_power_grid(
     paper_fit("slpower1"),
     visits  = table1_visits,
@@ -87,7 +84,6 @@ test_that("slope_power_grid() reproduces all nine Table 1 powers in one call", {
 })
 
 test_that("slope_sample_size_grid() reports the N each design needs", {
-  skip_without_paper_data()
   out <- suppressWarnings(slope_sample_size_grid(
     paper_fit("slpower1"),
     visits = list(annual = c(0, 1, 2)),
@@ -102,7 +98,6 @@ test_that("slope_sample_size_grid() reports the N each design needs", {
 })
 
 test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
-  skip_without_paper_data()
   out <- suppressWarnings(slope_sample_size_grid(
     paper_fit("slpower1"),
     visits = list(extended = c(0, 1, 2, 5)),
@@ -112,7 +107,6 @@ test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
 })
 
 test_that("slope_sample_size_grid() agrees with slope_sample_size() cell by cell", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   out <- suppressWarnings(slope_sample_size_grid(
     p, visits = table1_visits, dropout = list(none = NULL),
@@ -128,7 +122,6 @@ test_that("slope_sample_size_grid() agrees with slope_sample_size() cell by cell
 test_that("the two grids are inverses, design by design", {
   # Same shared loop, same dropout expansion: feeding one grid's N back into the
   # other must recover the target power in every cell.
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   sizes <- suppressWarnings(slope_sample_size_grid(
     p, visits = table1_visits, dropout = list(`5pc` = dropout_rate(0.05)),
@@ -149,7 +142,6 @@ test_that("the two grids are inverses, design by design", {
 })
 
 test_that("each grid requires the input its question needs", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # slope_power_grid() holds n fixed; without it there is nothing to evaluate
   expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2))), "`n` is required")
@@ -164,7 +156,6 @@ test_that("each grid requires the input its question needs", {
 })
 
 test_that("a dropout vector of the wrong length for a design errors helpfully", {
-  skip_without_paper_data()
   err <- expect_error(
     slope_power_grid(paper_fit("slpower1"),
                      visits = list(annual = 0:3),
@@ -174,7 +165,6 @@ test_that("a dropout vector of the wrong length for a design errors helpfully", 
 })
 
 test_that("slope_power_grid() collects the baseline-only warning once", {
-  skip_without_paper_data()
   # trial_design() warns per design; the grid should report once, not nine times
   w <- capture_warnings(slope_power_grid(
     paper_fit("slpower1"), visits = table1_visits,

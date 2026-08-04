@@ -30,7 +30,6 @@
 # a 3.3% error into every model-1 sample size. The port extracts by name.
 
 test_that("model 1 takes the cases' residual variance, not the controls'", {
-  skip_without_paper_data()
   p <- paper_fit("slpower2")
 
   # Stata: 1: var(e) = 10.35425 for the cases.
@@ -48,7 +47,6 @@ test_that("model 1 takes the cases' residual variance, not the controls'", {
 })
 
 test_that("nocontvar leaves the cases' parameters alone", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   full <- paper_fit("slpower2")
   reduced <- suppressMessages(
@@ -116,7 +114,6 @@ test_that("a dropout list summing to exactly 1 in decimal is accepted", {
 })
 
 test_that("everyone dropping out at the first visit is an error, not a number", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # Stata returns _rc = 0 with N = missing: the effect size is 0 because every
   # stratum but the completers is the baseline-only stratum, which carries no
@@ -131,7 +128,6 @@ test_that("everyone dropping out at the first visit is an error, not a number", 
 # ---------------------------------------------------------------------------
 
 test_that("var_tte stays finite where Stata's back-solve goes missing", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # The baseline-only warning is asserted where it belongs, above; here it is
   # incidental to the design under test.
@@ -162,7 +158,6 @@ test_that("var_tte stays finite where Stata's back-solve goes missing", {
 # ---------------------------------------------------------------------------
 
 test_that("rct data without usetrt ignores the observed treated slope", {
-  skip_without_paper_data()
   p <- paper_fit("slpower3")
 
   # Both slopes are estimated and reported -- Stata prints them in the data
@@ -187,7 +182,6 @@ test_that("rct data without usetrt ignores the observed treated slope", {
 })
 
 test_that("target = observed reports effectiveness as NA, matching Stata", {
-  skip_without_paper_data()
   p <- paper_fit("slpower3")
   r <- slope_sample_size(p, c(0, 1, 2), target = "observed")
   # Stata sets `local effectiveness = .` before building r(table) under usetrt,
@@ -219,7 +213,6 @@ test_that("visit schedules Stata's numlist refuses are refused here too", {
 })
 
 test_that("scale() has an exact analogue in real-valued visit times", {
-  skip_without_paper_data()
   # Stata scale(0.001) schedule(1 2) on slpower1 reports slope -0.0016725 --
   # the year-scale -1.6725 divided by 1000 -- and N = 453940728. The port has
   # no scale argument: it reads the schedule in the units of the fitted time
@@ -240,7 +233,6 @@ test_that("scale() has an exact analogue in real-valued visit times", {
 # ---------------------------------------------------------------------------
 
 test_that("n is floored to an even number, as Stata does", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # Stata: local actual_n = 2 * floor(`given_n' / 2). n(999) prints
   # "specified N = 999 / actual N = 998" and power 0.913.
@@ -260,7 +252,6 @@ test_that("n is floored to an even number, as Stata does", {
 })
 
 test_that("alpha, power and effectiveness boundaries match Stata's", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # Stata's messages, all rc 198:
   #   "Alpha must be a number greater than 0 and less than 1"
@@ -284,7 +275,6 @@ test_that("alpha, power and effectiveness boundaries match Stata's", {
 })
 
 test_that("the documented defaults are the ones Stata uses", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # Stata defaults effectiveness to 0.25 and, when neither power nor n is
   # given, power to 0.8. The port keeps the effectiveness default in the

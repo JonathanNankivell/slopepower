@@ -207,6 +207,10 @@ for new work.
   do not edit them by hand. After changing those comments, re-run
   `roxygen2::roxygenise("<package path>")`. `CONTRACT.md` documents the
   mathematics and the deliberate divergences from the Stata original.
+- The test suite reads the packaged datasets, so it runs in full under
+  `R CMD check` from a built tarball. The one exception is
+  `test-packaged-data.R`, which checks those datasets against the `.dta` files
+  they were converted from and so skips outside a source checkout.
 - `R CMD check` passes clean. `--run-donttest` additionally runs the
   `slope_bootstrap()` example, which fits a mixed model once per replicate and so
   takes appreciably longer than the rest.

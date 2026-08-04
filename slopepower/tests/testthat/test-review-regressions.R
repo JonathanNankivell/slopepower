@@ -2,7 +2,6 @@
 # Each of these silently returned a wrong number rather than erroring.
 
 test_that("a labelled factor or character group column is rejected, not guessed", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   d$g_num <- d$case
   d$g_chr <- ifelse(d$case == 1, "case", "control")
@@ -35,7 +34,6 @@ test_that("a labelled factor or character group column is rejected, not guessed"
 })
 
 test_that("hand-built trial_design objects have has_dropout derived, not trusted", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
 
   # Omitting the field used to fail with "argument is of length zero".
@@ -72,7 +70,6 @@ test_that("hand-built trial_design objects have has_dropout derived, not trusted
 })
 
 test_that("the covariate guard catches term removal and offsets, not just addition", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   d$age <- 50
 
@@ -95,7 +92,6 @@ test_that("the covariate guard catches term removal and offsets, not just additi
 })
 
 test_that("slope_bootstrap() rejects a statistic that would bootstrap its own input", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
 
   # slope_power() used to solve for whichever of n and power was absent, so
@@ -157,7 +153,6 @@ test_that("an explicit n = NULL is caught by the guard, not by the solver", {
 })
 
 test_that("slope_effect_size() takes no effectiveness argument", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
 
   # It used to accept one and ignore it, returning the same number for every
@@ -173,7 +168,6 @@ test_that("slope_effect_size() takes no effectiveness argument", {
 })
 
 test_that("both grids enforce the effectiveness/observed guard", {
-  skip_without_paper_data()
   p3 <- paper_fit("slpower3")
 
   # The stage-two functions error on this combination; the grid omitted the

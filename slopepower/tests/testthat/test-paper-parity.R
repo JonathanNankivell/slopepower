@@ -20,7 +20,6 @@ expect_printed <- function(object, expected, label, digits = 3) {
 # ---------------------------------------------------------------------------
 
 test_that("slpower1: the fitted slope matches the paper (p.588)", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
   # The fit gives -1.67250000, which is 2.3e-13 from the .0005 rounding
   # boundary: Stata's %5.3f prints -1.672 and R's formatC prints -1.673. Same
@@ -29,7 +28,6 @@ test_that("slpower1: the fitted slope matches the paper (p.588)", {
 })
 
 test_that("slpower2: case and control slopes match the paper (p.590)", {
-  skip_without_paper_data()
   p <- paper_fit("slpower2")
   expect_printed(p$slope, -1.715, "slope of cases")
   expect_printed(p$slope_comparator, 0.975, "slope of healthy controls")
@@ -37,7 +35,6 @@ test_that("slpower2: case and control slopes match the paper (p.590)", {
 })
 
 test_that("slpower3: control and treated arm slopes match the paper (p.594)", {
-  skip_without_paper_data()
   p <- paper_fit("slpower3")
   expect_printed(p$slope, -1.852, "slope of control arm")
   expect_printed(p$slope_comparator, -1.104, "slope of experimental arm")
@@ -49,7 +46,6 @@ test_that("slpower3: control and treated arm slopes match the paper (p.594)", {
 # ---------------------------------------------------------------------------
 
 test_that("p.588: annual visits over two years gives N = 712", {
-  skip_without_paper_data()
   r <- slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
   expect_equal(r$n, 712)
@@ -59,7 +55,6 @@ test_that("p.588: annual visits over two years gives N = 712", {
 })
 
 test_that("p.588: extended follow-up with 10% dropout gives N = 328", {
-  skip_without_paper_data()
   d <- trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
   r <- slope_sample_size(paper_fit("slpower1"), d, effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
@@ -68,7 +63,6 @@ test_that("p.588: extended follow-up with 10% dropout gives N = 328", {
 })
 
 test_that("p.589: six-monthly visits over two years gives N = 620", {
-  skip_without_paper_data()
   r <- slope_sample_size(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
                          effectiveness = 0.33)
   expect_equal(r$n, 620)
@@ -81,7 +75,6 @@ test_that("p.589: the same design on a rescaled time axis also gives N = 620", {
   # times, so the year axis with half-year visits and the half-year axis with
   # integer visits are the same calculation. Agreement is what makes the
   # scale() option unnecessary rather than merely absent.
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   d$time <- d$time / 0.5
   p <- slope_params(sdmt ~ time | id, d)
@@ -104,7 +97,6 @@ test_that("p.589: the same design on a rescaled time axis also gives N = 620", {
 # ---------------------------------------------------------------------------
 
 test_that("p.590: cases versus healthy controls gives N = 296", {
-  skip_without_paper_data()
   p <- paper_fit("slpower2")
   r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.888, "target treatment difference")
@@ -115,7 +107,6 @@ test_that("p.590: cases versus healthy controls gives N = 296", {
 })
 
 test_that("p.593: N = 200 with 5% dropout per visit gives power 0.597", {
-  skip_without_paper_data()
   # dropout[1] = 0.05 attends baseline only and contributes nothing; the
   # warning is expected here and is asserted rather than suppressed.
   d <- expect_warning(trial_design(c(0, 1, 2), dropout = c(0.05, 0.05)),
@@ -132,7 +123,6 @@ test_that("p.593: N = 200 with 5% dropout per visit gives power 0.597", {
 # ---------------------------------------------------------------------------
 
 test_that("p.594: targeting the previously observed effect gives N = 318", {
-  skip_without_paper_data()
   # dropout[1] = 0.2 means 20% attend baseline only and contribute nothing.
   # trial_design() warns about that; Stata skips the stratum silently.
   d <- expect_warning(trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)),
@@ -146,7 +136,6 @@ test_that("p.594: targeting the previously observed effect gives N = 318", {
 
 test_that("p.594: powering for a fraction p of the observed effect scales as p^-2", {
   # Paper section 4.1.3: "multiply the sample size above by 4" for p = 0.5.
-  skip_without_paper_data()
   d <- suppressWarnings(trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)))
   n_observed <- slope_sample_size(paper_fit("slpower3"), d, target = "observed")$n
   expect_equal(n_observed, 318)
@@ -159,7 +148,6 @@ test_that("p.594: powering for a fraction p of the observed effect scales as p^-
 # ---------------------------------------------------------------------------
 
 test_that("Table 1: all nine published powers reproduce", {
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
 
   for (i in seq_len(nrow(paper_table1))) {
@@ -182,7 +170,6 @@ test_that("Table 1: extra visits buy more power as dropout worsens", {
   # The paper's substantive conclusion: interim visits are worth
   # disproportionately more when dropout is high, because a mixed model uses
   # the data collected before withdrawal.
-  skip_without_paper_data()
   p <- paper_fit("slpower1")
 
   power_of <- function(design_name, dropout_name) {
@@ -208,7 +195,6 @@ test_that("Table 1: extra visits buy more power as dropout worsens", {
 # ---------------------------------------------------------------------------
 
 test_that("every published sample size round-trips to its stated power", {
-  skip_without_paper_data()
   cases <- list(
     list(p = "slpower1", visits = c(0, 1, 2), dropout = NULL, n = 712),
     list(p = "slpower1", visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1), n = 328),
@@ -224,7 +210,6 @@ test_that("every published sample size round-trips to its stated power", {
 })
 
 test_that("the published examples tabulate with identical columns", {
-  skip_without_paper_data()
   rows <- list(
     as.data.frame(slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)),
     as.data.frame(slope_sample_size(paper_fit("slpower2"), c(0, 1, 2), effectiveness = 0.33)),

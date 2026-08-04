@@ -5,7 +5,6 @@
 # each worked example as closely as the R interface allows.
 
 test_that("slopepower() reproduces the p.588 single-group example", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   # Stata: slopepower sdmt, schedule(1 2) subject(id) time(visit) obs
   #        nocontrols effectiveness(0.33)
@@ -20,7 +19,6 @@ test_that("slopepower() reproduces the p.588 single-group example", {
 })
 
 test_that("schedule() lists follow-up visits only, baseline implied", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   # Stata: schedule(1 2 5) dropouts(0 0 0.1) -> N = 328
   r <- suppressMessages(slopepower(
@@ -33,7 +31,6 @@ test_that("schedule() lists follow-up visits only, baseline implied", {
 })
 
 test_that("slopepower() supports the scale() option", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   # Stata: schedule(1 2 3 4) scale(0.5) -> N = 620, on a half-year axis
   r <- suppressMessages(slopepower(
@@ -45,7 +42,6 @@ test_that("slopepower() supports the scale() option", {
 })
 
 test_that("slopepower() reproduces the p.590 case-control example", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   # Stata: slopepower sdmt, schedule(1 2) scale(365) subject(id) time(vdate)
   #        obs casecon(case) effectiveness(0.33)
@@ -57,7 +53,6 @@ test_that("slopepower() reproduces the p.590 case-control example", {
 })
 
 test_that("slopepower() computes power when n is given (p.593)", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower2")
   # the baseline-only dropout warning is asserted in test-design.R; incidental here
   r <- suppressWarnings(suppressMessages(slopepower(
@@ -74,7 +69,6 @@ test_that("slopepower() keeps Stata's single bimodal interface, and guards it", 
   # The Stata command takes n() or power(), never both, and picks the
   # calculation from which was supplied. This wrapper mirrors that; the split
   # into slope_sample_size() and slope_power() is for new code, not for parity.
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   base <- list(d, depvar = "sdmt", subject = "id", time = "time",
                schedule = c(1, 2), obs = TRUE, nocontrols = TRUE,
@@ -94,7 +88,6 @@ test_that("slopepower() keeps Stata's single bimodal interface, and guards it", 
 })
 
 test_that("slopepower() reproduces the p.594 usetrt example", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower3")
   # Stata: slopepower sdmt, schedule(2 3) subject(id) time(visit) rct
   #        treat(treat) usetrt dropout(0.2 0.1)
@@ -110,7 +103,6 @@ test_that("slopepower() reproduces the p.594 usetrt example", {
 # --- Stata's model-selection rules ------------------------------------------
 
 test_that("slopepower() enforces the obs/rct model selection rules", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   base <- list(d, depvar = "sdmt", subject = "id", time = "time",
                schedule = c(1, 2))
@@ -127,7 +119,6 @@ test_that("slopepower() enforces the obs/rct model selection rules", {
 })
 
 test_that("slopepower() warns when an option does not apply to the model", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower3")
   # usetrt outside an RCT is ignored with a warning, as in Stata
   expect_warning(suppressMessages(slopepower(
@@ -137,7 +128,6 @@ test_that("slopepower() warns when an option does not apply to the model", {
 })
 
 test_that("slopepower() rejects effectiveness together with usetrt", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower3")
   expect_error(slopepower(
     d, depvar = "sdmt", subject = "id", time = "time", schedule = c(2, 3),
@@ -146,7 +136,6 @@ test_that("slopepower() rejects effectiveness together with usetrt", {
 })
 
 test_that("slopepower() validates column names", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   expect_error(slopepower(d, depvar = "nope", subject = "id", time = "time",
                           schedule = c(1, 2), obs = TRUE, nocontrols = TRUE),
@@ -157,7 +146,6 @@ test_that("slopepower() validates column names", {
 })
 
 test_that("slopepower() rejects a non-positive schedule, as Stata does", {
-  skip_without_paper_data()
   d <- load_paper_data("slpower1")
   # Stata declares schedule(numlist ascending integer >=1); baseline is implicit
   # and must not be listed
