@@ -74,11 +74,27 @@ slope_se <- function(params) {
   b <- tryCatch(nlme::fixef(fit), error = function(e) return(NULL))
   V <- tryCatch(stats::vcov(fit), error = function(e) return(NULL))
   if (is.null(b) || is.null(V)) return(NA_real_)
+  # The interaction label depends on the order its components appear in the
+  # internal formula, so resolve it rather than assuming a spelling -- the same
+  # reason params.R extracts through fixef_term(). Getting this wrong used to
+  # return NA silently, which switched off the section 2.6 warning below that is
+  # the entire reason for computing the standard error.
+  resolve <- function(parts) {
+    cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
+    hit <- cand[cand %in% names(b)]
+    if (length(hit)) hit[1L] else NA_character_
+  }
   terms <- switch(params$comparator,
                   none    = "sp_time",
-                  healthy = c("sp_time", "sp_case:sp_time"),
+                  healthy = c("sp_time", resolve(c("sp_case", "sp_time"))),
                   treated = c("sp_time", "sp_placebo_time"))
-  if (!all(terms %in% names(b))) return(NA_real_)
+  if (anyNA(terms) || !all(terms %in% names(b))) {
+    warning(sprintf(paste0(
+      "slope_bootstrap(): could not identify the slope terms in the fitted model ",
+      "(have %s), so the section 2.6 check on the slope-to-standard-error ratio ",
+      "was skipped."), paste(names(b), collapse = ", ")), call. = FALSE)
+    return(NA_real_)
+  }
   k <- as.numeric(names(b) %in% terms)
   sqrt(drop(k %*% as.matrix(V) %*% k))
 }
@@ -148,6 +164,22 @@ slope_bootstrap <- function(params, R = 199,
     stop(sprintf('%s: statistic = "%s" needs a trial design; pass `design` (and any of ',
                  context, statistic),
          "`effectiveness`, `n`, `power`, `alpha`) through `...`.", call. = FALSE)
+  }
+  # `slope_power()` solves for whichever of n and power is absent, so a mismatch
+  # here bootstraps the *input* rather than an estimate: every replicate returns
+  # the value the user supplied, and the result looks like a successful
+  # bootstrap with a zero-width interval.
+  if (identical(statistic, "power") && is.null(dots$n)) {
+    stop(sprintf(paste0(
+      '%s: statistic = "power" requires `n`, otherwise slope_power() solves for ',
+      "n instead and every replicate returns the target power unchanged, giving ",
+      "a zero-width interval."), context), call. = FALSE)
+  }
+  if (identical(statistic, "n") && !is.null(dots$n)) {
+    stop(sprintf(paste0(
+      '%s: statistic = "n" bootstraps the required sample size, so `n` must not ',
+      "be supplied; with it, slope_power() solves for power and every replicate ",
+      "returns the `n` you passed in."), context), call. = FALSE)
   }
 
   compute <- function(p) {

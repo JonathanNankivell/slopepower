@@ -328,15 +328,15 @@ test_that("as.data.frame() column names are stable across every scenario", {
 test_that("slope_effect_size() agrees with the value inside slope_power()", {
   p <- ref_params()
   d <- trial_design(c(0, 1, 2), c(0, 0.1))
-  expect_equal(slope_effect_size(p, d, effectiveness = 0.33),
+  expect_equal(slope_effect_size(p, d),
                slope_power(p, d, effectiveness = 0.33)$effect_size)
 })
 
 test_that("the effect size takes the sign of the slope difference", {
   falling <- ref_params("none", slope = -1.672)
   rising  <- ref_params("none", slope =  1.672)
-  expect_lt(slope_effect_size(falling, c(0, 1, 2), effectiveness = 0.33), 0)
-  expect_gt(slope_effect_size(rising,  c(0, 1, 2), effectiveness = 0.33), 0)
+  expect_lt(slope_effect_size(falling, c(0, 1, 2)), 0)
+  expect_gt(slope_effect_size(rising,  c(0, 1, 2)), 0)
   # only the magnitude drives the sample size
   expect_equal(slope_power(falling, c(0, 1, 2), effectiveness = 0.33)$n,
                slope_power(rising,  c(0, 1, 2), effectiveness = 0.33)$n)

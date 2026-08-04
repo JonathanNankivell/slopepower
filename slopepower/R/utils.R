@@ -73,6 +73,30 @@ parse_slope_formula <- function(formula, context) {
   # the time variable, silently returning a meaningless slope. The method of
   # Nash et al. models the outcome as a linear function of time alone; there is
   # no covariate adjustment, so extra terms can only be a mistake.
+  # Two checks, because they catch different things. `terms()` applies formula
+  # semantics while the expression is later *evaluated* with arithmetic
+  # semantics, and the two disagree: `time - age` and `offset(age)` each yield a
+  # single term label, so a count alone would let them through to be evaluated
+  # as arithmetic and fitted as though the result were the time variable. So
+  # reject any right-hand side whose head is an operator that combines or
+  # removes model terms. A transformation stays legal because `I()`, `log()` and
+  # friends are ordinary calls, not combining operators.
+  combining <- c("+", "-", "*", "/", ":", "^", "%in%", "offset")
+  if (is.call(rhs) && as.character(rhs[[1L]])[1L] %in% combining) {
+    stop(sprintf(paste0(
+      "%s: the right-hand side must be a single time term, but `%s` combines\n",
+      "  terms with `%s`. This port models the outcome as a linear function of\n",
+      "  time only, as in Nash et al. (2021); there is no covariate adjustment,\n",
+      "  and the Stata original refuses such a formula at parse time.\n",
+      "  To transform time, wrap the arithmetic in I(), e.g.\n",
+      "  `outcome ~ I(vdate / 365) | subject`.\n",
+      "  Baseline in particular needs no adjustment: it is modelled as a\n",
+      "  correlated outcome with a single intercept for both arms (paper\n",
+      "  section 2.1), rather than entered as a covariate."),
+      context, paste(deparse(rhs), collapse = " "),
+      as.character(rhs[[1L]])[1L]), call. = FALSE)
+  }
+
   labels <- tryCatch(
     attr(stats::terms(stats::as.formula(paste("~", paste(deparse(rhs), collapse = " ")),
                                         env = baseenv())),

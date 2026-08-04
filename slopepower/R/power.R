@@ -108,13 +108,14 @@ as_trial_design <- function(design, context) {
     stop(sprintf("%s: `design$dropout_type` must be \"incremental\" or \"cumulative\".",
                  context), call. = FALSE)
   }
-  if (identical(design$dropout_type, "cumulative")) {
-    stop(sprintf(paste0(
-      "%s: `design$dropout` must already be incremental; a `dropout_type` of ",
-      "\"cumulative\" records how the user supplied it, not how it is stored.\n",
-      "  Build the design with trial_design(visits, dropout, \"cumulative\") ",
-      "so the conversion happens once."), context), call. = FALSE)
-  }
+  # `dropout_type` records only how the user supplied the vector; `dropout`
+  # itself is always incremental, converted once by the constructor. So a value
+  # of "cumulative" is provenance, not an instruction, and must not be acted on
+  # here -- doing so rejected every design built with dropout_type =
+  # "cumulative", including the one in trial_design()'s own examples, with an
+  # error telling the user to do what they had already done. A hand-built list
+  # that puts cumulative values in `dropout` cannot be detected anyway: the
+  # values are indistinguishable from valid incremental ones.
   design$has_dropout <- any(dropout > 0)
   design$dropout <- dropout
   design$visits <- visits
@@ -311,20 +312,29 @@ effect_components <- function(params, design, target, effectiveness,
 #'
 #' @param params A `slope_params` object.
 #' @param design A `trial_design` object, or a numeric vector of visit times.
-#' @param target `"effectiveness"` to target a proportion of the observed slope
-#'   difference, or `"observed"` to target the treatment effect observed in a
-#'   previous trial. See [slope_power()].
-#' @param effectiveness Proportion of the slope difference the treatment is
-#'   expected to remove, in (0, 1]. Ignored when `target = "observed"`.
+#' @param target `"effectiveness"` to measure the slope difference toward zero
+#'   (or toward the healthy-control slope), or `"observed"` to measure it
+#'   against the treated arm of a previous trial. See [slope_power()].
 #'
-#' @return A single signed number. Its sign follows the slope difference; only
-#'   its magnitude affects the sample size.
+#' @return A single signed number, on the **slope-difference scale**: it is
+#'   \eqn{\Delta / s^*}, not \eqn{\beta_2 / s^*}. There is deliberately no
+#'   `effectiveness` argument, because the returned value does not depend on
+#'   one. Sample size is therefore
+#'   \code{2 * ceiling((qnorm(1 - alpha / 2) + qnorm(power))^2 /
+#'   (effect_size * effectiveness)^2)} --- omitting the `effectiveness` factor
+#'   understates it by \eqn{1/e^2}. Use [slope_power()] unless you specifically
+#'   want the unscaled quantity. The sign follows the slope difference; only the
+#'   magnitude affects the sample size.
 #' @export
 slope_effect_size <- function(params, design,
-                              target = c("effectiveness", "observed"),
-                              effectiveness = 0.25) {
-  comp <- effect_components(params, design, target, effectiveness,
-                            effectiveness_supplied = !missing(effectiveness),
+                              target = c("effectiveness", "observed")) {
+  # No `effectiveness` argument, deliberately. The returned effect size is on
+  # the slope-difference scale (CONTRACT.md section 5.4) and does not depend on
+  # effectiveness, so accepting the argument would silently ignore it: a caller
+  # reconstructing N = 2 * ceiling((z + z)^2 / es^2) from this value would be
+  # wrong by a factor of effectiveness^-2. See the note in @return.
+  comp <- effect_components(params, design, target, effectiveness = 1,
+                            effectiveness_supplied = FALSE,
                             context = "slope_effect_size()")
   comp$effect_size
 }

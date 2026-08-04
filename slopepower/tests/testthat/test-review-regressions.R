@@ -56,12 +56,75 @@ test_that("hand-built trial_design objects have has_dropout derived, not trusted
   expect_equal(fixed$var_tte, correct$var_tte, tolerance = 1e-10)
   expect_equal(fixed$n, correct$n)
 
-  # A design claiming its stored dropout is cumulative is rejected: the stored
-  # vector is always incremental, so honouring the claim would double-convert.
-  cumul <- structure(list(visits = c(0, 1, 2), dropout = c(0.05, 0.05),
-                          has_dropout = TRUE, dropout_type = "cumulative"),
-                     class = "trial_design")
-  expect_error(slope_power(p, cumul, effectiveness = 0.33), "already be incremental")
+  # A design built with dropout_type = "cumulative" must work. `dropout_type`
+  # records only how the user supplied the vector -- `dropout` is always stored
+  # incrementally -- so acting on the label rejected legitimate constructor
+  # output, including trial_design()'s own documented example, with an error
+  # telling the user to do exactly what they had done.
+  cumul <- suppressWarnings(
+    trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15), dropout_type = "cumulative"))
+  incr <- suppressWarnings(
+    trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.05, 0.05)))
+  from_cumul <- suppressWarnings(slope_power(p, cumul, effectiveness = 0.33))
+  from_incr <- suppressWarnings(slope_power(p, incr, effectiveness = 0.33))
+  expect_equal(from_cumul$n, from_incr$n)
+  expect_equal(from_cumul$var_tte, from_incr$var_tte, tolerance = 1e-10)
+})
+
+test_that("the covariate guard catches term removal and offsets, not just addition", {
+  skip_without_paper_data()
+  d <- load_paper_data("slpower1")
+  d$age <- 50
+
+  # terms() applies formula semantics -- `-` removes a term and offset() terms
+  # are excluded from term.labels -- so a count of term labels alone let these
+  # through to be evaluated arithmetically and fitted as the time variable.
+  # On slpower1 that returned slopes of -0.043 and -0.020 for the true -1.6725.
+  expect_error(slope_params(sdmt ~ time - age | id, d), "single time term")
+  expect_error(slope_params(sdmt ~ time + offset(age) | id, d), "single time term")
+  expect_error(slope_params(sdmt ~ offset(age) | id, d), "single time term")
+  expect_error(slope_params(sdmt ~ time * age | id, d), "single time term")
+  expect_error(slope_params(sdmt ~ time:age | id, d), "single time term")
+
+  # Transformations remain legal: they are ordinary calls, not combining
+  # operators.
+  ref <- slope_params(sdmt ~ time | id, d)
+  d$days <- d$time * 365
+  expect_equal(slope_params(sdmt ~ I(days / 365) | id, d)$slope, ref$slope,
+               tolerance = 1e-6)
+})
+
+test_that("slope_bootstrap() rejects a statistic that would bootstrap its own input", {
+  skip_without_paper_data()
+  p <- paper_fit("slpower1")
+
+  # slope_power() solves for whichever of n and power is absent, so these
+  # combinations returned the user's own input in every replicate -- a
+  # zero-width interval that looked like a successful bootstrap.
+  expect_error(
+    slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2),
+                    effectiveness = 0.33),
+    'requires `n`')
+  expect_error(
+    slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2), n = 400,
+                    effectiveness = 0.33),
+    'must not be supplied')
+})
+
+test_that("slope_effect_size() takes no effectiveness argument", {
+  skip_without_paper_data()
+  p <- paper_fit("slpower1")
+
+  # It used to accept one and ignore it, returning the same number for every
+  # value. The result is on the slope-difference scale, so a caller
+  # reconstructing N from it must apply the effectiveness factor themselves.
+  expect_error(slope_effect_size(p, c(0, 1, 2), effectiveness = 0.33), "unused argument")
+
+  es <- slope_effect_size(p, c(0, 1, 2))
+  for (e in c(0.1, 0.33, 0.9)) {
+    n_manual <- 2 * ceiling((stats::qnorm(0.975) + stats::qnorm(0.8))^2 / (es * e)^2)
+    expect_equal(slope_power(p, c(0, 1, 2), effectiveness = e)$n, n_manual)
+  }
 })
 
 test_that("slope_power_grid() enforces the effectiveness/observed guard", {
