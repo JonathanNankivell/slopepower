@@ -82,8 +82,12 @@ parse_slope_formula <- function(formula, context) {
     stop(sprintf(paste0(
       "%s: the right-hand side must be a single time term, but `%s` has %d: %s.\n",
       "  This port models the outcome as a linear function of time only, as in\n",
-      "  Nash et al. (2021); there is no covariate adjustment. A transformation\n",
-      "  of time is fine, e.g. `outcome ~ I(vdate / 365) | subject`."),
+      "  Nash et al. (2021); there is no covariate adjustment, and the Stata\n",
+      "  original refuses such a formula at parse time. A transformation of\n",
+      "  time is fine, e.g. `outcome ~ I(vdate / 365) | subject`.\n",
+      "  Baseline in particular needs no adjustment: it is modelled as a\n",
+      "  correlated outcome with a single intercept for both arms (paper\n",
+      "  section 2.1), rather than entered as a covariate."),
       context, paste(deparse(rhs), collapse = " "), length(labels),
       paste(sQuote(labels), collapse = ", ")), call. = FALSE)
   }
