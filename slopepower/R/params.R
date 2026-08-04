@@ -18,8 +18,15 @@
 
 #' Coerce a two-level group column to a 0/1 numeric indicator
 #'
-#' Accepts numeric 0/1, logical, two-level factor/character, or haven_labelled.
-#' For factors and characters the first level maps to 0 and the second to 1.
+#' Accepts numeric 0/1, logical, haven_labelled, or a factor/character whose
+#' levels are literally "0" and "1". Labelled factors such as
+#' c("case", "control") are rejected rather than mapped by level order: which
+#' level means "case" cannot be inferred, and guessing silently swaps the two
+#' groups, so the fitted slope and every variance component would be taken from
+#' the wrong one. The numeric path has always been strict about this; the
+#' factor path used to trust alphabetical order, which made
+#' `healthy = <"case"/"control" column>` return the healthy controls' slope
+#' labelled as the cases'.
 #' @noRd
 coerce_binary <- function(x, name, context) {
   if (inherits(x, "haven_labelled")) x <- as.numeric(x)
@@ -29,6 +36,16 @@ coerce_binary <- function(x, name, context) {
     if (nlevels(f) != 2L) {
       stop(sprintf("%s: `%s` must have exactly two levels; got %d.",
                    context, name, nlevels(f)), call. = FALSE)
+    }
+    if (!identical(levels(f), c("0", "1"))) {
+      meaning <- if (identical(name, "healthy")) "case" else "treated"
+      stop(sprintf(paste0(
+        "%s: `%s` is a %s with levels %s, so which level means \"%s\" cannot be ",
+        "determined.\n  Recode it explicitly as 0/1, e.g.",
+        "\n    data$%s <- as.integer(data$%s == \"%s\")\n  where 1 marks the %s group."),
+        context, name, if (is.factor(x)) "factor" else "character vector",
+        paste(sprintf("\"%s\"", levels(f)), collapse = " and "), meaning,
+        name, name, levels(f)[2L], meaning), call. = FALSE)
     }
     return(as.numeric(f) - 1)
   }

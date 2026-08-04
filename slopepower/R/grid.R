@@ -199,7 +199,19 @@ slope_power_grid <- function(params, visits, dropout = NULL,
                              target = c("effectiveness", "observed"),
                              n = NULL, power = NULL, alpha = 0.05) {
   context <- "slope_power_grid()"
+  effectiveness_supplied <- !missing(effectiveness)
   target <- match.arg(target)
+
+  # Raise slope_power()'s guard here rather than relying on it below: the loop
+  # omits `effectiveness` from the call when the target is the previously
+  # observed effect, which would otherwise bypass the check and silently return
+  # a whole table computed at effectiveness = 1.
+  if (identical(target, "observed") && effectiveness_supplied) {
+    stop(sprintf(paste0(
+      "%s: supply only one of `effectiveness` and target = \"observed\".\n",
+      "  target = \"observed\" reuses the treatment effect observed in the ",
+      "previous trial, which fixes effectiveness at 1."), context), call. = FALSE)
+  }
 
   visit_list <- as_visits_list(visits, context)
   drop_list <- as_dropout_list(dropout, context)

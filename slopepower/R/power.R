@@ -99,6 +99,25 @@ as_trial_design <- function(design, context) {
     stop(sprintf("%s: dropout proportions sum to %g, which exceeds 1.",
                  context, sum(dropout)), call. = FALSE)
   }
+  # `has_dropout` is what the calculation branches on, so it is derived here
+  # rather than trusted. A hand-built design that omits it would otherwise fail
+  # with "argument is of length zero", and one that sets it FALSE alongside a
+  # non-zero `dropout` would silently report the unweighted s*^2.
+  if (!identical(design$dropout_type, "incremental") &&
+      !identical(design$dropout_type, "cumulative")) {
+    stop(sprintf("%s: `design$dropout_type` must be \"incremental\" or \"cumulative\".",
+                 context), call. = FALSE)
+  }
+  if (identical(design$dropout_type, "cumulative")) {
+    stop(sprintf(paste0(
+      "%s: `design$dropout` must already be incremental; a `dropout_type` of ",
+      "\"cumulative\" records how the user supplied it, not how it is stored.\n",
+      "  Build the design with trial_design(visits, dropout, \"cumulative\") ",
+      "so the conversion happens once."), context), call. = FALSE)
+  }
+  design$has_dropout <- any(dropout > 0)
+  design$dropout <- dropout
+  design$visits <- visits
   invisible(design)
 }
 
