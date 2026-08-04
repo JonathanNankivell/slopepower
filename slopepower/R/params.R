@@ -67,6 +67,26 @@ coerce_binary <- function(x, name, context) {
   as.numeric(x)
 }
 
+#' Look up a fixed effect by name, resolving interactions whichever way round
+#' R happened to spell them
+#'
+#' `lme` names an interaction after the order its components appear in the model
+#' formula, so `sp_case * sp_time` yields `sp_case:sp_time` while
+#' `sp_time * sp_case` yields `sp_time:sp_case`. The two fits are identical --
+#' only the label differs -- so extraction must not depend on which spelling
+#' arose. Indexing a fixed spelling would break on an innocuous reordering of
+#' the internal formula, loudly rather than silently, but break nonetheless.
+#' @noRd
+fixef_term <- function(b, parts, context) {
+  cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
+  hit <- cand[cand %in% names(b)]
+  if (length(hit) == 0L) {
+    stop(sprintf("%s: fixed effect `%s` not found in the fitted model; have %s.",
+                 context, cand[1L], paste(names(b), collapse = ", ")), call. = FALSE)
+  }
+  unname(b[[hit[1L]]])
+}
+
 #' Evaluate a bare column name (or expression) against `data`, then the caller
 #' @noRd
 eval_column <- function(expr, data, env, context, name) {
@@ -362,7 +382,7 @@ slope_params <- function(formula, data,
     fit <- nlme::lme(sp_y ~ sp_time, random = ~ sp_time | sp_subject,
                      data = dat, method = "REML", control = ctrl)
     b <- nlme::fixef(fit)
-    slope <- unname(b[["sp_time"]])
+    slope <- fixef_term(b, "sp_time", context)
     slope_comparator <- NA_real_
     re <- extract_re(fit, "(Intercept)", "sp_time", context)
     s2r <- extract_residual(fit, NULL, context)
@@ -376,8 +396,9 @@ slope_params <- function(formula, data,
                      random = ~ sp_time | sp_subject,
                      data = dat, method = "REML", control = ctrl)
     b <- nlme::fixef(fit)
-    slope            <- unname(b[["sp_time"]] + b[["sp_placebo_time"]])  # control arm
-    slope_comparator <- unname(b[["sp_time"]])                           # treated arm
+    slope            <- fixef_term(b, "sp_time", context) +
+                        fixef_term(b, "sp_placebo_time", context)   # control arm
+    slope_comparator <- fixef_term(b, "sp_time", context)                 # treated arm
     re <- extract_re(fit, "(Intercept)", "sp_time", context)
     s2r <- extract_residual(fit, NULL, context)
 
@@ -417,8 +438,9 @@ slope_params <- function(formula, data,
     }
 
     b <- nlme::fixef(fit)
-    slope            <- unname(b[["sp_time"]] + b[["sp_case:sp_time"]])  # cases
-    slope_comparator <- unname(b[["sp_time"]])                            # controls
+    slope            <- fixef_term(b, "sp_time", context) +
+                        fixef_term(b, c("sp_case", "sp_time"), context)  # cases
+    slope_comparator <- fixef_term(b, "sp_time", context)                  # controls
     re  <- extract_re(fit, "sp_case", "sp_case_time", context)
     s2r <- extract_residual(fit, "case", context)
   }

@@ -66,6 +66,28 @@ parse_slope_formula <- function(formula, context) {
     subject <- rhs[[3L]]
     rhs <- rhs[[2L]]
   }
+
+  # The time side must be exactly one model term. A transformation is fine --
+  # `I(vdate / 365)` is one term -- but `time + age` is two, and without this
+  # check it would be evaluated as the arithmetic sum and fitted as if it were
+  # the time variable, silently returning a meaningless slope. The method of
+  # Nash et al. models the outcome as a linear function of time alone; there is
+  # no covariate adjustment, so extra terms can only be a mistake.
+  labels <- tryCatch(
+    attr(stats::terms(stats::as.formula(paste("~", paste(deparse(rhs), collapse = " ")),
+                                        env = baseenv())),
+         "term.labels"),
+    error = function(e) NULL)
+  if (!is.null(labels) && length(labels) != 1L) {
+    stop(sprintf(paste0(
+      "%s: the right-hand side must be a single time term, but `%s` has %d: %s.\n",
+      "  This port models the outcome as a linear function of time only, as in\n",
+      "  Nash et al. (2021); there is no covariate adjustment. A transformation\n",
+      "  of time is fine, e.g. `outcome ~ I(vdate / 365) | subject`."),
+      context, paste(deparse(rhs), collapse = " "), length(labels),
+      paste(sQuote(labels), collapse = ", ")), call. = FALSE)
+  }
+
   list(outcome = lhs, time = rhs, subject = subject)
 }
 
