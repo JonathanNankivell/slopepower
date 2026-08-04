@@ -2,7 +2,8 @@
 #
 # This exists so that an existing Stata script can be ported mechanically, and so
 # that the worked examples in Nash et al. (2021) can be run verbatim as a parity
-# check. New code should prefer slope_params() + trial_design() + slope_power().
+# check. New code should prefer slope_params() + trial_design() +
+# slope_sample_size() or slope_power().
 
 #' Sample size or power using the Stata command's interface
 #'
@@ -13,10 +14,13 @@
 #' element with `schedule`, and the data type is declared with `obs`/`rct` rather
 #' than by which grouping variable is supplied.
 #'
-#' New code should use [slope_params()], [trial_design()] and [slope_power()]
-#' directly. Those separate the two stages of the calculation, so the mixed model
-#' is fitted once and any number of designs evaluated against it, and they express
-#' the visit schedule in real time rather than through the `scale` workaround.
+#' New code should use [slope_params()], [trial_design()] and then
+#' [slope_sample_size()] or [slope_power()] directly. Those separate the two
+#' stages of the calculation, so the mixed model is fitted once and any number of
+#' designs evaluated against it; they express the visit schedule in real time
+#' rather than through the `scale` workaround; and they ask one question each,
+#' rather than switching between sample size and power depending on which
+#' argument was left out.
 #'
 #' @section Differences from the Stata command:
 #'
@@ -50,14 +54,17 @@
 #'   `schedule`.
 #' @param scale Number of `time` units in one `schedule` unit. Defaults to 1.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
-#' @param power,n Supply one. `power` defaults to 0.8 when neither is given.
+#' @param power,n Supply one, as in Stata. `n` gives the power that sample size
+#'   achieves; `power` gives the sample size that reaches it. `power` defaults to
+#'   0.8 when neither is given.
 #' @param effectiveness Proportion of the slope difference the treatment should
 #'   remove. Defaults to 0.25. Mutually exclusive with `usetrt`.
 #' @param usetrt Target the treatment effect observed in the supplied trial data.
 #'   Requires `rct`.
 #' @param ... Passed to [slope_params()], e.g. `common_variance`.
 #'
-#' @return A `slope_power` object.
+#' @return A `slope_sample_size` object, or a `slope_power` object when `n` is
+#'   supplied. Both inherit from `slope_result`.
 #'
 #' @examples
 #' \dontrun{
@@ -66,7 +73,7 @@
 #'            obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)
 #' }
 #'
-#' @seealso [slope_power()]
+#' @seealso [slope_sample_size()], [slope_power()]
 #' @export
 slopepower <- function(data, depvar, subject, time, schedule,
                        obs = FALSE, rct = FALSE, nocontrols = FALSE,
@@ -182,12 +189,27 @@ slopepower <- function(data, depvar, subject, time, schedule,
   # ---- stage two -----------------------------------------------------------
   design <- trial_design(c(0, schedule), dropout = dropouts)
 
-  args <- list(params = params, design = design, alpha = alpha, n = n, power = power)
+  args <- list(params = params, design = design, alpha = alpha)
   if (usetrt) {
     args$target <- "observed"
   } else {
     args$target <- "effectiveness"
     args$effectiveness <- effectiveness %||% 0.25
   }
-  do.call(slope_power, args)
+
+  # The Stata command takes n() or power(), never both, and picks the calculation
+  # from which was given. That single bimodal interface is the thing this port
+  # splits in two, so the branch lives here -- in the compatibility shim whose
+  # job is to mirror Stata -- rather than in the functions it delegates to.
+  if (!is.null(n) && !is.null(power)) {
+    stop(sprintf(paste0(
+      "%s: supply only one of `n` and `power`.\n",
+      "  `n` gives the power that sample size achieves; `power` gives the sample\n",
+      "  size that reaches it."), context), call. = FALSE)
+  }
+  if (!is.null(n)) {
+    do.call(slope_power, c(args, list(n = n)))
+  } else {
+    do.call(slope_sample_size, c(args, list(power = power %||% 0.8)))
+  }
 }

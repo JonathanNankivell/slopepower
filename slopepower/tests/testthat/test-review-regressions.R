@@ -41,8 +41,8 @@ test_that("hand-built trial_design objects have has_dropout derived, not trusted
   # Omitting the field used to fail with "argument is of length zero".
   bare <- structure(list(visits = c(0, 1, 2), dropout = c(0, 0),
                          dropout_type = "incremental"), class = "trial_design")
-  expect_silent(r <- slope_power(p, bare, effectiveness = 0.33))
-  expect_equal(r$n, slope_power(p, trial_design(c(0, 1, 2)), effectiveness = 0.33)$n)
+  expect_silent(r <- slope_sample_size(p, bare, effectiveness = 0.33))
+  expect_equal(r$n, slope_sample_size(p, trial_design(c(0, 1, 2)), effectiveness = 0.33)$n)
 
   # has_dropout = FALSE alongside a non-zero dropout vector used to report the
   # unweighted s*^2 (5.96990) in place of the dropout-weighted value (6.36497),
@@ -51,8 +51,8 @@ test_that("hand-built trial_design objects have has_dropout derived, not trusted
                           has_dropout = FALSE, dropout_type = "incremental"),
                      class = "trial_design")
   correct <- suppressWarnings(
-    slope_power(p, trial_design(c(0, 1, 2, 5), c(0, 0, 0.1)), effectiveness = 0.33))
-  fixed <- suppressWarnings(slope_power(p, lying, effectiveness = 0.33))
+    slope_sample_size(p, trial_design(c(0, 1, 2, 5), c(0, 0, 0.1)), effectiveness = 0.33))
+  fixed <- suppressWarnings(slope_sample_size(p, lying, effectiveness = 0.33))
   expect_equal(fixed$var_tte, correct$var_tte, tolerance = 1e-10)
   expect_equal(fixed$n, correct$n)
 
@@ -65,8 +65,8 @@ test_that("hand-built trial_design objects have has_dropout derived, not trusted
     trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15), dropout_type = "cumulative"))
   incr <- suppressWarnings(
     trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.05, 0.05)))
-  from_cumul <- suppressWarnings(slope_power(p, cumul, effectiveness = 0.33))
-  from_incr <- suppressWarnings(slope_power(p, incr, effectiveness = 0.33))
+  from_cumul <- suppressWarnings(slope_sample_size(p, cumul, effectiveness = 0.33))
+  from_incr <- suppressWarnings(slope_sample_size(p, incr, effectiveness = 0.33))
   expect_equal(from_cumul$n, from_incr$n)
   expect_equal(from_cumul$var_tte, from_incr$var_tte, tolerance = 1e-10)
 })
@@ -98,9 +98,11 @@ test_that("slope_bootstrap() rejects a statistic that would bootstrap its own in
   skip_without_paper_data()
   p <- paper_fit("slpower1")
 
-  # slope_power() solves for whichever of n and power is absent, so these
-  # combinations returned the user's own input in every replicate -- a
-  # zero-width interval that looked like a successful bootstrap.
+  # slope_power() used to solve for whichever of n and power was absent, so
+  # these combinations returned the user's own input in every replicate -- a
+  # zero-width interval that looked like a successful bootstrap. The split makes
+  # the mismatch explicit, but the guards stay: the error a caller sees should
+  # name the statistic, not just report an unused argument.
   expect_error(
     slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2),
                     effectiveness = 0.33),
@@ -108,7 +110,15 @@ test_that("slope_bootstrap() rejects a statistic that would bootstrap its own in
   expect_error(
     slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2), n = 400,
                     effectiveness = 0.33),
-    'must not be supplied')
+    'slope_sample_size\\(\\)')
+  expect_error(
+    slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2), n = 400,
+                    power = 0.8, effectiveness = 0.33),
+    'must not be')
+  expect_error(
+    slope_bootstrap(p, R = 5, statistic = "tte", design = c(0, 1, 2), n = 400,
+                    effectiveness = 0.33),
+    'slope_sample_size\\(\\)')
 })
 
 test_that("slope_effect_size() takes no effectiveness argument", {
@@ -123,30 +133,42 @@ test_that("slope_effect_size() takes no effectiveness argument", {
   es <- slope_effect_size(p, c(0, 1, 2))
   for (e in c(0.1, 0.33, 0.9)) {
     n_manual <- 2 * ceiling((stats::qnorm(0.975) + stats::qnorm(0.8))^2 / (es * e)^2)
-    expect_equal(slope_power(p, c(0, 1, 2), effectiveness = e)$n, n_manual)
+    expect_equal(slope_sample_size(p, c(0, 1, 2), effectiveness = e)$n, n_manual)
   }
 })
 
-test_that("slope_power_grid() enforces the effectiveness/observed guard", {
+test_that("both grids enforce the effectiveness/observed guard", {
   skip_without_paper_data()
   p3 <- paper_fit("slpower3")
 
-  # slope_power() errors on this combination; the grid omitted the argument
-  # instead of checking it, and returned a full table computed at
-  # effectiveness = 1 with no warning.
+  # The stage-two functions error on this combination; the grid omitted the
+  # argument instead of checking it, and returned a full table computed at
+  # effectiveness = 1 with no warning. The omission is still there -- it has to
+  # be -- so the check must be raised in each grid wrapper, both of them.
   expect_error(
-    slope_power(p3, trial_design(c(0, 2, 3)), target = "observed", effectiveness = 0.9),
+    slope_sample_size(p3, trial_design(c(0, 2, 3)), target = "observed",
+                      effectiveness = 0.9),
     "only one of"
   )
   expect_error(
-    slope_power_grid(p3, visits = list(a = c(0, 2, 3)),
+    slope_power(p3, trial_design(c(0, 2, 3)), n = 400, target = "observed",
+                effectiveness = 0.9),
+    "only one of"
+  )
+  expect_error(
+    slope_sample_size_grid(p3, visits = list(a = c(0, 2, 3)),
+                           target = "observed", effectiveness = 0.9),
+    "only one of"
+  )
+  expect_error(
+    slope_power_grid(p3, visits = list(a = c(0, 2, 3)), n = 400,
                      target = "observed", effectiveness = 0.9),
     "only one of"
   )
 
   # Not supplying it remains valid and reproduces the published N = 318.
   g <- suppressWarnings(
-    slope_power_grid(p3, visits = list(a = c(0, 2, 3)),
-                     dropout = list(d = c(0.2, 0.1)), target = "observed"))
+    slope_sample_size_grid(p3, visits = list(a = c(0, 2, 3)),
+                           dropout = list(d = c(0.2, 0.1)), target = "observed"))
   expect_equal(g$n[1], 318)
 })

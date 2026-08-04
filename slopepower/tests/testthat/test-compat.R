@@ -12,7 +12,9 @@ test_that("slopepower() reproduces the p.588 single-group example", {
   r <- suppressMessages(slopepower(
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = c(1, 2), obs = TRUE, nocontrols = TRUE, effectiveness = 0.33))
-  expect_s3_class(r, "slope_power")
+  # no n given, so the Stata wrapper asks the sample-size question
+  expect_s3_class(r, "slope_sample_size")
+  expect_s3_class(r, "slope_result")
   expect_equal(r$n, 712)
   expect_equal(r$n_per_arm, 356)
 })
@@ -62,8 +64,33 @@ test_that("slopepower() computes power when n is given (p.593)", {
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = c(1, 2), dropouts = c(0.05, 0.05), obs = TRUE,
     casecon = "case", effectiveness = 0.33, n = 200)))
+  # n given, so it asks the power question
+  expect_s3_class(r, "slope_power")
   expect_lt(abs(r$power - 0.597), 5e-4)
   expect_equal(r$n, 200)
+})
+
+test_that("slopepower() keeps Stata's single bimodal interface, and guards it", {
+  # The Stata command takes n() or power(), never both, and picks the
+  # calculation from which was supplied. This wrapper mirrors that; the split
+  # into slope_sample_size() and slope_power() is for new code, not for parity.
+  skip_without_paper_data()
+  d <- load_paper_data("slpower1")
+  base <- list(d, depvar = "sdmt", subject = "id", time = "time",
+               schedule = c(1, 2), obs = TRUE, nocontrols = TRUE,
+               effectiveness = 0.33)
+  expect_error(
+    do.call(slopepower, c(base, list(n = 450, power = 0.9))),
+    "only one of")
+  # neither given defaults to power 0.8, as documented
+  r <- suppressMessages(do.call(slopepower, base))
+  expect_s3_class(r, "slope_sample_size")
+  expect_equal(r$power, 0.8)
+  expect_equal(r$n, 712)
+  # and an explicit power reaches the same place
+  r9 <- suppressMessages(do.call(slopepower, c(base, list(power = 0.9))))
+  expect_s3_class(r9, "slope_sample_size")
+  expect_gt(r9$n, r$n)
 })
 
 test_that("slopepower() reproduces the p.594 usetrt example", {

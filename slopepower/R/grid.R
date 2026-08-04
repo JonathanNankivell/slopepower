@@ -17,7 +17,7 @@
 #' schedule: "5% per year" over three years is `0.15` for a trial with a single
 #' final visit, `rep(0.05, 3)` with annual visits, and `rep(0.025, 6)` with
 #' six-monthly visits. `dropout_rate()` expresses the rate once and lets
-#' [slope_power_grid()] expand it correctly for each design.
+#' the grid functions expand it correctly for each design.
 #'
 #' The expansion is linear in elapsed time, matching the way the worked example in
 #' section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
@@ -37,7 +37,7 @@
 #' dropout_rate(0.05)              # 5% per unit time
 #' dropout_rate(0.10, per = 12)    # 10% per 12 months, if time is in months
 #'
-#' @seealso [slope_power_grid()], [trial_design()]
+#' @seealso [slope_power_grid()], [slope_sample_size_grid()], [trial_design()]
 #' @export
 dropout_rate <- function(rate, per = 1) {
   context <- "dropout_rate()"
@@ -155,64 +155,31 @@ label_dropout <- function(x) {
 # the grid
 # ---------------------------------------------------------------------------
 
-#' Compare sample size or power across many candidate trial designs
+#' Reject `effectiveness` alongside target = "observed"
 #'
-#' Evaluates the cross product of a set of visit schedules and a set of dropout
-#' assumptions against a single set of stage-one parameter estimates, returning one
-#' row per combination. This is the calculation behind table 1 of Nash et al.
-#' (2021), which explores how adding interim visits changes the power of a trial
-#' under different rates of loss to follow-up.
-#'
-#' Because dropout proportions are supplied per visit, a single numeric vector
-#' cannot describe the same withdrawal behaviour across designs with different
-#' numbers of visits. Use [dropout_rate()] to state the rate once and have it
-#' expanded correctly for each schedule.
-#'
-#' @param params A `slope_params` object.
-#' @param visits A numeric vector of visit times, or a named list of such vectors.
-#'   Each must begin at 0.
-#' @param dropout `NULL`, a numeric vector of incremental proportions, a
-#'   [dropout_rate()] object, or a named list mixing any of these.
-#' @param effectiveness,target,n,power,alpha Passed to [slope_power()] and held
-#'   constant across the grid.
-#'
-#' @return A data frame with one row per design and dropout combination, with
-#'   columns `design`, `dropout`, `n_visits`, `n_follow_up`, `last_visit`,
-#'   `dropout_total`, `n`, `n_per_arm`, `power`, `tte`, `var_tte` and
-#'   `effect_size`.
-#'
-#' @examples
-#' pars <- slope_params_manual(
-#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
-#' )
-#' slope_power_grid(
-#'   pars, n = 450, effectiveness = 0.33,
-#'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
-#'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
-#' )
-#'
-#' @seealso [slope_power()], [dropout_rate()]
-#' @export
-slope_power_grid <- function(params, visits, dropout = NULL,
-                             effectiveness = 0.25,
-                             target = c("effectiveness", "observed"),
-                             n = NULL, power = NULL, alpha = 0.05) {
-  context <- "slope_power_grid()"
-  effectiveness_supplied <- !missing(effectiveness)
-  target <- match.arg(target)
-
-  # Raise slope_power()'s guard here rather than relying on it below: the loop
-  # omits `effectiveness` from the call when the target is the previously
-  # observed effect, which would otherwise bypass the check and silently return
-  # a whole table computed at effectiveness = 1.
-  if (identical(target, "observed") && effectiveness_supplied) {
+#' Raised in the grid wrappers rather than left to the stage-two functions,
+#' because the loop below omits `effectiveness` from the call when the target is
+#' the previously observed effect. Without this check the omission would bypass
+#' the guard and silently return a whole table computed at effectiveness = 1.
+#' @noRd
+check_target_effectiveness <- function(target, supplied, context) {
+  if (identical(target, "observed") && isTRUE(supplied)) {
     stop(sprintf(paste0(
       "%s: supply only one of `effectiveness` and target = \"observed\".\n",
       "  target = \"observed\" reuses the treatment effect observed in the ",
       "previous trial, which fixes effectiveness at 1."), context), call. = FALSE)
   }
+  invisible(NULL)
+}
 
+#' Walk the visits x dropout cross product, evaluating one design per cell
+#'
+#' `evaluate` takes a `trial_design` and returns a `slope_sample_size` or
+#' `slope_power` object. Everything except that call is shared between the two
+#' grids, so the two tables are guaranteed to have the same shape and the same
+#' dropout expansion.
+#' @noRd
+grid_impl <- function(visits, dropout, evaluate, context) {
   visit_list <- as_visits_list(visits, context)
   drop_list <- as_dropout_list(dropout, context)
 
@@ -246,13 +213,7 @@ slope_power_grid <- function(params, visits, dropout = NULL,
         }
       )
 
-      args <- list(params = params, design = des, target = target,
-                   n = n, power = power, alpha = alpha)
-      # slope_power() rejects an explicitly supplied `effectiveness` when the
-      # target is the previously observed effect, so omit it in that case.
-      if (!identical(target, "observed")) args$effectiveness <- effectiveness
-
-      res <- tryCatch(do.call(slope_power, args), error = function(e) {
+      res <- tryCatch(evaluate(des), error = function(e) {
         stop(sprintf("%s: design \"%s\" with dropout \"%s\" failed.\n  %s",
                      context, vname, dname, conditionMessage(e)), call. = FALSE)
       })
@@ -287,4 +248,114 @@ slope_power_grid <- function(params, visits, dropout = NULL,
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
   out
+}
+
+#' Compare the power of many candidate trial designs
+#'
+#' Evaluates the cross product of a set of visit schedules and a set of dropout
+#' assumptions against a single set of stage-one parameter estimates, at one fixed
+#' sample size, returning one row per combination. This is the calculation behind
+#' table 1 of Nash et al. (2021), which explores how adding interim visits changes
+#' the power of a trial under different rates of loss to follow-up.
+#'
+#' Because dropout proportions are supplied per visit, a single numeric vector
+#' cannot describe the same withdrawal behaviour across designs with different
+#' numbers of visits. Use [dropout_rate()] to state the rate once and have it
+#' expanded correctly for each schedule.
+#'
+#' Use [slope_sample_size_grid()] for the converse table: the sample size each
+#' design needs to reach a target power.
+#'
+#' @param params A `slope_params` object.
+#' @param visits A numeric vector of visit times, or a named list of such vectors.
+#'   Each must begin at 0.
+#' @param dropout `NULL`, a numeric vector of incremental proportions, a
+#'   [dropout_rate()] object, or a named list mixing any of these.
+#' @param n Total number of participants, held constant across the grid.
+#'   Required.
+#' @param effectiveness,target,alpha Passed to [slope_power()] and held constant
+#'   across the grid.
+#'
+#' @return A data frame with one row per design and dropout combination, with
+#'   columns `design`, `dropout`, `n_visits`, `n_follow_up`, `last_visit`,
+#'   `dropout_total`, `n`, `n_per_arm`, `power`, `tte`, `var_tte` and
+#'   `effect_size`. `n` is constant; `power` is what varies.
+#'
+#' @examples
+#' pars <- slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10
+#' )
+#' slope_power_grid(
+#'   pars, n = 450, effectiveness = 0.33,
+#'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+#'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
+#' )
+#'
+#' @seealso [slope_power()], [slope_sample_size_grid()], [dropout_rate()]
+#' @export
+slope_power_grid <- function(params, visits, dropout = NULL, n,
+                             effectiveness = 0.25,
+                             target = c("effectiveness", "observed"),
+                             alpha = 0.05) {
+  context <- "slope_power_grid()"
+  if (missing(n)) {
+    stop(sprintf(paste0(
+      "%s: `n` is required -- this grid holds the sample size fixed and reports\n",
+      "  the power each design achieves. For the sample size each design needs,\n",
+      "  use slope_sample_size_grid()."), context), call. = FALSE)
+  }
+  target <- match.arg(target)
+  check_target_effectiveness(target, !missing(effectiveness), context)
+
+  args <- list(params = params, n = n, target = target, alpha = alpha)
+  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+
+  grid_impl(visits, dropout,
+            function(des) do.call(slope_power, c(args, list(design = des))),
+            context)
+}
+
+#' Compare the sample size many candidate trial designs need
+#'
+#' The companion to [slope_power_grid()]: holds the target power fixed and reports
+#' the sample size each combination of visit schedule and dropout assumption
+#' requires. Section 4.2 of Nash et al. (2021) is the power version of this table;
+#' this is the same exploration read the other way round.
+#'
+#' @inheritParams slope_power_grid
+#' @param power Target power, held constant across the grid. Defaults to 0.8.
+#' @param effectiveness,target,alpha Passed to [slope_sample_size()] and held
+#'   constant across the grid.
+#'
+#' @return A data frame with the same columns as [slope_power_grid()]. `power` is
+#'   constant; `n` and `n_per_arm` are what vary.
+#'
+#' @examples
+#' pars <- slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10
+#' )
+#' slope_sample_size_grid(
+#'   pars, power = 0.8, effectiveness = 0.33,
+#'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+#'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+#' )
+#'
+#' @seealso [slope_sample_size()], [slope_power_grid()], [dropout_rate()]
+#' @export
+slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
+                                   effectiveness = 0.25,
+                                   target = c("effectiveness", "observed"),
+                                   alpha = 0.05) {
+  context <- "slope_sample_size_grid()"
+  target <- match.arg(target)
+  check_target_effectiveness(target, !missing(effectiveness), context)
+
+  args <- list(params = params, power = power, target = target, alpha = alpha)
+  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+
+  grid_impl(visits, dropout,
+            function(des) do.call(slope_sample_size, c(args, list(design = des))),
+            context)
 }

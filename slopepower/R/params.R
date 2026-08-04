@@ -216,7 +216,7 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' Stage one of the two-stage sample-size method of Nash et al. (2021). Fits a
 #' linear mixed model to previously collected longitudinal data and extracts the
 #' slope(s) and the between- and within-subject variance components that
-#' [slope_power()] needs.
+#' [slope_sample_size()] and [slope_power()] need.
 #'
 #' @param formula A two-sided formula `outcome ~ time | subject`. The time term
 #'   may be an expression, e.g. `sdmt ~ I(as.numeric(vdate) / 365) | id` to work
@@ -253,7 +253,8 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' * `healthy`: observational data containing both cases and healthy controls.
 #'   The target effect will be measured toward the healthy-control slope.
 #' * `treated`: data from a previous trial. The observed treatment effect is
-#'   available via `target = "observed"` in [slope_power()].
+#'   available via `target = "observed"` in [slope_sample_size()] and
+#'   [slope_power()].
 #'
 #' The returned variance components are always those of the **untreated / case**
 #' group. When `healthy` is supplied the controls contribute only their slope;
@@ -275,7 +276,7 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' Introducing the slopepower command. \emph{The Stata Journal} 21(3): 575--601.
 #'
 #' @seealso [slope_params_manual()] to supply parameters directly,
-#'   [slope_power()] for stage two.
+#'   [slope_sample_size()] and [slope_power()] for stage two.
 #' @export
 slope_params <- function(formula, data,
                          healthy = NULL, treated = NULL,

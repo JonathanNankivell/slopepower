@@ -55,7 +55,8 @@ check_params <- function(params, context) {
 #'
 #' Deliberately permissive: any strictly increasing finite vector of length >= 2
 #' defines a valid covariance matrix. The stricter trial constraints (baseline at
-#' zero) belong to `trial_design()` and are enforced in `slope_power()`.
+#' zero) belong to `trial_design()` and are enforced by the stage-two entry
+#' points, `slope_sample_size()` and `slope_power()`.
 #' @noRd
 check_visits <- function(visits, context) {
   if (!is.numeric(visits) || length(visits) < 2L || any(!is.finite(visits))) {
@@ -314,7 +315,7 @@ effect_components <- function(params, design, target, effectiveness,
 #' @param design A `trial_design` object, or a numeric vector of visit times.
 #' @param target `"effectiveness"` to measure the slope difference toward zero
 #'   (or toward the healthy-control slope), or `"observed"` to measure it
-#'   against the treated arm of a previous trial. See [slope_power()].
+#'   against the treated arm of a previous trial. See [slope_sample_size()].
 #'
 #' @return A single signed number, on the **slope-difference scale**: it is
 #'   \eqn{\Delta / s^*}, not \eqn{\beta_2 / s^*}. There is deliberately no
@@ -322,9 +323,9 @@ effect_components <- function(params, design, target, effectiveness,
 #'   one. Sample size is therefore
 #'   \code{2 * ceiling((qnorm(1 - alpha / 2) + qnorm(power))^2 /
 #'   (effect_size * effectiveness)^2)} --- omitting the `effectiveness` factor
-#'   understates it by \eqn{1/e^2}. Use [slope_power()] unless you specifically
-#'   want the unscaled quantity. The sign follows the slope difference; only the
-#'   magnitude affects the sample size.
+#'   understates it by \eqn{1/e^2}. Use [slope_sample_size()] unless you
+#'   specifically want the unscaled quantity. The sign follows the slope
+#'   difference; only the magnitude affects the sample size.
 #' @export
 slope_effect_size <- function(params, design,
                               target = c("effectiveness", "observed")) {
@@ -340,19 +341,104 @@ slope_effect_size <- function(params, design,
 }
 
 # ---------------------------------------------------------------------------
-# the main entry point
+# the shared solver
 # ---------------------------------------------------------------------------
 
-#' Sample size or power for a trial comparing slopes
+#' Everything `slope_sample_size()` and `slope_power()` have in common
 #'
-#' The second stage of the two-stage approach of Nash et al. (2021). Combines
-#' slope and variance estimates -- from [slope_params()] fitted to previously
-#' collected longitudinal data, or from [slope_params_manual()] -- with the
-#' design of a proposed two-arm parallel trial, and returns either the required
-#' sample size or the power of a given sample size.
+#' Exactly one of `n` and `power` is supplied; the other is solved for. This is
+#' the shared machinery, not an interface: the two questions take different
+#' inputs and produce differently shaped answers, so they are separate exported
+#' functions rather than one function with a mode switch. Keeping the algebra
+#' here means the sample size a design needs and the power it achieves can never
+#' drift apart.
 #'
-#' Supply exactly one of `n` and `power` and leave the other `NULL`; the missing
-#' one is solved for. Supplying neither is equivalent to `power = 0.8`.
+#' Returns the fields common to both results, in their canonical order.
+#' `n_requested` belongs only to the power branch and is added by its caller.
+#' @noRd
+solve_slope <- function(params, design, effectiveness, effectiveness_supplied,
+                        target, alpha, n, power, context) {
+  check_probability(alpha, "alpha", context)
+
+  solving_for_n <- is.null(n)
+  if (solving_for_n) {
+    check_probability(power, "power", context)
+  } else {
+    check_scalar(n, "n", context, lower = 2, upper = Inf, lower_open = FALSE)
+    if (n != floor(n)) {
+      stop(sprintf("%s: `n` must be a whole number of participants; got %g.",
+                   context, n), call. = FALSE)
+    }
+  }
+
+  comp <- effect_components(params, design, target, effectiveness,
+                            effectiveness_supplied = effectiveness_supplied,
+                            context = context)
+
+  z_a <- stats::qnorm(1 - alpha / 2)
+  scaled_effect <- abs(comp$effect_size) * comp$effectiveness
+
+  if (solving_for_n) {
+    n_per_arm <- ceiling((z_a + stats::qnorm(power))^2 / scaled_effect^2)
+    n_total <- 2 * n_per_arm
+  } else {
+    n_total <- 2 * floor(n / 2)
+    n_per_arm <- n_total / 2
+    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
+  }
+
+  # With dropout no single s*^2 applies across strata, so report the effective
+  # value obtained by inverting the sample-size formula (CONTRACT.md 5.6).
+  #
+  # The two branches are the same algebra but not the same number. Solving for
+  # power, qnorm inverts the pnorm above and n_per_arm cancels exactly, leaving
+  # tte^2 / scaled_effect^2 -- so that form is used directly rather than round
+  # -tripping through the power. The round trip is not merely redundant: past
+  # n_per_arm of a few thousand the power saturates at exactly 1, qnorm(1) is
+  # Inf, and the back-solve silently reported an effective variance of 0.
+  # Solving for n there is no such cancellation, because n_per_arm has been
+  # rounded up to a whole participant; the reported value carries that rounding
+  # and is very slightly larger, which is what the Stata original reports too.
+  var_tte <- if (!comp$design$has_dropout) {
+    comp$var_full
+  } else if (solving_for_n) {
+    n_per_arm * comp$tte^2 / (z_a + stats::qnorm(power))^2
+  } else {
+    comp$tte^2 / scaled_effect^2
+  }
+
+  list(
+    n                = n_total,
+    n_per_arm        = n_per_arm,
+    power            = power,
+    alpha            = alpha,
+    effectiveness    = if (identical(comp$target, "observed")) NA_real_ else comp$effectiveness,
+    target           = comp$target,
+    tte              = comp$tte,
+    var_tte          = var_tte,
+    effect_size      = comp$effect_size,
+    slope_difference = comp$slope_difference,
+    reference_slope  = comp$reference_slope,
+    params           = params,
+    design           = comp$design
+  )
+}
+
+#' Shared documentation for the two stage-two entry points
+#'
+#' @param params A `slope_params` object, from [slope_params()] fitted to
+#'   previously collected longitudinal data or from [slope_params_manual()].
+#' @param design A `trial_design` object, or a numeric vector of visit times
+#'   beginning at 0.
+#' @param effectiveness Proportion of the slope difference the treatment is
+#'   expected to remove, in (0, 1]. Must not be supplied when
+#'   `target = "observed"`, which fixes it at 1.
+#' @param target `"effectiveness"` (the default) or `"observed"`. The latter is
+#'   the equivalent of the Stata command's `usetrt` option and requires
+#'   parameters estimated from a previous trial.
+#' @param alpha Two-sided significance level. Defaults to 0.05.
+#'
+#' @section The reference slope:
 #'
 #' The target treatment effect is defined relative to a reference slope, which
 #' depends on the data the parameters came from:
@@ -370,112 +456,131 @@ slope_effect_size <- function(params, design,
 #'     Stata command's default behaviour for trial data.}
 #' }
 #'
-#' To power a trial for an effect that is a fraction `p` of a previously observed
-#' one, obtain the sample size with `target = "observed"` and multiply it by
-#' `p^-2` (Nash et al. 2021, section 4.1.3).
-#'
-#' @param params A `slope_params` object.
-#' @param design A `trial_design` object, or a numeric vector of visit times
-#'   beginning at 0.
-#' @param effectiveness Proportion of the slope difference the treatment is
-#'   expected to remove, in (0, 1]. Ignored, and must not be supplied, when
-#'   `target = "observed"`.
-#' @param target `"effectiveness"` (the default) or `"observed"`. The latter is
-#'   the equivalent of the Stata command's `usetrt` option and requires
-#'   parameters estimated from a previous trial.
-#' @param n Total number of participants across both arms. Odd values are reduced
-#'   by one so that the arms are equal. Supply to compute power.
-#' @param power Desired power. Supply to compute sample size.
-#' @param alpha Two-sided significance level. Defaults to 0.05.
-#'
-#' @return An object of class `slope_power`. See [as.data.frame.slope_power()]
-#'   for a tabular form with column names that are stable across designs.
-#'
 #' @references
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 #' calculations for trials that compare slopes over time: Introducing the
 #' slopepower command. \emph{Stata Journal} 21(3): 575--601.
+#'
+#' @name stage_two
+#' @keywords internal
+NULL
+
+# ---------------------------------------------------------------------------
+# sample size
+# ---------------------------------------------------------------------------
+
+#' Sample size for a trial comparing slopes
+#'
+#' "How many participants do I need?" --- the second stage of the two-stage
+#' approach of Nash et al. (2021), solved for `n`. Combines slope and variance
+#' estimates with the design of a proposed two-arm parallel trial and returns the
+#' total sample size that achieves `power`.
+#'
+#' Use [slope_power()] for the converse question, "what power does this many
+#' participants buy?". The two take different inputs and answer differently
+#' shaped questions, so they are separate functions; they share their algebra
+#' internally and are exact inverses up to the `ceiling()` that rounds a
+#' fractional participant up.
+#'
+#' To power a trial for an effect that is a fraction `p` of a previously observed
+#' one, obtain the sample size with `target = "observed"` and multiply it by
+#' `p^-2` (Nash et al. 2021, section 4.1.3).
+#'
+#' @inheritParams stage_two
+#' @param power Desired power, in (0, 1). Defaults to 0.8.
+#'
+#' @return An object of class `slope_sample_size`, a list with elements `n`,
+#'   `n_per_arm`, `power`, `alpha`, `effectiveness`, `target`, `tte`, `var_tte`,
+#'   `effect_size`, `slope_difference`, `reference_slope`, `params` and `design`.
+#'   See [as.data.frame.slope_result()] for a tabular form whose column names are
+#'   stable across designs and across both entry points.
+#'
+#' @inheritSection stage_two The reference slope
+#' @inherit stage_two references
 #'
 #' @examples
 #' pars <- slope_params_manual(
 #'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
 #'   sigma_cov = 5, sigma2_residual = 10
 #' )
-#' slope_power(pars, c(0, 1, 2), effectiveness = 0.33)
-#' slope_power(pars, c(0, 1, 2), effectiveness = 0.33, n = 712)
+#' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+#' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33, power = 0.9)
+#'
+#' @seealso [slope_power()] for the power of a given `n`,
+#'   [slope_sample_size_grid()] to compare many designs at once.
 #' @export
-slope_power <- function(params, design,
+slope_sample_size <- function(params, design,
+                              effectiveness = 0.25,
+                              target = c("effectiveness", "observed"),
+                              power = 0.8, alpha = 0.05) {
+  res <- solve_slope(params, design, effectiveness,
+                     effectiveness_supplied = !missing(effectiveness),
+                     target = target, alpha = alpha,
+                     n = NULL, power = power,
+                     context = "slope_sample_size()")
+  structure(res, class = c("slope_sample_size", "slope_result"))
+}
+
+# ---------------------------------------------------------------------------
+# power
+# ---------------------------------------------------------------------------
+
+#' Power of a trial comparing slopes
+#'
+#' "What power does this many participants buy?" --- the second stage of the
+#' two-stage approach of Nash et al. (2021), solved for power. Combines slope and
+#' variance estimates with the design of a proposed two-arm parallel trial and a
+#' fixed total sample size.
+#'
+#' Use [slope_sample_size()] for the converse question, "how many participants do
+#' I need?". The two take different inputs and answer differently shaped
+#' questions, so they are separate functions; they share their algebra internally
+#' and are exact inverses up to the `ceiling()` that rounds a fractional
+#' participant up.
+#'
+#' @inheritParams stage_two
+#' @param n Total number of participants across both arms. Required: it is the
+#'   quantity whose power is being evaluated. Odd values are reduced by one so
+#'   that the arms are equal, with the value as supplied kept in `n_requested`.
+#'
+#' @return An object of class `slope_power`, a list with elements `n`,
+#'   `n_per_arm`, `n_requested`, `power`, `alpha`, `effectiveness`, `target`,
+#'   `tte`, `var_tte`, `effect_size`, `slope_difference`, `reference_slope`,
+#'   `params` and `design`. See [as.data.frame.slope_result()] for a tabular form
+#'   whose column names are stable across designs and across both entry points.
+#'
+#' @inheritSection stage_two The reference slope
+#' @inherit stage_two references
+#'
+#' @examples
+#' pars <- slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10
+#' )
+#' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+#'
+#' @seealso [slope_sample_size()] for the `n` a target power needs,
+#'   [slope_power_grid()] to compare many designs at once.
+#' @export
+slope_power <- function(params, design, n,
                         effectiveness = 0.25,
                         target = c("effectiveness", "observed"),
-                        n = NULL, power = NULL, alpha = 0.05) {
+                        alpha = 0.05) {
   context <- "slope_power()"
-
-  if (!is.null(n) && !is.null(power)) {
-    stop(sprintf("%s: supply only one of `n` and `power`; the other is solved for.",
-                 context), call. = FALSE)
+  if (missing(n)) {
+    stop(sprintf(paste0(
+      "%s: `n` is required -- it is the sample size whose power is being\n",
+      "  evaluated. To solve for the sample size that achieves a given power,\n",
+      "  use slope_sample_size(params, design, power = 0.8)."),
+      context), call. = FALSE)
   }
-  check_probability(alpha, "alpha", context)
-
-  solve_for <- if (is.null(n)) "n" else "power"
-  n_requested <- NA_real_
-
-  if (identical(solve_for, "n")) {
-    if (is.null(power)) power <- 0.8
-    check_probability(power, "power", context)
-  } else {
-    check_scalar(n, "n", context, lower = 2, upper = Inf, lower_open = FALSE)
-    if (n != floor(n)) {
-      stop(sprintf("%s: `n` must be a whole number of participants; got %g.",
-                   context, n), call. = FALSE)
-    }
-    n_requested <- n
-  }
-
-  comp <- effect_components(params, design, target, effectiveness,
-                            effectiveness_supplied = !missing(effectiveness),
-                            context = context)
-
-  z_a <- stats::qnorm(1 - alpha / 2)
-  scaled_effect <- abs(comp$effect_size) * comp$effectiveness
-
-  if (identical(solve_for, "n")) {
-    n_per_arm <- ceiling((z_a + stats::qnorm(power))^2 / scaled_effect^2)
-    n_total <- 2 * n_per_arm
-  } else {
-    n_total <- 2 * floor(n_requested / 2)
-    n_per_arm <- n_total / 2
-    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
-  }
-
-  # With dropout no single s*^2 applies across strata, so report the effective
-  # value obtained by inverting the sample-size formula. The algebra cancels in
-  # both directions, recovering the dropout-weighted variance exactly.
-  var_tte <- if (comp$design$has_dropout) {
-    n_per_arm * comp$tte^2 / (z_a + stats::qnorm(power))^2
-  } else {
-    comp$var_full
-  }
-
-  structure(
-    list(
-      n                = n_total,
-      n_per_arm        = n_per_arm,
-      n_requested      = n_requested,
-      power            = power,
-      alpha            = alpha,
-      effectiveness    = if (identical(comp$target, "observed")) NA_real_ else comp$effectiveness,
-      target           = comp$target,
-      tte              = comp$tte,
-      var_tte          = var_tte,
-      effect_size      = comp$effect_size,
-      slope_difference = comp$slope_difference,
-      reference_slope  = comp$reference_slope,
-      solve_for        = solve_for,
-      params           = params,
-      design           = comp$design
-    ),
-    class = "slope_power"
-  )
+  res <- solve_slope(params, design, effectiveness,
+                     effectiveness_supplied = !missing(effectiveness),
+                     target = target, alpha = alpha,
+                     n = n, power = NULL, context = context)
+  # Kept separately from `n`, which is the even number actually used.
+  res <- append(res, list(n_requested = as.numeric(n)), after = 2L)
+  structure(res, class = c("slope_power", "slope_result"))
 }
 
 # ---------------------------------------------------------------------------
@@ -495,18 +600,13 @@ schedule_string <- function(design) {
         collapse = ", ")
 }
 
-#' Print a slope sample-size or power calculation
+#' The "Data characteristics" block, common to both print methods
 #'
-#' The layout follows the Stata command's output closely, which makes results
+#' Layout follows the Stata command's output closely, which makes results
 #' directly comparable with the worked examples in Nash et al. (2021).
-#'
-#' @param x A `slope_power` object.
-#' @param ... Ignored.
-#' @return `x`, invisibly.
-#' @export
-print.slope_power <- function(x, ...) {
+#' @noRd
+print_data_block <- function(x) {
   params <- x$params
-  design <- x$design
   comparator <- params$comparator
 
   cat("\nData characteristics:\n")
@@ -529,46 +629,78 @@ print.slope_power <- function(x, ...) {
       cat(fmt_line("slope of healthy controls", params$slope_comparator), "\n", sep = "")
     }
   }
+  invisible(x)
+}
 
-  cat("\nParameters for planned study:\n")
-  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
-  if (identical(x$solve_for, "power")) {
-    cat(fmt_line("specified N", x$n_requested, digits = 0L), "\n", sep = "")
-    cat(fmt_line("actual N", x$n, digits = 0L), "\n", sep = "")
-    cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
-  } else {
-    cat(fmt_line("power", x$power), "\n", sep = "")
-  }
+#' The tail of the "Parameters for planned study" block, common to both
+#' @noRd
+print_design_block <- function(x) {
+  design <- x$design
   cat(fmt_line("effectiveness", x$effectiveness), "\n", sep = "")
   cat(fmt_line("target treatment difference in slopes", x$tte), "\n", sep = "")
   cat(fmt_line("number of follow-up visits", length(design$visits) - 1L, digits = 0L), "\n", sep = "")
   cat(fmt_line("schedule (and dropouts)", schedule_string(design)), "\n", sep = "")
+  invisible(x)
+}
 
-  if (identical(x$solve_for, "n")) {
-    cat("\n  Estimated sample size:\n")
-    cat(fmt_line("N", x$n, digits = 0L), "\n", sep = "")
-    cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
-  } else {
-    cat("\nEstimated power:\n")
-    cat(fmt_line("power", x$power), "\n", sep = "")
-  }
+#' Print a slope sample-size calculation
+#'
+#' @param x A `slope_sample_size` object.
+#' @param ... Ignored.
+#' @return `x`, invisibly.
+#' @export
+print.slope_sample_size <- function(x, ...) {
+  print_data_block(x)
+  cat("\nParameters for planned study:\n")
+  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
+  cat(fmt_line("power", x$power), "\n", sep = "")
+  print_design_block(x)
+  cat("\n  Estimated sample size:\n")
+  cat(fmt_line("N", x$n, digits = 0L), "\n", sep = "")
+  cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
   cat("\n")
   invisible(x)
 }
 
-#' Coerce a slope power calculation to a one-row data frame
-#'
-#' Column names are identical for every combination of data type, comparator and
-#' target, which makes results from different designs safe to bind together. This
-#' differs deliberately from the Stata command, whose returned matrix renames its
-#' slope columns depending on which model was fitted.
+#' Print a slope power calculation
 #'
 #' @param x A `slope_power` object.
+#' @param ... Ignored.
+#' @return `x`, invisibly.
+#' @export
+print.slope_power <- function(x, ...) {
+  print_data_block(x)
+  cat("\nParameters for planned study:\n")
+  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
+  cat(fmt_line("specified N", x$n_requested, digits = 0L), "\n", sep = "")
+  cat(fmt_line("actual N", x$n, digits = 0L), "\n", sep = "")
+  cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
+  print_design_block(x)
+  cat("\nEstimated power:\n")
+  cat(fmt_line("power", x$power), "\n", sep = "")
+  cat("\n")
+  invisible(x)
+}
+
+#' Coerce a stage-two result to a one-row data frame
+#'
+#' Column names are identical for every combination of data type, comparator and
+#' target, and for both [slope_sample_size()] and [slope_power()], which makes
+#' results from different designs and different questions safe to bind together.
+#' This differs deliberately from the Stata command, whose returned matrix renames
+#' its slope columns depending on which model was fitted.
+#'
+#' `solve_for` records which question produced the row --- `"n"` for
+#' [slope_sample_size()], `"power"` for [slope_power()]. It is derived from the
+#' object's class, and exists so that a bound table stays interpretable; the
+#' functions themselves have no such switch.
+#'
+#' @param x A `slope_sample_size` or `slope_power` object.
 #' @param row.names,optional Passed on for consistency with the generic; ignored.
 #' @param ... Ignored.
 #' @return A one-row data frame.
 #' @export
-as.data.frame.slope_power <- function(x, row.names = NULL, optional = FALSE, ...) {
+as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ...) {
   data.frame(
     alpha            = x$alpha,
     power            = x$power,
@@ -587,7 +719,7 @@ as.data.frame.slope_power <- function(x, row.names = NULL, optional = FALSE, ...
     n_follow_up      = length(x$design$visits) - 1L,
     n_obs            = as.numeric(x$params$n_obs %||% NA_real_),
     n_subjects       = as.numeric(x$params$n_subjects %||% NA_real_),
-    solve_for        = x$solve_for,
+    solve_for        = if (inherits(x, "slope_power")) "power" else "n",
     row.names        = row.names,
     stringsAsFactors = FALSE
   )

@@ -50,7 +50,7 @@ test_that("slpower3: control and treated arm slopes match the paper (p.594)", {
 
 test_that("p.588: annual visits over two years gives N = 712", {
   skip_without_paper_data()
-  r <- slope_power(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)
+  r <- slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
   expect_equal(r$n, 712)
   expect_equal(r$n_per_arm, 356)
@@ -61,7 +61,7 @@ test_that("p.588: annual visits over two years gives N = 712", {
 test_that("p.588: extended follow-up with 10% dropout gives N = 328", {
   skip_without_paper_data()
   d <- trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
-  r <- slope_power(paper_fit("slpower1"), d, effectiveness = 0.33)
+  r <- slope_sample_size(paper_fit("slpower1"), d, effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
   expect_equal(r$n, 328)
   expect_equal(r$n_per_arm, 164)
@@ -69,8 +69,8 @@ test_that("p.588: extended follow-up with 10% dropout gives N = 328", {
 
 test_that("p.589: six-monthly visits over two years gives N = 620", {
   skip_without_paper_data()
-  r <- slope_power(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
-                   effectiveness = 0.33)
+  r <- slope_sample_size(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
+                         effectiveness = 0.33)
   expect_equal(r$n, 620)
   expect_equal(r$n_per_arm, 310)
 })
@@ -87,14 +87,14 @@ test_that("p.589: the same design on a rescaled time axis also gives N = 620", {
   p <- slope_params(sdmt ~ time | id, d)
   expect_printed(p$slope, -0.836, "slope on the half-year axis")
 
-  r <- slope_power(p, 0:4, effectiveness = 0.33)
+  r <- slope_sample_size(p, 0:4, effectiveness = 0.33)
   expect_printed(r$tte, 0.276, "tte on the half-year axis")
   expect_equal(r$n, 620)
   expect_equal(r$n_per_arm, 310)
 
   # identical to the year-axis result
-  r_year <- slope_power(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
-                        effectiveness = 0.33)
+  r_year <- slope_sample_size(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
+                              effectiveness = 0.33)
   expect_equal(r$n, r_year$n)
   expect_equal(r$effect_size, r_year$effect_size, tolerance = 1e-8)
 })
@@ -106,7 +106,7 @@ test_that("p.589: the same design on a rescaled time axis also gives N = 620", {
 test_that("p.590: cases versus healthy controls gives N = 296", {
   skip_without_paper_data()
   p <- paper_fit("slpower2")
-  r <- slope_power(p, c(0, 1, 2), effectiveness = 0.33)
+  r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.888, "target treatment difference")
   expect_equal(r$n, 296)
   expect_equal(r$n_per_arm, 148)
@@ -120,7 +120,7 @@ test_that("p.593: N = 200 with 5% dropout per visit gives power 0.597", {
   # warning is expected here and is asserted rather than suppressed.
   d <- expect_warning(trial_design(c(0, 1, 2), dropout = c(0.05, 0.05)),
                       "contribute nothing")
-  r <- slope_power(paper_fit("slpower2"), d, effectiveness = 0.33, n = 200)
+  r <- slope_power(paper_fit("slpower2"), d, n = 200, effectiveness = 0.33)
   expect_printed(r$tte, 0.888, "target treatment difference")
   expect_printed(r$power, 0.597, "estimated power")
   expect_equal(r$n, 200)
@@ -137,7 +137,7 @@ test_that("p.594: targeting the previously observed effect gives N = 318", {
   # trial_design() warns about that; Stata skips the stratum silently.
   d <- expect_warning(trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)),
                       "contribute nothing")
-  r <- slope_power(paper_fit("slpower3"), d, target = "observed")
+  r <- slope_sample_size(paper_fit("slpower3"), d, target = "observed")
   expect_printed(r$tte, 0.747, "target treatment difference")
   expect_equal(r$n, 318)
   expect_equal(r$n_per_arm, 159)
@@ -148,7 +148,7 @@ test_that("p.594: powering for a fraction p of the observed effect scales as p^-
   # Paper section 4.1.3: "multiply the sample size above by 4" for p = 0.5.
   skip_without_paper_data()
   d <- suppressWarnings(trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)))
-  n_observed <- slope_power(paper_fit("slpower3"), d, target = "observed")$n
+  n_observed <- slope_sample_size(paper_fit("slpower3"), d, target = "observed")$n
   expect_equal(n_observed, 318)
   # 318 * 4 = 1272, the figure quoted in the paper
   expect_equal(n_observed * 4, 1272)
@@ -171,7 +171,7 @@ test_that("Table 1: all nine published powers reproduce", {
     dropout <- table1_dropout[[dropout_name]][[design_name]]
 
     d <- suppressWarnings(trial_design(visits, dropout = dropout))
-    r <- slope_power(p, d, effectiveness = 0.33, n = 450)
+    r <- slope_power(p, d, n = 450, effectiveness = 0.33)
 
     expect_printed(r$power, expected,
                    sprintf("Table 1 [%s / %s]", design_name, dropout_name))
@@ -189,7 +189,7 @@ test_that("Table 1: extra visits buy more power as dropout worsens", {
     d <- suppressWarnings(trial_design(
       table1_visits[[design_name]],
       dropout = table1_dropout[[dropout_name]][[design_name]]))
-    slope_power(p, d, effectiveness = 0.33, n = 450)$power
+    slope_power(p, d, n = 450, effectiveness = 0.33)$power
   }
 
   gain_none <- power_of("six_month", "none")  - power_of("final_only", "none")
@@ -217,7 +217,7 @@ test_that("every published sample size round-trips to its stated power", {
   )
   for (cs in cases) {
     d <- suppressWarnings(trial_design(cs$visits, dropout = cs$dropout))
-    r <- slope_power(paper_fit(cs$p), d, effectiveness = 0.33, n = cs$n)
+    r <- slope_power(paper_fit(cs$p), d, n = cs$n, effectiveness = 0.33)
     expect_gte(r$power, 0.8)
     expect_lt(r$power, 0.806)   # the ceiling() overshoot only
   }
@@ -226,11 +226,11 @@ test_that("every published sample size round-trips to its stated power", {
 test_that("the published examples tabulate with identical columns", {
   skip_without_paper_data()
   rows <- list(
-    as.data.frame(slope_power(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)),
-    as.data.frame(slope_power(paper_fit("slpower2"), c(0, 1, 2), effectiveness = 0.33)),
-    as.data.frame(slope_power(paper_fit("slpower3"),
-                              suppressWarnings(trial_design(c(0, 2, 3), c(0.2, 0.1))),
-                              target = "observed"))
+    as.data.frame(slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)),
+    as.data.frame(slope_sample_size(paper_fit("slpower2"), c(0, 1, 2), effectiveness = 0.33)),
+    as.data.frame(slope_sample_size(paper_fit("slpower3"),
+                                    suppressWarnings(trial_design(c(0, 2, 3), c(0.2, 0.1))),
+                                    target = "observed"))
   )
   reference <- names(rows[[1]])
   for (r in rows) expect_identical(names(r), reference)

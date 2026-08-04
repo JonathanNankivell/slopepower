@@ -1,4 +1,4 @@
-# Layer 4 --- slope_power_grid() and dropout_rate().
+# Layer 4 --- slope_power_grid(), slope_sample_size_grid() and dropout_rate().
 #
 # The point of the grid is section 4.2 of the paper: fit stage one once, then
 # price out many trial designs. In Stata each row of Table 1 refits the mixed
@@ -61,7 +61,7 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
 
   for (nm in names(table1_visits)) {
     direct <- slope_power(p, trial_design(table1_visits[[nm]]),
-                          effectiveness = 0.33, n = 450)$power
+                          n = 450, effectiveness = 0.33)$power
     expect_equal(out$power[out$design == nm], direct, tolerance = 1e-12)
   }
 })
@@ -86,9 +86,9 @@ test_that("slope_power_grid() reproduces all nine Table 1 powers in one call", {
   }
 })
 
-test_that("slope_power_grid() can solve for sample size as well as power", {
+test_that("slope_sample_size_grid() reports the N each design needs", {
   skip_without_paper_data()
-  out <- suppressWarnings(slope_power_grid(
+  out <- suppressWarnings(slope_sample_size_grid(
     paper_fit("slpower1"),
     visits = list(annual = c(0, 1, 2)),
     dropout = list(none = NULL),
@@ -97,16 +97,70 @@ test_that("slope_power_grid() can solve for sample size as well as power", {
   expect_equal(nrow(out), 1L)
   expect_equal(out$n, 712)
   expect_equal(out$n_per_arm, 356)
+  # power is the held-constant input on this side of the split
+  expect_equal(out$power, 0.8)
 })
 
-test_that("slope_power_grid() accepts explicit dropout vectors", {
+test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
   skip_without_paper_data()
-  out <- suppressWarnings(slope_power_grid(
+  out <- suppressWarnings(slope_sample_size_grid(
     paper_fit("slpower1"),
     visits = list(extended = c(0, 1, 2, 5)),
     dropout = list(tenpc_final = c(0, 0, 0.1)),
     power = 0.8, effectiveness = 0.33))
   expect_equal(out$n, 328)
+})
+
+test_that("slope_sample_size_grid() agrees with slope_sample_size() cell by cell", {
+  skip_without_paper_data()
+  p <- paper_fit("slpower1")
+  out <- suppressWarnings(slope_sample_size_grid(
+    p, visits = table1_visits, dropout = list(none = NULL),
+    power = 0.9, effectiveness = 0.33))
+
+  for (nm in names(table1_visits)) {
+    direct <- slope_sample_size(p, trial_design(table1_visits[[nm]]),
+                                power = 0.9, effectiveness = 0.33)$n
+    expect_equal(out$n[out$design == nm], direct)
+  }
+})
+
+test_that("the two grids are inverses, design by design", {
+  # Same shared loop, same dropout expansion: feeding one grid's N back into the
+  # other must recover the target power in every cell.
+  skip_without_paper_data()
+  p <- paper_fit("slpower1")
+  sizes <- suppressWarnings(slope_sample_size_grid(
+    p, visits = table1_visits, dropout = list(`5pc` = dropout_rate(0.05)),
+    power = 0.8, effectiveness = 0.33))
+  expect_identical(names(sizes),
+                   names(suppressWarnings(slope_power_grid(
+                     p, visits = table1_visits,
+                     dropout = list(`5pc` = dropout_rate(0.05)),
+                     n = 450, effectiveness = 0.33))))
+  for (i in seq_len(nrow(sizes))) {
+    des <- suppressWarnings(trial_design(
+      table1_visits[[sizes$design[i]]],
+      dropout = dropout_rate(0.05)$rate * diff(table1_visits[[sizes$design[i]]])))
+    back <- slope_power(p, des, n = sizes$n[i], effectiveness = 0.33)
+    expect_gte(back$power, 0.8)
+    expect_lt(back$power - 0.8, 0.005)
+  }
+})
+
+test_that("each grid requires the input its question needs", {
+  skip_without_paper_data()
+  p <- paper_fit("slpower1")
+  # slope_power_grid() holds n fixed; without it there is nothing to evaluate
+  expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2))), "`n` is required")
+  expect_match(tryCatch(slope_power_grid(p, visits = list(a = c(0, 1, 2))),
+                        error = conditionMessage),
+               "slope_sample_size_grid")
+  # and neither accepts the other's input
+  expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2)), n = 450, power = 0.8),
+               "unused argument")
+  expect_error(slope_sample_size_grid(p, visits = list(a = c(0, 1, 2)), n = 450),
+               "unused argument")
 })
 
 test_that("a dropout vector of the wrong length for a design errors helpfully", {

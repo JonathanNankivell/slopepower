@@ -16,8 +16,8 @@ Reference: Nash, Morgan, Frost & Mulick (2021), *Stata Journal* 21(3): 575–601
 | `R/utils.R` | (foundation, already written) | shared validators, `%||%`, `qnorm` helpers |
 | `R/design.R` | Layer 2 | `trial_design()`, `print.trial_design()` |
 | `R/params.R` | Layer 1 | `slope_params()`, `slope_params_manual()`, `print.slope_params()` |
-| `R/power.R` | Layer 3 | `slope_sigma()`, `slope_var()`, `slope_effect_size()`, `slope_power()`, `print.slope_power()`, `as.data.frame.slope_power()` |
-| `R/grid.R`, `R/bootstrap.R`, `R/compat.R` | Layer 4 | `slope_power_grid()`, `slope_bootstrap()`, `slopepower()` |
+| `R/power.R` | Layer 3 | `slope_sigma()`, `slope_var()`, `slope_effect_size()`, `slope_sample_size()`, `slope_power()`, their `print` methods, `as.data.frame.slope_result()` |
+| `R/grid.R`, `R/bootstrap.R`, `R/compat.R` | Layer 4 | `slope_sample_size_grid()`, `slope_power_grid()`, `slope_bootstrap()`, `slopepower()` |
 
 **Touch only your own files.** `R/utils.R` is read-only for all layers.
 
@@ -95,14 +95,33 @@ list(
 
 ---
 
-## 4. `slope_power` result object (Layer 3)
+## 4. Stage-two result objects (Layer 3)
 
-S3 class `"slope_power"`, a list with **exactly** these fields:
+Sample size and power are **two exported functions, not one function with a mode switch**. They
+take different inputs, answer different questions, and return differently shaped objects:
+
+```r
+slope_sample_size(params, design, effectiveness = 0.25, target, power = 0.8, alpha = 0.05)
+slope_power(params, design, n, effectiveness = 0.25, target, alpha = 0.05)
+```
+
+`n` is `slope_power()`'s third argument and is **required** — there is no default sample size to
+fall back on. `power` is an ordinary argument of `slope_sample_size()` with its default in the
+signature. Neither accepts the other's input: `slope_sample_size(..., n = 450)` and
+`slope_power(..., power = 0.8)` are "unused argument" errors from R's own argument matching, so
+the mismatch that used to be silently resolved by which argument was left `NULL` can no longer be
+expressed. **Do not reintroduce a combined entry point**, and do not give `n` a default.
+
+Both classes inherit from `"slope_result"`, which is what `as.data.frame()` dispatches on.
+
+### 4.1 `slope_sample_size`
+
+S3 class `c("slope_sample_size", "slope_result")`, a list with **exactly** these 13 fields:
 
 ```r
 list(
-  n, n_per_arm, n_requested,     # n_requested = user's n before the even-number adjustment; NA when solving for n
-  power, alpha,
+  n, n_per_arm,
+  power, alpha,                  # power is the input here
   effectiveness,                 # NA_real_ when target == "observed"
   target,                        # "effectiveness" or "observed"
   tte,                           # target treatment effect, beta_2
@@ -110,10 +129,19 @@ list(
   effect_size,                   # dropout-weighted standardised effect, signed
   slope_difference,              # slope - reference_slope
   reference_slope,
-  solve_for,                     # "n" or "power"
   params, design                 # the input objects, retained
 )
 ```
+
+### 4.2 `slope_power`
+
+S3 class `c("slope_power", "slope_result")`. The same 13 fields, plus `n_requested` after
+`n_per_arm` — the user's `n` before the even-number adjustment — for 14 in total. `n` is the input
+here and `power` the output.
+
+There is **no `solve_for` field**: the class carries that information. `as.data.frame()` still
+emits a `solve_for` column, derived from the class, so that rows from both functions bind into one
+interpretable table. Column names are identical across both classes and every comparator.
 
 ---
 
@@ -201,15 +229,19 @@ Both directions, matching Stata exactly:
 ```r
 z_a <- qnorm(1 - alpha / 2)
 
-# solving for n:
+# slope_sample_size():
 n_per_arm <- ceiling((z_a + qnorm(power))^2 / (effect_size * effectiveness)^2)
 n         <- 2 * n_per_arm
 
-# solving for power:
+# slope_power():
 n_actual  <- 2 * floor(n_requested / 2)        # force even, split 1:1
 n_per_arm <- n_actual / 2
 power     <- pnorm(abs(effect_size) * effectiveness * sqrt(n_per_arm) - z_a)
 ```
+
+Both live in one internal `solve_slope()`, called by the two exported functions. The **interfaces**
+are separate; the **algebra** is shared, so the sample size a design needs and the power it
+achieves cannot drift apart.
 
 The `effectiveness` factor appears here **in addition to** its appearance inside `tte`. This is
 **not** double counting: `effect_size` is on the `slope_difference` scale while `tte` is on the
@@ -220,12 +252,25 @@ The `effectiveness` factor appears here **in addition to** its appearance inside
 ### 5.6 Reported `var_tte`
 
 ```
-no dropout : var_tte = slope_var(params, visits)
-dropout    : var_tte = n_per_arm * tte^2 / (z_a + qnorm(power))^2
+no dropout                     : var_tte = slope_var(params, visits)
+dropout, slope_sample_size()   : var_tte = n_per_arm * tte^2 / (z_a + qnorm(power))^2
+dropout, slope_power()         : var_tte = tte^2 / (effect_size * effectiveness)^2
 ```
 
 The dropout branch back-solves the effective s*² because no single value applies across strata.
-It is self-consistent in both the sample-size and the power branch (the algebra cancels).
+
+The two dropout forms are the same algebra but **not** the same number, and the difference is
+real rather than a rounding artefact to be papered over. Solving for power, `qnorm` inverts the
+`pnorm` above and `n_per_arm` cancels exactly, leaving `tte^2 / scaled_effect^2` — the true
+effective s*², independent of `n`. That closed form is used directly. It is not merely a
+simplification: past a few thousand per arm the power saturates at exactly 1 in double precision,
+`qnorm(1)` is `Inf`, and the round trip silently reported `var_tte = 0`.
+
+Solving for n there is no such cancellation, because `n_per_arm` has been rounded up to a whole
+participant. The reported value carries that rounding and is slightly larger than the exact one,
+bounded above by `n_per_arm / (n_per_arm - 1)` times it. This matches the Stata original, which
+reports the same rounded quantity. Do not "fix" the two branches into agreement — assert the
+inequality instead.
 
 ---
 
@@ -237,7 +282,11 @@ Errors (not warnings, not silent `NA`):
   we error with a clear message.
 - `alpha` outside (0, 1); `power` outside (0, 1); `effectiveness` outside (0, 1]
 - `n < 2`, or non-integer `n`
-- both or neither of `n` and `power` supplied (default: `power = 0.8` when both are `NULL`)
+- `n` missing from `slope_power()` (there is no default sample size), and likewise from
+  `slope_power_grid()`
+- `slopepower()` only: both `n` and `power` supplied. The Stata command's single bimodal
+  interface is mirrored **in the compatibility wrapper alone**; `power` defaults to 0.8 there when
+  neither is given.
 - `length(dropout) != length(visits) - 1`
 - `sum(dropout) > 1 + 1e-8`
 - non-positive variance components in `slope_params_manual()`
@@ -259,6 +308,9 @@ exactly 1 in decimal and must be accepted; naive accumulation makes it `-6.7e-17
 
 All from Nash et al. (2021). Data files are `../slpower1.dta`, `../slpower2.dta`, `../slpower3.dta`
 relative to the package root, read with `haven::read_dta()`.
+
+Rows with an expected **N** are `slope_sample_size()` calls; the one row with an expected **power**
+is a `slope_power()` call.
 
 `slpower1` — 200 subjects, `visit` 0..3, single group, `effectiveness = 0.33`:
 

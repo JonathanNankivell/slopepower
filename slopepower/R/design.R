@@ -16,7 +16,7 @@ fmt_call_vec <- function(x) {
 #'
 #' `trial_design()` bundles the design of a *future* trial --- when participants
 #' are seen, and what proportion are expected to withdraw at each point --- into
-#' a validated object that can be reused across many [slope_power()] calls. It
+#' a validated object that can be reused across many stage-two calls. It
 #' carries no information about the outcome or its variability; that lives in the
 #' [slope_params] object.
 #'
@@ -73,7 +73,7 @@ fmt_call_vec <- function(x) {
 #' trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
 #'              dropout_type = "cumulative")
 #'
-#' @seealso [slope_params()], [slope_power()]
+#' @seealso [slope_params()], [slope_sample_size()], [slope_power()]
 #' @export
 trial_design <- function(visits,
                          dropout = NULL,

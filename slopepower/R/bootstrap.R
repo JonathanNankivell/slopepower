@@ -124,9 +124,11 @@ slope_se <- function(params) {
 #'   accelerated intervals. The paper recommends BCa because the distribution of
 #'   estimated sample sizes is typically skewed.
 #' @param statistic Which quantity to bootstrap. `"n"`, `"power"` and `"tte"`
-#'   require the design arguments of [slope_power()] to be supplied in `...`.
-#' @param ... Passed to [slope_power()]; typically `design`, `effectiveness`, and
-#'   one of `n` or `power`.
+#'   require a `design` in `...`. Each is computed through the entry point that
+#'   solves for it: `"power"` through [slope_power()], which needs `n`; `"n"` and
+#'   `"tte"` through [slope_sample_size()], which takes a target `power` instead.
+#' @param ... Passed to [slope_power()] or [slope_sample_size()] according to
+#'   `statistic`; typically `design`, `effectiveness`, and `n` or `power`.
 #' @param level Confidence level for the interval.
 #' @param seed Optional integer seed, for reproducibility.
 #' @param progress Report progress while resampling.
@@ -145,7 +147,7 @@ slope_se <- function(params) {
 #' slope_bootstrap(pars, R = 200, design = c(0, 1, 2), effectiveness = 0.33)
 #' }
 #'
-#' @seealso [slope_power()], [slope_params()]
+#' @seealso [slope_sample_size()], [slope_power()], [slope_params()]
 #' @export
 slope_bootstrap <- function(params, R = 199,
                             type = c("percentile", "bca"),
@@ -163,29 +165,38 @@ slope_bootstrap <- function(params, R = 199,
   if (needs_design && is.null(dots$design)) {
     stop(sprintf('%s: statistic = "%s" needs a trial design; pass `design` (and any of ',
                  context, statistic),
-         "`effectiveness`, `n`, `power`, `alpha`) through `...`.", call. = FALSE)
+         "`effectiveness`, `alpha`, and `n` or `power`) through `...`.", call. = FALSE)
   }
-  # `slope_power()` solves for whichever of n and power is absent, so a mismatch
-  # here bootstraps the *input* rather than an estimate: every replicate returns
-  # the value the user supplied, and the result looks like a successful
-  # bootstrap with a zero-width interval.
+  # Each statistic is bootstrapped through the entry point that solves for it, so
+  # the quantity being resampled must be an output of that call and not one of
+  # its inputs. Supplying it as an input bootstraps the user's own number:
+  # every replicate returns it unchanged, giving a zero-width interval that looks
+  # like a successful bootstrap.
   if (identical(statistic, "power") && is.null(dots$n)) {
     stop(sprintf(paste0(
-      '%s: statistic = "power" requires `n`, otherwise slope_power() solves for ',
-      "n instead and every replicate returns the target power unchanged, giving ",
-      "a zero-width interval."), context), call. = FALSE)
+      '%s: statistic = "power" requires `n` -- it is the sample size whose power ',
+      "is being bootstrapped."), context), call. = FALSE)
   }
-  if (identical(statistic, "n") && !is.null(dots$n)) {
+  if (identical(statistic, "power") && !is.null(dots$power)) {
     stop(sprintf(paste0(
-      '%s: statistic = "n" bootstraps the required sample size, so `n` must not ',
-      "be supplied; with it, slope_power() solves for power and every replicate ",
-      "returns the `n` you passed in."), context), call. = FALSE)
+      '%s: statistic = "power" bootstraps the power, so `power` must not be ',
+      "supplied as an input. Pass `n` instead."), context), call. = FALSE)
+  }
+  if (statistic %in% c("n", "tte") && !is.null(dots$n)) {
+    stop(sprintf(paste0(
+      '%s: statistic = "%s" is computed by slope_sample_size(), which takes a ',
+      "target `power` rather than an `n`; every replicate would otherwise return ",
+      "the `n` you passed in."), context, statistic), call. = FALSE)
   }
 
   compute <- function(p) {
-    if (identical(statistic, "slope")) return(p$slope)
-    res <- do.call(slope_power, c(list(params = p), dots))
-    switch(statistic, n = res$n, power = res$power, tte = res$tte)
+    switch(statistic,
+           slope = p$slope,
+           power = do.call(slope_power, c(list(params = p), dots))$power,
+           n     = do.call(slope_sample_size, c(list(params = p), dots))$n,
+           # tte depends on neither n nor power; slope_sample_size() is simply the
+           # entry point that needs no extra input to reach it.
+           tte   = do.call(slope_sample_size, c(list(params = p), dots))$tte)
   }
 
   observed <- compute(params)

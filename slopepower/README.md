@@ -44,19 +44,31 @@ library(slopepower)
 #   formula is  outcome ~ time | subject
 pars <- slope_params(sdmt ~ visit | id, data = mydata)
 
-# Stage 2 — describe the proposed trial and solve.
+# Stage 2 — describe the proposed trial.
 design <- trial_design(visits = c(0, 1, 2))          # baseline + two follow-ups
 
-slope_power(pars, design, effectiveness = 0.33)      # solve for N at 80% power
-slope_power(pars, design, effectiveness = 0.33, n = 200)   # solve for power at N = 200
+# Then ask one of the two questions.
+slope_sample_size(pars, design, effectiveness = 0.33)             # how many people?
+slope_power(pars, design, n = 200, effectiveness = 0.33)          # what power at N = 200?
 ```
 
-`slope_power()` returns a `slope_power` object that prints a formatted summary;
-`as.data.frame()` gives one tidy row. Supply exactly one of `n` and `power`
-(neither means `power = 0.8`). `alpha` defaults to 0.05, two-sided.
+The two are separate functions on purpose. They take different inputs, answer
+different questions, and return differently shaped objects, so there is no
+argument you can leave out to switch between them:
+
+| | input | output | class |
+|---|---|---|---|
+| `slope_sample_size()` | `power` (default 0.8) | `n`, `n_per_arm` | `slope_sample_size` |
+| `slope_power()` | `n` (required) | `power` | `slope_power` |
+
+Both print a formatted summary, and both have an `as.data.frame()` method giving
+one tidy row with the same columns, so results from either can be bound into one
+table — a `solve_for` column records which question produced each row. `alpha`
+defaults to 0.05, two-sided.
 
 `design` may be a bare numeric vector of visit times instead of a `trial_design`
-object, so `slope_power(pars, c(0, 1, 2), effectiveness = 0.33)` also works.
+object, so `slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)` also
+works.
 
 ### Units of time
 
@@ -81,9 +93,9 @@ slope_params(y ~ t | id, data = d, treated = treat)   # previous RCT: treated (1
 ```
 
 `healthy` and `treated` take bare column names and are mutually exclusive. With
-`treated`, `slope_power(..., target = "observed")` targets the treatment effect
-actually observed in that trial (Stata's `usetrt`) instead of an `effectiveness`
-fraction of the slope difference.
+`treated`, `target = "observed"` targets the treatment effect actually observed
+in that trial (Stata's `usetrt`) instead of an `effectiveness` fraction of the
+slope difference.
 
 ### Dropout
 
@@ -114,17 +126,28 @@ pars <- slope_params_manual(
 
 ## Comparing many designs
 
+The grid functions split the same way:
+
 ```r
+# power of each design at a fixed N — this is table 1 of the paper
 slope_power_grid(
   pars, n = 450, effectiveness = 0.33,
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 )
+
+# N each design needs for a fixed power
+slope_sample_size_grid(
+  pars, power = 0.8, effectiveness = 0.33,
+  visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+  dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+)
 ```
 
-Returns one row per visits × dropout combination. Use `dropout_rate(rate, per = 1)`
-rather than a fixed vector when schedules have different numbers of visits, so the
-same withdrawal rate is expanded correctly for each.
+Both return one row per visits × dropout combination, with identical columns. Use
+`dropout_rate(rate, per = 1)` rather than a fixed vector when schedules have
+different numbers of visits, so the same withdrawal rate is expanded correctly for
+each.
 
 ## Uncertainty in the stage-one estimates
 
@@ -137,11 +160,17 @@ Resamples subjects (stratified by group where relevant) and refits the mixed mod
 each time, so it is slow — start with a small `R`. Needs a `slope_params` object
 from `slope_params()`; manually supplied parameters carry no data to resample.
 
+`statistic` picks the entry point: `"power"` goes through `slope_power()` and so
+needs an `n` in `...`, while `"n"` and `"tte"` go through `slope_sample_size()`
+and take a target `power` instead. Passing the statistic you are bootstrapping as
+an input is an error rather than a zero-width interval.
+
 ## Porting existing Stata scripts
 
 `slopepower()` mirrors the Stata command's interface argument for argument —
 `schedule` lists follow-up visits only, `dropouts` aligns with it, `scale` divides
-time, and the data type is declared with `obs`/`rct`:
+time, the data type is declared with `obs`/`rct`, and a single call computes
+either a sample size or a power depending on whether you pass `power` or `n`:
 
 ```r
 d <- haven::read_dta("slpower1.dta")
@@ -149,12 +178,15 @@ slopepower(d, "sdmt", "id", "visit", schedule = c(1, 2),
            obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)
 ```
 
-Use it for mechanical translation and parity checks; prefer the three-function
-pipeline above for new work.
+That last point is the one thing the wrapper keeps that new code should not: it
+is Stata's bimodal interface, preserved deliberately for parity. Use `slopepower()`
+for mechanical translation and parity checks; prefer the pipeline above —
+`slope_params()`, `trial_design()`, then `slope_sample_size()` or `slope_power()` —
+for new work.
 
 ## Notes
 
-- The package has no generated `man/` pages, so `?slope_power` will not work after
+- The package has no generated `man/` pages, so `?slope_sample_size` will not work after
   installing. The roxygen comments above each function in `R/` are the reference,
   and `CONTRACT.md` documents the mathematics and the deliberate divergences from
   the Stata original.
