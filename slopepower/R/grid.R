@@ -299,7 +299,10 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
                              target = c("effectiveness", "observed"),
                              alpha = 0.05) {
   context <- "slope_power_grid()"
-  if (missing(n)) {
+  # `is.null(n)` too; see the note on the same guard in slope_power(). Without
+  # it the failure surfaces from inside the loop, wrapped in a per-cell message,
+  # and complains about `power` rather than the missing `n`.
+  if (missing(n) || is.null(n)) {
     stop(sprintf(paste0(
       "%s: `n` is required -- this grid holds the sample size fixed and reports\n",
       "  the power each design achieves. For the sample size each design needs,\n",

@@ -182,11 +182,22 @@ slope_bootstrap <- function(params, R = 199,
       '%s: statistic = "power" bootstraps the power, so `power` must not be ',
       "supplied as an input. Pass `n` instead."), context), call. = FALSE)
   }
-  if (statistic %in% c("n", "tte") && !is.null(dots$n)) {
+  if (identical(statistic, "n") && !is.null(dots$n)) {
     stop(sprintf(paste0(
-      '%s: statistic = "%s" is computed by slope_sample_size(), which takes a ',
-      "target `power` rather than an `n`; every replicate would otherwise return ",
-      "the `n` you passed in."), context, statistic), call. = FALSE)
+      '%s: statistic = "n" bootstraps the required sample size, so `n` must not ',
+      "be supplied as an input; every replicate would otherwise return the `n` ",
+      "you passed in. Pass a target `power` instead."), context), call. = FALSE)
+  }
+  # `tte` is a different case and needs its own message. It depends on neither
+  # `n` nor `power`, so passing `n` is not the bootstrap-your-own-input mistake
+  # above -- it is simply an argument slope_sample_size() does not take, and it
+  # is rejected only because silently discarding it is worse.
+  if (identical(statistic, "tte") && !is.null(dots$n)) {
+    stop(sprintf(paste0(
+      '%s: statistic = "tte" does not depend on the sample size -- the target ',
+      "treatment effect is fixed by the slopes and `effectiveness` alone. It is ",
+      "reached through slope_sample_size(), which takes no `n`, so drop the ",
+      "argument rather than have it silently ignored."), context), call. = FALSE)
   }
 
   compute <- function(p) {

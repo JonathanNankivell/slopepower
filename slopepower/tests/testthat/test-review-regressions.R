@@ -110,15 +110,50 @@ test_that("slope_bootstrap() rejects a statistic that would bootstrap its own in
   expect_error(
     slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2), n = 400,
                     effectiveness = 0.33),
-    'slope_sample_size\\(\\)')
+    'must not be supplied as an input')
   expect_error(
     slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2), n = 400,
                     power = 0.8, effectiveness = 0.33),
     'must not be')
-  expect_error(
+  # "tte" gets its own message. It depends on neither n nor power, so the
+  # bootstrap-your-own-input rationale above does not apply to it; saying it did
+  # would have told a caller something false about their own call.
+  err <- tryCatch(
     slope_bootstrap(p, R = 5, statistic = "tte", design = c(0, 1, 2), n = 400,
                     effectiveness = 0.33),
-    'slope_sample_size\\(\\)')
+    error = conditionMessage)
+  expect_match(err, "does not depend on the sample size")
+  expect_false(grepl("every replicate", err))
+
+  # and it still works once the irrelevant argument is dropped
+  b <- suppressWarnings(slope_bootstrap(p, R = 3, statistic = "tte",
+                                        design = c(0, 1, 2), effectiveness = 0.33))
+  expect_equal(b$observed, slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$tte)
+})
+
+test_that("an explicit n = NULL is caught by the guard, not by the solver", {
+  # solve_slope() picks its branch on is.null(n) while the guards were checking
+  # missing(n), so `n = NULL` -- what do.call() produces from an argument list
+  # with an unset element -- slipped through into the solve-for-n branch and
+  # failed with "`power` must be a single finite number", naming an argument
+  # slope_power() does not have.
+  p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
+                           sigma2_slope = 2, sigma_cov = 5, sigma2_residual = 10)
+
+  for (call_it in list(
+    function() slope_power(p, c(0, 1, 2), n = NULL),
+    function() do.call(slope_power, list(params = p, design = c(0, 1, 2), n = NULL))
+  )) {
+    err <- tryCatch(call_it(), error = conditionMessage)
+    expect_match(err, "`n` is required")
+    expect_false(grepl("`power` must be", err))
+  }
+
+  err_grid <- tryCatch(slope_power_grid(p, visits = list(a = c(0, 1, 2)), n = NULL),
+                       error = conditionMessage)
+  expect_match(err_grid, "`n` is required")
+  # the old failure surfaced from inside the loop, wrapped per cell
+  expect_false(grepl("failed", err_grid))
 })
 
 test_that("slope_effect_size() takes no effectiveness argument", {

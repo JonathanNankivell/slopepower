@@ -567,7 +567,12 @@ slope_power <- function(params, design, n,
                         target = c("effectiveness", "observed"),
                         alpha = 0.05) {
   context <- "slope_power()"
-  if (missing(n)) {
+  # `is.null(n)` as well as `missing(n)`: solve_slope() picks its branch on
+  # is.null(), so an explicit n = NULL -- the shape a programmatic caller gets
+  # from do.call() with an unset element -- would otherwise slip past this guard
+  # into the solve-for-n branch and fail complaining about `power`, an argument
+  # this function does not have.
+  if (missing(n) || is.null(n)) {
     stop(sprintf(paste0(
       "%s: `n` is required -- it is the sample size whose power is being\n",
       "  evaluated. To solve for the sample size that achieves a given power,\n",
