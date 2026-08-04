@@ -203,10 +203,9 @@ compare_stata_grid <- function(stem) {
     info = stata_mismatch_report(bad, c("o_tte", "r_tte"), paste0(stem, ": tte"))
   )
 
-  # 6. var_tte, on the rows where the two are defined the same way. With
-  #    dropout and solving for power the definitions differ by construction ---
-  #    see CONTRACT.md section 5.6 --- so those rows get the inequality instead.
-  same_def <- ok[!nzchar(ok$drops) | ok$mode == "power", , drop = FALSE]
+  # 6. var_tte, on the rows where the two are defined the same way; the
+  #    predicate is CONTRACT.md 5.6 and lives in the helper.
+  same_def <- ok[stata_var_tte_comparable(ok), , drop = FALSE]
   bad <- same_def[!is.na(same_def$o_var_tte) &
                     rel_diff(same_def$o_var_tte, same_def$r_var_tte) > TOL_DERIV,
                   , drop = FALSE]
@@ -217,11 +216,11 @@ compare_stata_grid <- function(stem) {
   )
 
   # 7. The fit used the same data. Guarded on both columns, not just o_obs: a
-  #    missing o_subjects would otherwise select an all-NA row and the failure
-  #    would print as NA rather than as the mismatch report.
-  bad <- ok[which(!is.na(ok$o_obs) & !is.na(ok$o_subjects) &
-                    (ok$o_obs != ok$r_obs |
-                       ok$o_subjects != ok$r_subjects)), , drop = FALSE]
+  #    missing o_subjects would otherwise leave the mask NA, select an all-NA
+  #    row, and print the failure as NA rather than as the mismatch report.
+  bad <- ok[!is.na(ok$o_obs) & !is.na(ok$o_subjects) &
+              (ok$o_obs != ok$r_obs |
+                 ok$o_subjects != ok$r_subjects), , drop = FALSE]
   testthat::expect_equal(
     nrow(bad), 0,
     info = stata_mismatch_report(bad, c("o_obs", "r_obs", "o_subjects",
@@ -232,13 +231,16 @@ compare_stata_grid <- function(stem) {
   # 8. The effectiveness both sides report. On these rows it is an echo of the
   #    input, or of the default when `effin` is blank, so this is not a test of
   #    the arithmetic --- it is a test that the two defaults agree and that the
-  #    value survives the round trip. usetrt rows are excluded because the port
-  #    deliberately reports NA there rather than Stata's back-computed value;
-  #    that divergence is pinned in test-stata-behaviour.R instead. Without
-  #    this the harness collected r_effectiveness and compared it to nothing.
-  eff <- ok[which(ok$usetrt != 1 & !is.na(ok$o_effectiveness)), , drop = FALSE]
-  bad <- eff[which(rel_diff(eff$o_effectiveness, eff$r_effectiveness) > 1e-9),
-             , drop = FALSE]
+  #    value survives the round trip. Asserted exactly, with no tolerance: both
+  #    sides parse the same decimal string to the same double, and all 525
+  #    comparable rows agree bit for bit. A tolerance here would only hide the
+  #    one thing this can catch.
+  #
+  #    usetrt rows are excluded because the port deliberately reports NA there
+  #    rather than Stata's back-computed value; that divergence is pinned in
+  #    test-stata-behaviour.R instead.
+  eff <- ok[ok$usetrt != 1 & !is.na(ok$o_effectiveness), , drop = FALSE]
+  bad <- eff[eff$o_effectiveness != eff$r_effectiveness, , drop = FALSE]
   testthat::expect_equal(
     nrow(bad), 0,
     info = stata_mismatch_report(bad, c("o_effectiveness", "r_effectiveness"),
@@ -271,25 +273,18 @@ test_that("the committed fixtures are the ones the manifest describes", {
   }
 })
 
-test_that("grid 1: the stage-two arithmetic matches Stata", {
-  skip_without_stata_reference("01_grid_arithmetic")
-  compare_stata_grid("01_grid_arithmetic")
-})
-
-test_that("grid 2: the comparator branches match Stata", {
-  skip_without_stata_reference("02_grid_comparators")
-  compare_stata_grid("02_grid_comparators")
-})
-
-test_that("grid 3: scaled and subsetted fits match Stata", {
-  skip_without_stata_reference("03_grid_fits")
-  compare_stata_grid("03_grid_fits")
-})
-
-test_that("grid 4: boundaries and guards match Stata where they should", {
-  skip_without_stata_reference("04_edge_cases")
-  compare_stata_grid("04_edge_cases")
-})
+# One test_that per grid, so a failure names the grid rather than one of four
+# indistinguishable iterations --- but driven off DESIGN_GRIDS so that the set
+# of grids under test is stated once, here and in the exact test below.
+for (stem in names(DESIGN_GRIDS)) {
+  local({
+    stem <- stem
+    test_that(DESIGN_GRIDS[[stem]], {
+      skip_without_stata_reference(stem)
+      compare_stata_grid(stem)
+    })
+  })
+}
 
 # ---------------------------------------------------------------------------
 # The tolerance-free comparison
@@ -369,13 +364,10 @@ test_that("with Stata's own variance components the arithmetic is exact", {
   fits <- read_stata_reference("05_variance_components")
   expect_true(all(fits$converged == 1))
 
-  # All four design grids, grid 4 included. Grid 4 is the one that most needs
-  # it: its EFF-0.0001 and SCALE-0.001 rows drive N to 7.7e9 and 4.5e8, where
-  # the REML gap moves N by thousands and the loose bound above is excused on
-  # the grounds that "the exact test carries the real burden" (see the note at
-  # the N comparison). That is only true if grid 4 reaches this loop.
-  for (stem in c("01_grid_arithmetic", "02_grid_comparators", "03_grid_fits",
-                 "04_edge_cases")) {
+  # Every design grid, grid 4 included: the loose N bound above is excused on
+  # the grounds that this exact test carries the real burden, which is only
+  # true if the grid it excuses reaches this loop.
+  for (stem in names(DESIGN_GRIDS)) {
     skip_without_stata_reference(stem)
     grid <- read_stata_reference(stem)
     grid <- grid[grid$rc == 0 & !grid$tag %in% c(STATA_ONLY, KNOWN_DIVERGENCES),
@@ -392,18 +384,16 @@ test_that("with Stata's own variance components the arithmetic is exact", {
       args <- list(params = p, design = des, alpha = row$alpha)
       if (isTRUE(row$usetrt == 1)) args$target <- "observed"
       else if (nzchar(row$effin)) args$effectiveness <- as.numeric(row$effin)
-      out <- tryCatch(suppressWarnings(
+      # No tryCatch. Every row reaching here survived the filter above, so both
+      # implementations accept it and a refusal is a finding: letting the error
+      # surface names the call and the reason, where catching it would drop the
+      # row and leave the suite green over one row fewer. It also keeps `res`
+      # row-for-row with j$grid, so the mask below can be built from the frame
+      # it indexes rather than from a different object of assumed equal length.
+      out <- suppressWarnings(
         if (row$mode == "n") do.call(slope_power, c(args, list(n = row$nin)))
         else do.call(slope_sample_size, c(args, list(power = row$pin)))
-      ), error = function(e) NULL)
-      if (is.null(out)) return(NULL)
-      # drops and mode travel with the row rather than being read back off
-      # j$grid later: a row whose replay errors is dropped from `res` here, so
-      # any mask built from j$grid would be the wrong length and would silently
-      # recycle against a shorter frame. Today nothing errors; the first
-      # deliberate divergence added without its KNOWN_DIVERGENCES tag would
-      # make it error, and the misalignment would corrupt the comparison
-      # instead of failing it.
+      )
       data.frame(tag = row$tag, drops = row$drops, mode = row$mode,
                  o_n = row$o_n, r_n = out$n,
                  o_power = row$o_power, r_power = out$power,
@@ -411,23 +401,21 @@ test_that("with Stata's own variance components the arithmetic is exact", {
                  stringsAsFactors = FALSE)
     })
     res <- do.call(rbind, res)
-    # Every joined row must have replayed; see the note above.
-    expect_equal(nrow(res), nrow(j$grid))
 
-    bad <- res[which(res$o_n != res$r_n), , drop = FALSE]
+    bad <- res[!is.na(res$o_n) & res$o_n != res$r_n, , drop = FALSE]
     expect_equal(nrow(bad), 0,
                  info = stata_mismatch_report(bad, c("o_n", "r_n"),
                                               paste0(stem, ": exact N")))
 
-    bad <- res[which(abs(res$o_power - res$r_power) > 1e-12), , drop = FALSE]
+    bad <- res[!is.na(res$o_power) &
+                 abs(res$o_power - res$r_power) > 1e-12, , drop = FALSE]
     expect_equal(nrow(bad), 0,
                  info = stata_mismatch_report(bad, c("o_power", "r_power"),
                                               paste0(stem, ": exact power")))
 
-    # var_tte only where the two are defined the same way; the dropout-plus-
-    # power rows differ by construction, per CONTRACT.md 5.6.
-    same_def <- !nzchar(res$drops) | res$mode == "power"
-    v <- res[same_def & !is.na(res$o_var_tte), , drop = FALSE]
+    # var_tte only where the two are defined the same way, per CONTRACT.md 5.6.
+    v <- res[stata_var_tte_comparable(res) & !is.na(res$o_var_tte), ,
+             drop = FALSE]
     bad <- v[rel_diff(v$o_var_tte, v$r_var_tte) > 1e-12, , drop = FALSE]
     expect_equal(nrow(bad), 0,
                  info = stata_mismatch_report(bad, c("o_var_tte", "r_var_tte"),

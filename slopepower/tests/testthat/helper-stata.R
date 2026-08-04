@@ -86,6 +86,34 @@ stata_dropout <- function(row) {
   as.numeric(strsplit(row$drops, "[[:space:]]+")[[1]])
 }
 
+#' Rows on which the two implementations define var_tte the same way
+#'
+#' With dropout and solving for power the definitions differ by construction:
+#' Stata back-solves var_tte through the power it just computed, the R port uses
+#' the closed form. See CONTRACT.md section 5.6. One contract rule, so one
+#' predicate --- it is applied both to the tolerance comparison and to the
+#' tolerance-free one, and those two must not be able to drift apart.
+stata_var_tte_comparable <- function(df) {
+  !nzchar(df$drops) | df$mode == "power"
+}
+
+#' The four design grids, with the test label each one carries
+#'
+#' Single-sourced because the membership of this list is load-bearing twice
+#' over: once for the per-grid comparisons and once for the tolerance-free
+#' arithmetic test. A grid present in one loop and absent from the other still
+#' passes --- it just silently tests fewer rows --- which is exactly how
+#' 04_edge_cases went unchecked by the exact test. Deriving it from MANIFEST
+#' would be worse: MANIFEST also lists 05_variance_components, which is the
+#' input to that test rather than a member of it, and MANIFEST exists only in
+#' fixtures/, so the list would silently empty on the regeneration path.
+DESIGN_GRIDS <- c(
+  "01_grid_arithmetic"  = "grid 1: the stage-two arithmetic matches Stata",
+  "02_grid_comparators" = "grid 2: the comparator branches match Stata",
+  "03_grid_fits"        = "grid 3: scaled and subsetted fits match Stata",
+  "04_edge_cases"       = "grid 4: boundaries and guards match Stata where they should"
+)
+
 # Fitting is the slow part and many rows share a fit, so cache on everything
 # that can change one. `scale` is deliberately absent: Stata rescales the time
 # variable and refits, while the R port always fits on the axis it was given and

@@ -50,13 +50,16 @@ if (requireNamespace("slopepower", quietly = TRUE)) {
     slpower2 = suppressMessages(fit(slpower2, healthy = case))$slope,
     slpower3 = fit(slpower3, treated = treat)$slope
   )
-  want <- c(slpower1 = -1.672, slpower2 = -1.715, slpower3 = -1.852)
-  # The bound is 1e-3, not the 5e-4 that "agrees to 3 d.p." would suggest.
-  # slpower1 fits -1.67250000, which sits 2.3e-13 from the .0005 rounding
-  # boundary against the paper's -1.672 --- see the note in test-paper-parity.R.
-  # At 5e-4 this guard passes by about 1e-15, so any nlme or BLAS change that
-  # moved the REML slope by one ulp the wrong way would abort a routine
+  # "Still prints as the paper's figure", which is a bound of half a unit in the
+  # last printed place. slpower1 is pinned one digit further out for the reason
+  # test-paper-parity.R gives at its slpower1 test: the fit lands on
+  # -1.6724999999999988, which clears a 5e-4 bound against -1.672 by 1.2e-15, so
+  # at 3 d.p. any nlme or BLAS change worth one ulp would abort a routine
   # regeneration with a message reading as "the packaged data are corrupt".
-  stopifnot(all(abs(got - want) < 1e-3))
+  # Loosening the shared bound instead would buy slpower1 that headroom at the
+  # cost of slpower2 and slpower3, which are nowhere near their boundaries.
+  want   <- c(slpower1 = -1.6725, slpower2 = -1.715, slpower3 = -1.852)
+  digits <- c(slpower1 = 4,       slpower2 = 3,      slpower3 = 3)
+  stopifnot(all(abs(got - want) < 0.5 * 10^-digits + 1e-9))
   cat("paper slopes reproduced:", paste(sprintf("%.3f", got), collapse = " "), "\n")
 }
