@@ -142,9 +142,23 @@ slope_se <- function(params) {
 #' slopepower command. \emph{Stata Journal} 21(3): 575--601.
 #'
 #' @examples
-#' \dontrun{
-#' pars <- slope_params(sdmt ~ visit | id, data = d1)
-#' slope_bootstrap(pars, R = 200, design = c(0, 1, 2), effectiveness = 0.33)
+#' # The parameters must come from slope_params(): bootstrapping resamples the
+#' # underlying subjects, which slope_params_manual() objects do not carry.
+#' set.seed(1)
+#' subject <- rep(1:40, each = 4)
+#' sim <- data.frame(
+#'   id    = subject,
+#'   visit = rep(0:3, times = 40),
+#'   sdmt  = rnorm(40, 50, 10)[subject] +
+#'           rnorm(40, -1.7, 1.4)[subject] * rep(0:3, times = 40) +
+#'           rnorm(160, 0, 3)
+#' )
+#' pars <- slope_params(sdmt ~ visit | id, data = sim)
+#'
+#' # One mixed-model fit per replicate, so a real run wants a much larger R.
+#' \donttest{
+#' slope_bootstrap(pars, R = 100, design = c(0, 1, 2),
+#'                 effectiveness = 0.33, seed = 42)
 #' }
 #'
 #' @seealso [slope_sample_size()], [slope_power()], [slope_params()]

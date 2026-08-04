@@ -19,6 +19,7 @@
           nlme      # lme()/gls(), correlation & variance structures
           haven     # read Stata .dta files
           testthat  # unit tests
+          roxygen2  # generate NAMESPACE and man/ from #' comments
         ];
 
         rEnv = pkgs.rWrapper.override { packages = rPkgs; };
@@ -29,7 +30,7 @@
           packages = [ rEnv ];
 
           shellHook = ''
-            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, lme4, lmerTest, nlme, haven, testthat"
+            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, lme4, lmerTest, nlme, haven, testthat, roxygen2"
           '';
         };
 

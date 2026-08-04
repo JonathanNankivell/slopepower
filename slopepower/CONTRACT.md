@@ -306,8 +306,14 @@ exactly 1 in decimal and must be accepted; naive accumulation makes it `-6.7e-17
 
 ## 7. Published results the test suite must reproduce
 
-All from Nash et al. (2021). Data files are `../slpower1.dta`, `../slpower2.dta`, `../slpower3.dta`
-relative to the package root, read with `haven::read_dta()`.
+All from Nash et al. (2021). The test suite reads `../slpower1.dta`, `../slpower2.dta`,
+`../slpower3.dta` relative to the package root with `haven::read_dta()`, and skips when they are
+absent — so the parity tests do not run from a built tarball.
+
+The same three datasets also ship with the package as `slpower1`, `slpower2` and `slpower3`
+(see `data-raw/make-data.R`), which is what the examples use. Those copies are checked against
+the published slopes at build time, but they are a second copy of the same numbers: if the `.dta`
+files in the repository root ever change, re-run `data-raw/make-data.R`.
 
 Rows with an expected **N** are `slope_sample_size()` calls; the one row with an expected **power**
 is a `slope_power()` call.
@@ -402,8 +408,9 @@ maxima are dominated by fits that barely identify a random slope (two timepoints
 - Base R plus `nlme` and `stats` only in `R/`. No tidyverse inside the package (it is available
   for tests and exploration).
 - `snake_case` functions, S3 classes, no R6/S4.
-- Every exported function gets roxygen2 comments (`#'`) even though we are not running roxygen —
-  they document intent and can generate `man/` later. Hand-write `NAMESPACE` entries in your
-  report; the integrator maintains the file.
+- Every exported function gets roxygen2 comments (`#'`). These are the source of truth:
+  `NAMESPACE` and `man/*.Rd` are generated from them by `roxygen2::roxygenise()` and must not
+  be edited by hand. Mark exports with `@export` and internal helpers with `@noRd`; package-level
+  `@importFrom` tags live in `R/slopepower-package.R`, one line per tag.
 - Errors via `stop()` with a leading context, e.g. `stop("slope_power(): ...")`.
 - No `library()` or `require()` calls inside `R/`. Use `nlme::lme`, `stats::qnorm`, etc.

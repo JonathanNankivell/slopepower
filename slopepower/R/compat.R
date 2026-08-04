@@ -67,11 +67,17 @@
 #'   supplied. Both inherit from `slope_result`.
 #'
 #' @examples
-#' \dontrun{
-#' d <- haven::read_dta("slpower1.dta")
-#' slopepower(d, "sdmt", "id", "visit", schedule = c(1, 2),
+#' # The paper's first worked example, p.588. Observational data with no
+#' # comparison group, follow-up at 1 and 2 years, powering against a treatment
+#' # expected to remove a third of the decline. Gives N = 712.
+#' slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
 #'            obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)
-#' }
+#'
+#' # p.594. A completed trial, powered against the effect it actually observed
+#' # rather than an assumed proportion. The uneven schedule draws the message
+#' # about `scale` described above; the Stata original would reject it outright.
+#' slopepower(slpower3, "sdmt", "id", "visit", schedule = c(0.5, 2),
+#'            rct = TRUE, treat = "treat", usetrt = TRUE)
 #'
 #' @seealso [slope_sample_size()], [slope_power()]
 #' @export
