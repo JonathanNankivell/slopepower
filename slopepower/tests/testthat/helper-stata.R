@@ -267,8 +267,8 @@ stata_join_fits <- function(grid, fits) {
 #' much", so the tests make one expectation per quantity and print the table.
 stata_mismatch_report <- function(bad, cols, label) {
   if (nrow(bad) == 0) return("")
-  keep <- c("tag", "dataset", "model", "scale", "subset", "sched", "drops",
-            "effin", "alpha", "mode", cols)
+  keep <- c("tag", "vtag", "dataset", "model", "scale", "subset", "sched",
+            "drops", "effin", "alpha", "mode", cols)
   keep <- keep[keep %in% names(bad)]
   txt <- utils::capture.output(print(bad[, keep, drop = FALSE], row.names = FALSE))
   paste0(label, ": ", nrow(bad), " row(s) disagree\n", paste(txt, collapse = "\n"))

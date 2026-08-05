@@ -21,9 +21,10 @@ expect_printed <- function(object, expected, label, digits = 3) {
 
 test_that("slpower1: the fitted slope matches the paper (p.588)", {
   p <- paper_fit("slpower1")
-  # The fit gives -1.67250000, which is 2.3e-13 from the .0005 rounding
-  # boundary: Stata's %5.3f prints -1.672 and R's formatC prints -1.673. Same
-  # number, different tie-break. Compare at 4 d.p. to sidestep the tie entirely.
+  # The fit gives -1.6724999999999988, which clears the .0005 rounding boundary
+  # against -1.672 by 1.2e-15 -- about one ulp. Comparing at 3 d.p. would pass,
+  # but only just: an nlme or BLAS change worth one ulp would flip it, for
+  # reasons having nothing to do with the port. Pin at 4 d.p. instead.
   expect_equal(round(p$slope, 4), -1.6725)
 })
 

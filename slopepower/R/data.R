@@ -98,7 +98,7 @@
 #' slopepower command. \emph{Stata Journal} 21(3): 575--601.
 #'
 #' @examples
-#' # The paper's p.594 fit: treated slope -1.852, control -1.104.
+#' # The paper's p.594 fit: control slope -1.852, treated -1.104.
 #' slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
 #'
 #' @seealso [slpower1], [slpower2].

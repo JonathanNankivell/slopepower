@@ -365,9 +365,10 @@ sits within rounding distance of an integer and that fact is worth knowing.
 `5e-4` bound against the paper's −1.672 by 1.2e-15 — about one ulp. Two consequences, and both are
 load-bearing:
 
-- Stata's `%5.3f` prints −1.672 and R's `formatC` prints −1.673. Same number, opposite tie-break;
-  neither is wrong. `test-paper-parity.R` sidesteps the tie by pinning the value at 4 d.p.
-  (`round(slope, 4) == -1.6725`) instead of comparing at 3.
+- The value sits just *below* the tie, so nothing actually disagrees about it: Stata's `%5.3f` and
+  R's `formatC`, `sprintf` and `round` all print −1.672. `test-paper-parity.R` nevertheless pins the
+  value at 4 d.p. (`round(slope, 4) == -1.6725`) rather than comparing at 3, because agreement that
+  rests on one ulp is not agreement worth asserting.
 - Any check that compares this slope at 3 d.p. is one ulp from failing, and would fail for reasons
   having nothing to do with the port — an `nlme` or BLAS change is enough. `data-raw/make-data.R`'s
   regeneration guard therefore carries a **per-dataset** precision (`slpower1` at 4 d.p., the other

@@ -33,14 +33,18 @@ slpower3$treat <- as.integer(haven::zap_labels(slpower3$treat))
 slpower3$visit <- as.numeric(slpower3$visit)
 slpower3$sdmt  <- as.numeric(slpower3$sdmt)
 
-dir.create("data", showWarnings = FALSE)
-save(slpower1, file = "data/slpower1.rda", version = 2, compress = "xz")
-save(slpower2, file = "data/slpower2.rda", version = 2, compress = "xz")
-save(slpower3, file = "data/slpower3.rda", version = 2, compress = "xz")
-
-# Guard: the packaged data must still reproduce the paper's fitted slopes.
-# slpower1 p.588, slpower2 p.590, slpower3 p.594.
-if (requireNamespace("slopepower", quietly = TRUE)) {
+# Guard: the newly read data must still reproduce the paper's fitted slopes.
+# slpower1 p.588, slpower2 p.590, slpower3 p.594. This runs *before* the save()
+# calls below, so that a failure leaves the existing data/*.rda untouched rather
+# than replacing known-good data with the data it has just rejected. It is a
+# hard requirement, not a courtesy: without slopepower on the library path there
+# is nothing to fit with and the regeneration is unverifiable, so stop rather
+# than write unchecked data.
+if (!requireNamespace("slopepower", quietly = TRUE)) {
+  stop("slopepower must be installed to verify the regenerated data; ",
+       "install it first, then re-run this script.")
+}
+local({
   fit <- function(d, ...) slopepower::slope_params(sdmt ~ time | id, d, ...)
   slpower1$time <- slpower1$visit
   slpower2$time <- as.numeric(slpower2$vdate) / 365
@@ -62,4 +66,9 @@ if (requireNamespace("slopepower", quietly = TRUE)) {
   digits <- c(slpower1 = 4,       slpower2 = 3,      slpower3 = 3)
   stopifnot(all(abs(got - want) < 0.5 * 10^-digits + 1e-9))
   cat("paper slopes reproduced:", paste(sprintf("%.3f", got), collapse = " "), "\n")
-}
+})
+
+dir.create("data", showWarnings = FALSE)
+save(slpower1, file = "data/slpower1.rda", version = 2, compress = "xz")
+save(slpower2, file = "data/slpower2.rda", version = 2, compress = "xz")
+save(slpower3, file = "data/slpower3.rda", version = 2, compress = "xz")
