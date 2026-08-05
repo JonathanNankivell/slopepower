@@ -428,8 +428,8 @@ solve_slope <- function(params, design, effectiveness, effectiveness_supplied,
 #'
 #' @param params A `slope_params` object, from [slope_params()] fitted to
 #'   previously collected longitudinal data or from [slope_params_manual()].
-#' @param design A `trial_design` object, or a numeric vector of visit times
-#'   beginning at 0.
+#' @param design A `trial_design` object, from [trial_design()], or a numeric
+#'   vector of visit times beginning at 0.
 #' @param effectiveness Proportion of the slope difference the treatment is
 #'   expected to remove, in (0, 1]. Must not be supplied when
 #'   `target = "observed"`, which fixes it at 1.
@@ -506,7 +506,8 @@ NULL
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33, power = 0.9)
 #'
-#' @seealso [slope_power()] for the power of a given `n`,
+#' @seealso [trial_design()] to build the `design` argument,
+#'   [slope_power()] for the power of a given `n`,
 #'   [slope_sample_size_grid()] to compare many designs at once.
 #' @export
 slope_sample_size <- function(params, design,
@@ -559,7 +560,8 @@ slope_sample_size <- function(params, design,
 #' )
 #' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
 #'
-#' @seealso [slope_sample_size()] for the `n` a target power needs,
+#' @seealso [trial_design()] to build the `design` argument,
+#'   [slope_sample_size()] for the `n` a target power needs,
 #'   [slope_power_grid()] to compare many designs at once.
 #' @export
 slope_power <- function(params, design, n,

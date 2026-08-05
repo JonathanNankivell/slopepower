@@ -17,8 +17,8 @@ slope_power(
 \item{params}{A \code{slope_params} object, from \code{\link[=slope_params]{slope_params()}} fitted to
 previously collected longitudinal data or from \code{\link[=slope_params_manual]{slope_params_manual()}}.}
 
-\item{design}{A \code{trial_design} object, or a numeric vector of visit times
-beginning at 0.}
+\item{design}{A \code{trial_design} object, from \code{\link[=trial_design]{trial_design()}}, or a numeric
+vector of visit times beginning at 0.}
 
 \item{n}{Total number of participants across both arms. Required: it is the
 quantity whose power is being evaluated. Odd values are reduced by one so
@@ -88,6 +88,7 @@ calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
 }
 \seealso{
+\code{\link[=trial_design]{trial_design()}} to build the \code{design} argument,
 \code{\link[=slope_sample_size]{slope_sample_size()}} for the \code{n} a target power needs,
 \code{\link[=slope_power_grid]{slope_power_grid()}} to compare many designs at once.
 }
