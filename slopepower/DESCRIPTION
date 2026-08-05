@@ -23,4 +23,4 @@ Imports: nlme, stats
 LazyData: true
 Suggests: testthat (>= 3.0.0), haven
 Roxygen: list(markdown = TRUE)
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
