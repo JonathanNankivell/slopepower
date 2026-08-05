@@ -1,31 +1,22 @@
-# slopepower R port — interface contract
+# slopepower R port — porting notes and invariants
 
-**Binding on all layers.** Parallel agents implement against this document, not against each
-other's code. Do not change a signature or field name here without saying so explicitly in your
-final report.
+What the port guarantees, and — more usefully — which of its oddities are
+deliberate. Several things here look like defects and are not: the notes saying
+so are the point of the document, because the evidence behind them took a Stata
+licence to obtain and cannot be re-derived by reading `slopepower.ado`.
+
+Not shipped to users (see `.Rbuildignore`); this is for whoever maintains the
+port. The user-facing documentation is the roxygen help pages. Code and tests
+cite these sections by number, so **sections may be revised but not renumbered**.
 
 Reference: Nash, Morgan, Frost & Mulick (2021), *Stata Journal* 21(3): 575–601, and the original
 `slopepower.ado` v2.1 in the parent directory.
 
 ---
 
-## 0. File ownership
-
-| File | Owner | Contents |
-|---|---|---|
-| `R/utils.R` | (foundation, already written) | shared validators, `%||%`, `qnorm` helpers |
-| `R/design.R` | Layer 2 | `trial_design()`, `print.trial_design()` |
-| `R/params.R` | Layer 1 | `slope_params()`, `slope_params_manual()`, `print.slope_params()` |
-| `R/power.R` | Layer 3 | `slope_sigma()`, `slope_var()`, `slope_effect_size()`, `slope_sample_size()`, `slope_power()`, their `print` methods, `as.data.frame.slope_result()` |
-| `R/grid.R`, `R/bootstrap.R`, `R/compat.R` | Layer 4 | `slope_sample_size_grid()`, `slope_power_grid()`, `slope_bootstrap()`, `slopepower()` |
-
-**Touch only your own files.** `R/utils.R` is read-only for all layers.
-
----
-
 ## 1. Notation
 
-Mapping from the paper to code, fixed for all layers:
+Mapping from the paper to code, fixed throughout:
 
 | Paper | Code field | Meaning |
 |---|---|---|
@@ -40,7 +31,7 @@ Mapping from the paper to code, fixed for all layers:
 
 ---
 
-## 2. `slope_params` object (Layer 1)
+## 2. `slope_params` object (`R/params.R`)
 
 S3 class `"slope_params"`, a list with **exactly** these fields:
 
@@ -69,7 +60,7 @@ discarded. This mirrors the Stata behaviour and paper §2.3.
 
 ---
 
-## 3. `trial_design` object (Layer 2)
+## 3. `trial_design` object (`R/design.R`)
 
 S3 class `"trial_design"`, a list with **exactly** these fields:
 
@@ -95,7 +86,7 @@ list(
 
 ---
 
-## 4. Stage-two result objects (Layer 3)
+## 4. Stage-two result objects (`R/power.R`)
 
 Sample size and power are **two exported functions, not one function with a mode switch**. They
 take different inputs, answer different questions, and return differently shaped objects:
@@ -220,7 +211,7 @@ effect_size = sign(slope_difference) * sqrt(eff2)
 
 Skipping `j = 1` is correct: a participant with only a baseline measurement yields a singular
 design matrix and contributes zero information, i.e. an infinite stratum-specific sample size and
-a zero contribution to the sum. Layer 2 warns when `dropout[1] > 0`.
+a zero contribution to the sum. `trial_design()` warns when `dropout[1] > 0`.
 
 ### 5.5 Sample size and power
 
@@ -296,7 +287,7 @@ Warnings:
 
 - `tte` points away from benefit (i.e. treatment would need to make the slope more extreme)
 - `dropout[1] > 0` (those participants contribute nothing)
-- any subject's time origin had to be shifted (Layer 1)
+- any subject's time origin had to be shifted (`slope_params()`)
 - `abs(slope) / se(slope) < 2.5` in `slope_bootstrap()` (paper §2.6)
 
 **Floating point:** compare dropout sums with a tolerance. `dropout = c(0.3, 0.3, 0.4)` sums to
@@ -363,11 +354,30 @@ Table 1 (p.595), `slpower1`, `n = 450`, `effectiveness = 0.33`, powers as percen
 | `seq(0,3,0.5)` | `rep(0.05,6)` | 0.783 |
 
 **Tolerances.** Slopes and variance components come from a REML fit and will differ from Stata in
-the last digits: compare to the paper's 3 d.p. with `tolerance = 5e-4` on the printed value.
+the last digits, so the rule is "still prints as the paper's figure": half a unit in the last
+printed place. The paper prints slopes and powers to 3 d.p., giving `5e-4` and `5e-4`
+respectively — but see the rounding-boundary exception below before applying that literally.
 Sample sizes are integers after `ceiling()` and should match **exactly**; if one is off by one,
 report it rather than loosening the tolerance — an off-by-one means the underlying real-valued N
-sits within rounding distance of an integer and that fact is worth knowing. Powers are printed to
-3 d.p. in the paper; use `tolerance = 1e-3`.
+sits within rounding distance of an integer and that fact is worth knowing.
+
+**The slpower1 rounding boundary.** `slpower1`'s slope fits to −1.6724999999999988, which clears a
+`5e-4` bound against the paper's −1.672 by 1.2e-15 — about one ulp. Two consequences, and both are
+load-bearing:
+
+- Stata's `%5.3f` prints −1.672 and R's `formatC` prints −1.673. Same number, opposite tie-break;
+  neither is wrong. `test-paper-parity.R` sidesteps the tie by pinning the value at 4 d.p.
+  (`round(slope, 4) == -1.6725`) instead of comparing at 3.
+- Any check that compares this slope at 3 d.p. is one ulp from failing, and would fail for reasons
+  having nothing to do with the port — an `nlme` or BLAS change is enough. `data-raw/make-data.R`'s
+  regeneration guard therefore carries a **per-dataset** precision (`slpower1` at 4 d.p., the other
+  two at 3) rather than one loosened bound for all three.
+
+Do not "simplify" that guard back to a single tolerance. Loosening the shared bound to clear
+`slpower1` also loosens `slpower2` and `slpower3`, which sit nowhere near their boundaries, and
+costs the guard its meaning: at `1e-3`, `slpower2` could drift far enough to print −1.716 and still
+pass, while the script's own success line printed a number contradicting the paper it claims to
+have reproduced.
 
 ### 7.1 The Stata reference suite
 
@@ -391,7 +401,7 @@ Stata licence. See that directory's README for how to regenerate.
 
 | Comparison | Tolerance | What it tests |
 |---|---|---|
-| Stata's variance components in via `slope_params_manual()` | 1e-12 | Σ\*, X\*, F\*, dropout weighting, `effectiveness` rescaling — **all 542 rows match exactly** |
+| Stata's variance components in via `slope_params_manual()` | 1e-12 | Σ\*, X\*, F\*, dropout weighting, `effectiveness` rescaling — **all 542 rows match exactly** (348 + 88 + 75 + 31, i.e. every comparable row of all four design grids) |
 | Fitted components vs Stata's | 1e-3 to 5e-2 relative | how closely `nlme::lme` and `mixed` converge |
 | End to end | dominated by the above | nothing extra; it cannot be tighter than the fits agree |
 
