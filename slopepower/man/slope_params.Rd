@@ -81,6 +81,104 @@ separate. Consequently \code{common_variance} cannot change the estimates return
 for the cases -- it only affects how many nuisance parameters are estimated
 for the controls, and therefore whether the fit converges at all.
 }
+\section{The models fitted}{
+
+
+Write \eqn{y_{ij}}{y[ij]} for the outcome of participant \eqn{i}{i} at time
+\eqn{t_{ij}}{t[ij]}, measured from that participant's own first visit under
+the default \code{origin = "subject"}. All three scenarios share one
+participant-level structure --- a random intercept and a random slope, with
+independent residuals:
+
+\deqn{y_{ij} = \mu(t_{ij}) + a_i + b_i t_{ij} + \epsilon_{ij},}{
+      y[ij] = mu(t[ij]) + a[i] + b[i] * t[ij] + e[ij],}
+\deqn{\left(a_i, b_i\right) \sim N(0, G), \qquad
+      \epsilon_{ij} \sim N(0, \sigma^2_\epsilon),}{
+      (a[i], b[i]) ~ N(0, G),   e[ij] ~ N(0, sigma2_residual),}
+
+where \eqn{G}{G} is an unstructured 2 by 2 matrix with diagonal
+\eqn{\sigma^2_a}{sigma2_intercept}, \eqn{\sigma^2_b}{sigma2_slope} and
+off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. Residuals are independent across
+visits and across participants; there is no serial correlation term. Only the
+mean \eqn{\mu}{mu} and the number of variance parameters differ between the
+scenarios.
+
+\describe{
+\item{Neither \code{healthy} nor \code{treated}}{
+\deqn{\mu(t) = \beta_0 + \beta_1 t}{mu(t) = b0 + b1 * t}
+with one \eqn{G}{G} and one \eqn{\sigma^2_\epsilon}{sigma2_residual}. The
+returned slope is \eqn{\beta_1}{b1}. Equivalent to
+\code{nlme::lme(y ~ t, random = ~ t | id)}.}
+\item{\code{healthy = g}, with \eqn{g_i = 1}{g[i] = 1} for cases}{
+\deqn{\mu(t) = \beta_0 + \beta_g g_i + (\beta_1 + \beta_{1g} g_i) t}{
+          mu(t) = b0 + bg * g[i] + (b1 + b1g * g[i]) * t}
+and, in addition, a \strong{separate} \eqn{G}{G} and a \strong{separate}
+\eqn{\sigma^2_\epsilon}{sigma2_residual} for each group. The slope of the
+cases is \eqn{\beta_1 + \beta_{1g}}{b1 + b1g} and that of the controls
+\eqn{\beta_1}{b1}; the variance components returned are the cases'. The
+model factorises into two independent per-group fits (see above).}
+\item{\code{treated = z}, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
+\deqn{\mu(t) = \beta_0 + \beta_1 t + \beta_p (1 - z_i) t}{
+          mu(t) = b0 + b1 * t + bp * (1 - z[i]) * t}
+with one \eqn{G}{G} and one
+\eqn{\sigma^2_\epsilon}{sigma2_residual} shared by both arms. Note the
+single intercept and the absence of a main effect of \eqn{z}{z}:
+randomisation makes the expected baseline equal in the two arms, so
+baseline is modelled as a correlated outcome rather than adjusted for.
+The slope of the treated arm is \eqn{\beta_1}{b1} and that of the control
+arm \eqn{\beta_1 + \beta_p}{b1 + bp}.}
+}
+
+Stage two then assumes the planned trial will be analysed with the matching
+model, \eqn{\mu(t) = \beta_0 + \beta_1 t + \beta_2 g_i t}{mu(t) = b0 + b1 * t
++ b2 * g[i] * t}, in which the treatment effect \eqn{\beta_2}{b2} is the
+difference in slopes and the arms again share an intercept.
+}
+
+\section{What these models do and do not include}{
+
+
+The design matrices above are fixed by the method and are not what you would
+write by hand in \code{lme4}. Both comparator models depart from the obvious
+\code{y ~ group * time + (time | id)}: the \code{treated} model drops the group main
+effect, and the \code{healthy} model gives each group its own residual variance,
+which \code{lme4} cannot fit at all. Included, therefore:
+\itemize{
+\item one continuous, approximately Gaussian outcome;
+\item a mean that is linear in time, and nothing else --- no other covariates;
+\item exactly one grouping level, the participant, whose random intercept and
+random slope have an unstructured covariance;
+\item independent residuals with a variance that is constant within a group;
+\item at most two groups, distinguished only by their slope (and, for \code{healthy},
+by their variance components).
+}
+
+Not included, and not obtainable by any argument to this function:
+\itemize{
+\item \strong{covariate adjustment.} Age, sex, disease duration, centre and the rest
+cannot be entered. \code{formula} takes a single time term and rejects anything
+more. If the trial you are planning will adjust for prognostic covariates,
+its residual variance will be smaller than the one estimated here and the
+resulting sample size is conservative.
+\item \strong{baseline as a covariate.} Baseline is part of the outcome vector, under
+a common intercept for both arms (paper section 2.1). This is not the
+ANCOVA-style adjustment used by many trial analyses, and the two give
+different standard errors.
+\item \strong{further levels of clustering.} Visits within participants within sites,
+clinics, families or therapists cannot be represented: the random effects
+have one grouping factor, and stage two treats participants as independent.
+For a design with meaningful site-level variation the sample size returned
+here will be too small.
+\item \strong{non-linear trajectories} --- quadratic time, splines, change points ---
+and any estimand that is not a difference in slopes.
+\item \strong{non-Gaussian outcomes}: binary, ordinal, count or time-to-event.
+\item \strong{structured residuals}, such as AR(1) or other serial correlation within
+a participant.
+\item \strong{more than two arms, unequal allocation, or cluster-randomised, crossover
+and stepped-wedge designs.} Stage two assumes two equal parallel arms.
+}
+}
+
 \references{
 Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
 sample-size calculations for trials that compare slopes over time:

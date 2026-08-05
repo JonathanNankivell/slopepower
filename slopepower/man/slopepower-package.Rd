@@ -5,7 +5,7 @@
 \alias{slopepower-package}
 \title{slopepower: Power and Sample Size for Trials Comparing Slopes Over Time}
 \description{
-An R implementation of the Stata 'slopepower' command of Nash, Morgan, Frost and Mulick (2021) \doi{10.1177/1536867X211045512}. Performs sample size and power calculations for two-arm parallel trials in which the outcome is a rate of change (slope) estimated by a linear mixed model. Parameters are estimated in a first stage from previously collected longitudinal data, or supplied directly, and combined in a second stage with the design of a proposed trial.
+An R implementation of the Stata 'slopepower' command of Nash, Morgan, Frost and Mulick (2021) \doi{10.1177/1536867X211045512}. Performs sample size and power calculations for two-arm parallel trials in which the outcome is a rate of change (slope) estimated by a linear mixed model. Parameters are estimated in a first stage from previously collected longitudinal data, or supplied directly, and combined in a second stage with the design of a proposed trial. The model is fixed and narrow: one continuous outcome, a straight line in time, a random intercept and random slope per participant, and a treatment effect that is a difference in slopes. Participants are assumed independent, so there is no adjustment for covariates, no further level of clustering such as site, and no randomisation scheme other than two equal parallel arms.
 }
 \section{Imports}{
 

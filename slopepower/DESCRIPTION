@@ -10,12 +10,17 @@ Description: An R implementation of the Stata 'slopepower' command of Nash,
     outcome is a rate of change (slope) estimated by a linear mixed model.
     Parameters are estimated in a first stage from previously collected
     longitudinal data, or supplied directly, and combined in a second stage with
-    the design of a proposed trial.
+    the design of a proposed trial. The model is fixed and narrow: one
+    continuous outcome, a straight line in time, a random intercept and random
+    slope per participant, and a treatment effect that is a difference in
+    slopes. Participants are assumed independent, so there is no adjustment for
+    covariates, no further level of clustering such as site, and no
+    randomisation scheme other than two equal parallel arms.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.1)
 Imports: nlme, stats
 LazyData: true
-Suggests: testthat (>= 3.0.0), haven, lme4
+Suggests: testthat (>= 3.0.0), haven
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.0.0
