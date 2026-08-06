@@ -1,0 +1,422 @@
+---
+title: "Reusing a trial in which the treatment did harm"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{Reusing a trial in which the treatment did harm}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 4)
+library(slopepower)
+```
+
+## The situation
+
+You ran a two-arm trial of a treatment meant to slow disease progression. It did
+the opposite: the treated arm's outcome declined *faster* than the control arm's.
+You now want to plan the next trial. What, if anything, can you take from the one
+you have?
+
+The short answer is: the **variance components** and the **control-arm slope**,
+but *not* the treatment effect. This vignette explains why `target = "observed"`
+is the wrong tool here, sets out the two ways to reuse the data that are
+defensible, and then measures how good the resulting estimates actually are.
+
+Throughout we use a simulated trial built from the generating model of Nash et
+al. (2021, §4.1.3) — the one behind the packaged `slpower3` — except that the
+treated arm is made worse than the control arm rather than better:
+
+```{r generator}
+truth <- list(
+  intercept = 34,
+  slope_control = -1.8,   # units/year
+  slope_treated = -2.8,   # harm: treated decline faster
+  s2a = 100, s2b = 2, sab = 5, s2e = 10
+)
+visits_observed <- c(0, 0.5, 2)   # visit times in the trial we already ran
+
+sim_trial <- function(n_arm = 75, tr = truth, tvis = visits_observed) {
+  n  <- 2 * n_arm
+  G  <- matrix(c(tr$s2a, tr$sab, tr$sab, tr$s2b), 2, 2)
+  ab <- matrix(rnorm(2 * n), n, 2) %*% chol(G)
+  trt <- rep(0:1, each = n_arm)
+  sl  <- ifelse(trt == 1, tr$slope_treated, tr$slope_control)
+  d <- data.frame(
+    id    = rep(seq_len(n), each = length(tvis)),
+    treat = rep(trt,        each = length(tvis)),
+    visit = rep(tvis,       times = n)
+  )
+  d$sdmt <- tr$intercept + sl[d$id] * d$visit +
+    ab[d$id, 1] + ab[d$id, 2] * d$visit + rnorm(nrow(d), 0, sqrt(tr$s2e))
+  d
+}
+
+set.seed(20260805)
+trial <- sim_trial()
+```
+
+Stage one recovers what happened:
+
+```{r fit}
+pars <- slope_params(sdmt ~ visit | id, trial, treated = treat)
+pars
+```
+
+The `observed difference in slopes` is control minus treated, so a **positive**
+value means the treatment harmed. The proposed trial, throughout, is three years
+with an interim visit at year two:
+
+```{r design}
+design <- trial_design(c(0, 2, 3))
+```
+
+## Why `target = "observed"` is the wrong tool
+
+`target = "observed"` (Stata's `usetrt`) takes the observed treatment effect as
+the target for the next trial. It is defined only for a treatment that helped.
+Nothing stops you calling it here, and that is the problem: the sample-size
+formula is
+
+$$N \;\propto\; \frac{s_*^2}{\beta_2^2}$$
+
+and the target effect \(\beta_2\) enters **squared**. The sign cancels. A trial
+powered to detect a benefit of 1.0 units/year and a trial powered to detect a
+*harm* of 1.0 units/year get the same answer.
+
+To see it, run the same data twice — once as it came out, and once with the arm
+labels swapped, which is the counterfactual trial where the same treatment helped
+by the same amount:
+
+```{r sign-cancels}
+flipped <- transform(trial, treat = 1L - treat)
+pars_flipped <- slope_params(sdmt ~ visit | id, flipped, treated = treat)
+
+harm    <- suppressWarnings(slope_sample_size(pars, design, target = "observed"))
+benefit <- slope_sample_size(pars_flipped, design, target = "observed")
+
+data.frame(
+  scenario    = c("treatment harmed", "treatment helped (labels swapped)"),
+  slope_ctrl  = c(pars$slope, pars_flipped$slope),
+  slope_treat = c(pars$slope_comparator, pars_flipped$slope_comparator),
+  tte         = c(harm$tte, benefit$tte),
+  n           = c(harm$n, benefit$n)
+)
+```
+
+Identical `n`. Only the sign of the target treatment effect differs, and in the
+harm row it is negative — meaning the design is powered to detect a treatment
+that makes patients *worse* by that amount. That is a coherent calculation and
+almost never the trial anyone wants to run.
+
+`slopepower` warns rather than refusing, because the calculation is not wrong,
+only misdirected:
+
+```{r warn}
+tryCatch(slope_sample_size(pars, design, target = "observed"),
+         warning = function(w) conditionMessage(w))
+```
+
+The Stata original prints the negative target silently and moves on
+(`slopepower.ado`, lines 449–457), so if you are checking an old script against
+this package, expect the warning to be new.
+
+Note also that `effectiveness` cannot express harm at all: it is a proportion of
+a gap that treatment closes, constrained to \((0, 1]\) by both implementations.
+There is no way to ask for a harmful target except through `target = "observed"`.
+
+## What is actually reusable
+
+Two things, and neither is the treatment effect:
+
+* the **variance components** \(\sigma^2_a, \sigma^2_b, \sigma_{ab}, \sigma^2_\varepsilon\)
+  (`sigma2_intercept`, `sigma2_slope`, `sigma_cov`, `sigma2_residual`), which
+  govern \(s_*\) and are the parameters the paper describes as hardest to guess
+  a priori (§2.2);
+* the **control-arm slope**, which is the untreated rate of progression in your
+  population.
+
+Both are direction-agnostic. A trial that failed still measured them.
+
+The target treatment effect for the next trial then has to come from clinical
+judgment, expressed as an `effectiveness` fraction of that control-arm slope.
+
+## Two defensible options
+
+### A. Keep both arms, take the target from the control arm
+
+Fit the previous-trial model — one intercept, arm-specific slopes, shared
+variance components — but supply `effectiveness` instead of
+`target = "observed"`. The observed effect is then discarded entirely, while all
+150 participants contribute to the variance components:
+
+```{r option-a}
+opt_a <- slope_sample_size(pars, design, effectiveness = 0.25)
+opt_a
+```
+
+### B. Control arm only
+
+Drop the treated arm and treat what remains as a single untreated cohort:
+
+```{r option-b}
+control_only <- subset(trial, treat == 0)
+pars_b <- slope_params(sdmt ~ visit | id, control_only)
+opt_b  <- slope_sample_size(pars_b, design, effectiveness = 0.25)
+opt_b
+```
+
+The paper endorses this route explicitly for a previous trial of an unrelated
+treatment (p. 594): *"we might have decided to use only the untreated arm as our
+dataset and use the options for a single group of untreated subjects."*
+
+### Choosing between them
+
+```{r compare-ab}
+rbind(cbind(option = "A: both arms",   as.data.frame(opt_a)),
+      cbind(option = "B: control only", as.data.frame(opt_b)))[
+        , c("option", "n", "tte", "var_tte", "slope", "n_subjects")]
+```
+
+Do not read anything into which of the two gives the smaller `n`. On this draw
+option B does, by a wide margin, and that is sampling noise: `var_tte` is
+estimated from 75 participants instead of 150, so it is simply a noisier number,
+and here it happened to come out low. Option A uses twice the data for the
+variance components and is therefore the *more precise* of the two, even when it
+returns the larger sample size. Choosing between them on the basis of the answer
+you prefer is a good way to under-power the next trial.
+
+Option A buys that precision with an assumption: the previous-trial model
+constrains \(\sigma^2_a, \sigma^2_b, \sigma_{ab}, \sigma^2_\varepsilon\) to be
+**equal in both arms**.
+
+In this particular setting that assumption is the weak point. You are pooling the
+variability of people the treatment harmed into an estimate you intend to apply to
+a future *control* arm. A treatment that changes the mean trajectory can
+plausibly change the spread around it too — more heterogeneous response, or
+noisier measurement in a group doing worse. If you suspect that, option B trades
+precision for a cleaner target and is the better choice. Comparing the two fits
+is a cheap diagnostic: a large discrepancy in the variance components is evidence
+against pooling.
+
+Option A also forces a **common intercept** across arms, which is the
+randomisation assumption of the analysis model (§2.1). Over repeated
+randomisations that is fine; conditional on a realised chance baseline imbalance,
+that imbalance leaks into the arm-specific slopes. Option B, having a free
+intercept, is immune.
+
+## Are these estimates unbiased?
+
+Stage one is. The sample size that comes out of stage two is not — and the reason
+is worth understanding, because it tells you when it matters.
+
+The stage-one estimates are REML fits of a correctly specified linear mixed
+model. The fixed effects are unbiased under the usual conditions, and REML exists
+precisely to remove the downward bias that maximum likelihood has in variance
+components. But
+
+$$N \;\propto\; \frac{s_*^2}{(e\,\hat\beta_1)^2}$$
+
+puts an estimated slope in the denominator, squared. \(1/x^2\) is convex, so
+Jensen's inequality guarantees \(\mathbb{E}[1/\hat\beta_1^2] > 1/\beta_1^2\): the
+sample size is biased **upward** even though every input is unbiased. A
+second-order Taylor expansion quantifies it in terms of the signal-to-noise ratio
+of the slope, \(r = |\beta_1| / \mathrm{SE}(\hat\beta_1)\):
+
+$$\mathbb{E}\!\left[\frac{1}{\hat\beta_1^{2}}\right] \;\approx\;
+  \frac{1}{\beta_1^{2}}\left(1 + \frac{3}{r^{2}}\right)$$
+
+### Measuring it
+
+Because we generated the data, the truth is available: put the true parameters
+through stage two and compare.
+
+```{r truth}
+true_pars <- slope_params_manual(
+  slope = truth$slope_control, sigma2_intercept = truth$s2a,
+  sigma2_slope = truth$s2b, sigma_cov = truth$sab,
+  sigma2_residual = truth$s2e
+)
+true_res <- slope_sample_size(true_pars, design, effectiveness = 0.25)
+c(n = true_res$n, var_tte = true_res$var_tte)
+```
+
+Now repeat the whole pipeline — option A, no dropout — on fresh datasets:
+
+```{r replicate}
+R_sim <- 300   # the figures quoted in the text come from 2000
+
+set.seed(1)
+out <- t(vapply(seq_len(R_sim), function(i) {
+  d <- sim_trial()
+  p <- slope_params(sdmt ~ visit | id, d, treated = treat)
+  z <- suppressWarnings(slope_sample_size(p, design, effectiveness = 0.25))
+  c(slope = p$slope, s2a = p$sigma2_intercept, s2b = p$sigma2_slope,
+    sab = p$sigma_cov, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n)
+}, numeric(7)))
+
+truths <- c(slope = truth$slope_control, s2a = truth$s2a, s2b = truth$s2b,
+            sab = truth$sab, s2e = truth$s2e,
+            var_tte = true_res$var_tte, n = true_res$n)
+
+summary_tab <- data.frame(
+  truth    = truths,
+  mean     = colMeans(out),
+  median   = apply(out, 2, median),
+  bias_pct = 100 * (colMeans(out) - truths) / abs(truths),
+  mcse_pct = 100 * apply(out, 2, sd) / sqrt(nrow(out)) / abs(truths)
+)
+round(summary_tab, 3)
+```
+
+Every stage-one input sits on its true value to within Monte Carlo error, and so
+does `var_tte`. The sample size does not: it is biased upward by
+`r sprintf("%.1f%%", summary_tab["n", "bias_pct"])` here, with a Monte Carlo
+standard error of `r sprintf("%.1f", summary_tab["n", "mcse_pct"])` percentage
+points. Run at 2000 replicates instead of `r R_sim`, this same setup gives
+**+8.6%** (MCSE 1.1%).
+
+The delta-method formula predicts that from the slope's signal-to-noise ratio
+alone:
+
+```{r delta-check}
+r_hat <- abs(truth$slope_control) / sd(out[, "slope"])
+c(signal_to_noise = r_hat,
+  predicted_bias_pct = 100 * 3 / r_hat^2,
+  observed_bias_pct  = summary_tab["n", "bias_pct"])
+```
+
+### Where the bias comes from
+
+Recomputing the per-arm sample size with only one of the two inputs estimated
+isolates the source. (No dropout here, so `var_tte` is the plain \(s_*^2\); with
+dropout the field holds a different quantity.)
+
+```{r decompose}
+k  <- (qnorm(0.975) + qnorm(0.8))^2
+e  <- 0.25
+n_true <- true_res$var_tte / (e * truth$slope_control)^2 * k
+
+data.frame(
+  estimated = c("nothing (truth)", "slope only", "variances only", "both"),
+  per_arm_n = c(n_true,
+                mean(true_res$var_tte / (e * out[, "slope"])^2 * k),
+                mean(out[, "var_tte"] / (e * truth$slope_control)^2 * k),
+                mean(out[, "var_tte"] / (e * out[, "slope"])^2 * k))
+) |> transform(bias_pct = 100 * (per_arm_n - n_true) / n_true)
+```
+
+Essentially all of it is the slope in the denominator; the variance components
+contribute almost nothing. The two contributions simply add, which is what you
+would expect given that fixed effects and variance components are asymptotically
+orthogonal in a Gaussian linear mixed model.
+
+### The bias is in the safe direction, and the estimator is median-unbiased
+
+```{r median-unbiased}
+c(median_n = median(out[, "n"]), true_n = true_res$n,
+  P_below_truth = mean(out[, "n"] < true_res$n))
+```
+
+The mean is pulled up by a long right tail; the median — which is what you
+actually report — sits on the truth to within Monte Carlo error. (At `R_sim` =
+`r R_sim` the median is itself noisy; the 2000-replicate run gives a median of
+636 against a truth of 640, and `P_below_truth` = 0.505.) The bias that remains
+is conservative: you over-recruit rather than under-recruit.
+
+## Does the bias matter? Three things matter more
+
+### 1. The spread dwarfs it
+
+```{r spread}
+q <- quantile(out[, "n"], c(.025, .1, .25, .5, .75, .9, .975))
+round(q)
+```
+
+The 95% range spans a factor of about `r sprintf("%.1f", q[["97.5%"]] / q[["2.5%"]])`
+against a truth of `r true_res$n`, and that is with a well-determined slope
+(\(r \approx `r sprintf("%.1f", r_hat)`\)). A ten-per-cent bias in the mean is
+noise against that.
+
+This is why §2.6 and §4.1.2 of the paper press you to bootstrap the whole
+pipeline rather than quote a point estimate:
+
+```{r bootstrap}
+set.seed(2)
+slope_bootstrap(pars, R = 120, design = design, effectiveness = 0.25,
+                statistic = "n", type = "bca")
+```
+
+Use a much larger `R` in earnest — the paper uses 2000. Note that the bias
+scales as \(3/r^2\), so the paper's rule of thumb in §2.6 that the slope should
+exceed 2.5 times its standard error is, read this way, a bound on exactly this
+bias: at \(r = 2.5\) it is about 48%, at \(r = 6\) about 8%, at \(r = 10\) about
+3%.
+
+### 2. The `effectiveness` you choose dominates everything
+
+\(N \propto e^{-2}\), so:
+
+```{r effectiveness-sensitivity}
+es <- c(0.15, 0.20, 0.25, 0.33, 0.50)
+data.frame(
+  effectiveness = es,
+  n = vapply(es, function(e) slope_sample_size(pars, design, effectiveness = e)$n, 1)
+)
+```
+
+Moving from 0.25 to 0.33 changes `n` by a factor of \((0.33/0.25)^2 = 1.74\) —
+larger than the estimation bias and larger than the interquartile range of the
+sampling distribution. That number is a clinical judgment with no sampling
+distribution at all, and the trial you already ran tells you nothing about it,
+because the one quantity it estimated is the one you cannot use.
+
+### 3. Specification bias, which no sample size fixes
+
+The simulation above generates data from the model, so it can only speak to
+estimation error. The biases that do not shrink as the previous study grows are:
+
+* **Common variance across arms** (option A only) — discussed above, and the one
+  most likely to bite when the treatment did harm.
+* **Linearity.** The fitted slope is a projection of the true trajectory onto a
+  straight line, and which line you get depends on the *previous* trial's visit
+  schedule. Here we costed visits at years 2 and 3 from data ending at year 2.
+  `slopepower` gives no warning when you extrapolate (§2.6). With a bounded
+  outcome such as SDMT, floor effects make curvature likely.
+* **Transportability.** §2.6 requires the previous population to resemble the
+  future trial's. A trial that harmed people may also have had unusual entry
+  criteria or an unusual case mix.
+* **Missing-not-at-random dropout** in the previous trial flattens the observed
+  slope and so inflates `n`. A harmful treatment is exactly the setting where
+  differential withdrawal is likely.
+
+None of these is visible in a bootstrap interval.
+
+## Summary
+
+1. Do **not** use `target = "observed"` on a trial that showed harm. It returns
+   the same sample size it would have for a benefit of equal magnitude, and the
+   target effect it reports is negative.
+2. Reuse the variance components and the control-arm slope; take the target
+   effect from clinical judgment via `effectiveness`.
+3. Prefer **option A** (both arms, `effectiveness`) for precision; switch to
+   **option B** (control arm only) if you doubt that the treatment left the
+   variance structure alone. Compare the two fits — it costs one line.
+4. The point estimate of `n` is median-unbiased and its mean is conservative by
+   roughly \(3/r^2\). Do not correct for it.
+5. Spend the effort instead on `slope_bootstrap()` and on a sensitivity analysis
+   over `effectiveness` and over options A versus B. That is where the
+   uncertainty actually lives.
+
+## Reference
+
+Nash, S., Morgan, K. E., Frost, C., & Mulick, A. (2021). Power and sample-size
+calculations for trials that compare slopes over time: Introducing the
+`slopepower` command. *The Stata Journal*, 21(3), 575–601.
+<https://doi.org/10.1177/1536867X211045512>

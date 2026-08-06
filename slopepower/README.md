@@ -227,6 +227,26 @@ paper's units. They are rebuilt from the `.dta` files in the repository root by
 `data-raw/make-data.R`, which asserts that the packaged copies still reproduce the
 published slopes.
 
+## Vignettes
+
+```r
+browseVignettes("slopepower")
+vignette("harmful-previous-trial", package = "slopepower")
+```
+
+| | topic |
+|---|---|
+| `harmful-previous-trial` | What to reuse from a trial in which the treatment made things worse, why `target = "observed"` is the wrong tool there, and how much of the resulting sample size is bias rather than signal |
+
+Vignettes are `rmarkdown::html_vignette`, so building them needs **pandoc** on
+`PATH` — the flake's dev shell provides it. They set `math_method: mathml`, which
+writes the equations into the file as MathML. The default would instead leave the
+LaTeX as raw text and inject a loader that fetches MathJax from
+`mathjax.rstudio.com` when the page is opened, so the equations would only render
+online.
+`harmful-previous-trial` runs a small Monte Carlo study and a bootstrap, and
+takes around a minute to knit.
+
 ## Porting existing Stata scripts
 
 `slopepower()` mirrors the Stata command's interface argument for argument —

@@ -21,6 +21,7 @@ Encoding: UTF-8
 Depends: R (>= 4.1)
 Imports: nlme, stats
 LazyData: true
-Suggests: testthat (>= 3.0.0), haven
+Suggests: testthat (>= 3.0.0), haven, knitr, rmarkdown (>= 2.16)
+VignetteBuilder: knitr
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0
