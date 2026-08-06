@@ -12,7 +12,7 @@
 slope_bootstrap(
   x,
   R = 199,
-  type = c("percentile", "bca"),
+  type = c("bca", "percentile"),
   ...,
   level = 0.95,
   seed = NULL,
@@ -22,7 +22,7 @@ slope_bootstrap(
 \method{slope_bootstrap}{slope_sample_size}(
   x,
   R = 199,
-  type = c("percentile", "bca"),
+  type = c("bca", "percentile"),
   statistic = c("n", "tte"),
   ...,
   level = 0.95,
@@ -33,7 +33,7 @@ slope_bootstrap(
 \method{slope_bootstrap}{slope_power}(
   x,
   R = 199,
-  type = c("percentile", "bca"),
+  type = c("bca", "percentile"),
   statistic = c("power", "tte"),
   ...,
   level = 0.95,
@@ -44,7 +44,7 @@ slope_bootstrap(
 \method{slope_bootstrap}{slope_params}(
   x,
   R = 199,
-  type = c("percentile", "bca"),
+  type = c("bca", "percentile"),
   ...,
   level = 0.95,
   seed = NULL,
@@ -54,7 +54,7 @@ slope_bootstrap(
 \method{slope_bootstrap}{default}(
   x,
   R = 199,
-  type = c("percentile", "bca"),
+  type = c("bca", "percentile"),
   ...,
   level = 0.95,
   seed = NULL,
@@ -73,9 +73,9 @@ method, the \code{slope_bootstrap} object to show.}
 
 \item{R}{Number of bootstrap replicates.}
 
-\item{type}{\code{"percentile"} (the default) or \code{"bca"} for bias-corrected and
-accelerated intervals. The paper recommends BCa because the distribution of
-estimated sample sizes is typically skewed.}
+\item{type}{\code{"bca"} (the default) for bias-corrected and accelerated
+intervals, or \code{"percentile"}. The paper recommends BCa because the
+distribution of estimated sample sizes is typically skewed.}
 
 \item{...}{Not used. The calculation is taken from \code{x}, so any argument here
 is an error rather than something silently ignored.}

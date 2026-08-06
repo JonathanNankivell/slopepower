@@ -209,7 +209,7 @@ resolve_args <- function(p, result) {
 #' @noRd
 run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
                           seed, progress, context) {
-  type <- match.arg(type, c("percentile", "bca"))
+  type <- match.arg(type, c("bca", "percentile"))
   check_params(params, context)
   check_scalar(R, "R", context, lower = 1, upper = Inf, lower_open = FALSE)
   check_probability(level, "level", context)
@@ -337,9 +337,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #'   [slope_params_manual()] objects carry no data to resample. For the `print()`
 #'   method, the `slope_bootstrap` object to show.
 #' @param R Number of bootstrap replicates.
-#' @param type `"percentile"` (the default) or `"bca"` for bias-corrected and
-#'   accelerated intervals. The paper recommends BCa because the distribution of
-#'   estimated sample sizes is typically skewed.
+#' @param type `"bca"` (the default) for bias-corrected and accelerated
+#'   intervals, or `"percentile"`. The paper recommends BCa because the
+#'   distribution of estimated sample sizes is typically skewed.
 #' @param ... Not used. The calculation is taken from `x`, so any argument here
 #'   is an error rather than something silently ignored.
 #' @param level Confidence level for the interval.
@@ -405,7 +405,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' @seealso [slope_sample_size()], [slope_power()], [slope_params()],
 #'   [slope_se()] for the standard error behind the section 2.6 check
 #' @export
-slope_bootstrap <- function(x, R = 199, type = c("percentile", "bca"), ...,
+slope_bootstrap <- function(x, R = 199, type = c("bca", "percentile"), ...,
                             level = 0.95, seed = NULL, progress = FALSE) {
   UseMethod("slope_bootstrap")
 }
@@ -417,7 +417,7 @@ slope_bootstrap <- function(x, R = 199, type = c("percentile", "bca"), ...,
 #'   quantity the object exists to report.
 #' @export
 slope_bootstrap.slope_sample_size <- function(x, R = 199,
-                                              type = c("percentile", "bca"),
+                                              type = c("bca", "percentile"),
                                               statistic = c("n", "tte"), ...,
                                               level = 0.95, seed = NULL,
                                               progress = FALSE) {
@@ -440,7 +440,7 @@ slope_bootstrap.slope_sample_size <- function(x, R = 199,
 #'   target treatment effect behind it.
 #' @export
 slope_bootstrap.slope_power <- function(x, R = 199,
-                                        type = c("percentile", "bca"),
+                                        type = c("bca", "percentile"),
                                         statistic = c("power", "tte"), ...,
                                         level = 0.95, seed = NULL,
                                         progress = FALSE) {
@@ -464,7 +464,7 @@ slope_bootstrap.slope_power <- function(x, R = 199,
 #'   trial design.
 #' @export
 slope_bootstrap.slope_params <- function(x, R = 199,
-                                         type = c("percentile", "bca"), ...,
+                                         type = c("bca", "percentile"), ...,
                                          level = 0.95, seed = NULL,
                                          progress = FALSE) {
   context <- "slope_bootstrap()"
@@ -480,7 +480,7 @@ slope_bootstrap.slope_params <- function(x, R = 199,
 #' @describeIn slope_bootstrap Reject anything else, with a pointer to what is
 #'   accepted.
 #' @export
-slope_bootstrap.default <- function(x, R = 199, type = c("percentile", "bca"),
+slope_bootstrap.default <- function(x, R = 199, type = c("bca", "percentile"),
                                     ..., level = 0.95, seed = NULL,
                                     progress = FALSE) {
   stop(sprintf(paste0(
