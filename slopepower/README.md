@@ -79,6 +79,26 @@ you read Stata `.dta` files; `testthat` only for the test suite.
 Re-run the install command after pulling changes — there is no auto-reload. If you
 are editing the package itself, `devtools::load_all("<that path>")` is faster.
 
+### Installing the vignettes too
+
+Neither command above installs the vignettes: `R CMD INSTALL` never builds them,
+and `remotes::install_local()` does not by default, so `vignette("...")` will
+report that none exist. Ask for them explicitly:
+
+```r
+remotes::install_local("<that path>", build_vignettes = TRUE)
+```
+
+or build the tarball first, which is what CRAN does:
+
+```sh
+R CMD build "<that path>" && R CMD INSTALL slopepower_*.tar.gz
+```
+
+Either route knits the vignettes, so both need **pandoc** on `PATH` — see
+[Vignettes](#vignettes) below. Once installed the built HTML is self-contained;
+reading it needs neither pandoc nor a network connection.
+
 ## Basic use
 
 ```r
@@ -233,6 +253,9 @@ published slopes.
 browseVignettes("slopepower")
 vignette("harmful-previous-trial", package = "slopepower")
 ```
+
+Both need the package to have been installed *with* its vignettes — see
+[Installing the vignettes too](#installing-the-vignettes-too).
 
 | | topic |
 |---|---|
