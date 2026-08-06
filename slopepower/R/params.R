@@ -159,8 +159,30 @@ extract_residual <- function(fit, level = NULL, context) {
 
 # ---- model fitting ----------------------------------------------------------
 
-#' lme control settings used for every fit
-#' @noRd
+#' The `nlme::lme()` control settings used by every fit
+#'
+#' Returns the [nlme::lmeControl()] settings that [slope_params()] passes to
+#' every call to [nlme::lme()]: more iterations than `nlme`'s own defaults,
+#' the `"optim"` optimiser, and tighter convergence tolerances. These were
+#' chosen because the untightened defaults converged less precisely,
+#' particularly for the two-block random-effects structure fitted when
+#' `healthy` is supplied (see the `common_variance` note in
+#' [slope_params()]).
+#'
+#' There is deliberately no argument to [slope_params()] for supplying a
+#' different control object -- see "What these models do and do not include"
+#' in `?slope_params` for why the model this package fits is fixed rather
+#' than user-tunable. This function exists so the settings behind every fit
+#' are inspectable and reproducible outside the package, not so they can be
+#' overridden inside it.
+#'
+#' @return A list of control settings, as returned by [nlme::lmeControl()].
+#'
+#' @examples
+#' slope_lme_control()
+#'
+#' @seealso [slope_params()], which uses this for every mixed-model fit.
+#' @export
 slope_lme_control <- function() {
   nlme::lmeControl(maxIter = 200, msMaxIter = 200, niterEM = 50,
                    opt = "optim", tolerance = 1e-7, msTol = 1e-8,
@@ -361,6 +383,43 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #'   and stepped-wedge designs.** Stage two assumes two equal parallel arms.
 #'
 #' @return An object of class `"slope_params"`.
+#'
+#' @examples
+#' # Neither `healthy` nor `treated`: a single group of untreated subjects.
+#' # Four of the two hundred participants of `slpower1`, kept small so the
+#' # example runs quickly -- see `slpower1` for the paper's fit on the full data.
+#' df <- data.frame(
+#'   id    = c(1,1,1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4),
+#'   visit = c(0,1,2,3, 0,1,2,3, 0,1,2,3, 0,1,2,3),
+#'   sdmt  = c(41,33,25,30, 16,14,13,6, 35,27,31,23, 38,33,33,20)
+#' )
+#' slope_params(sdmt ~ visit | id, data = df)
+#'
+#' # `healthy`: two cases and two healthy controls, a subset of `slpower2`.
+#' # Visits are recorded as calendar dates there, so the time term converts
+#' # them to years.
+#' df2 <- data.frame(
+#'   id    = rep(c(1, 2, 251, 252), each = 4),
+#'   case  = rep(c(0, 0, 1, 1), each = 4),
+#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+#' )
+#' slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#'
+#' # `treated`: data from a completed trial, a subset of `slpower3`. Fitting the
+#' # random-effects structure shared by both arms needs more than a couple of
+#' # subjects per arm to converge, so this excerpt keeps six per arm.
+#' df3 <- data.frame(
+#'   id    = rep(c(1:6, 76:81), each = 3),
+#'   treat = rep(c(0,0,0,0,0,0, 1,1,1,1,1,1), each = 3),
+#'   visit = rep(c(0, 0.5, 2), times = 12),
+#'   sdmt  = c(35,36,34, 32,34,29, 27,29,22, 15,22,13, 16,17,14, 29,27,28,
+#'             29,33,35, 19,19,17, 19,14,7, 37,38,32, 19,18,23, 43,44,43)
+#' )
+#' slope_params(sdmt ~ visit | id, data = df3, treated = treat)
 #'
 #' @references
 #' Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
@@ -574,6 +633,24 @@ slope_params <- function(formula, data,
 #' @param comparator One of `"none"`, `"healthy"` or `"treated"`.
 #'
 #' @return An object of class `"slope_params"`.
+#'
+#' @examples
+#' # A single group, powered toward a slope of zero. Figures from Table 1,
+#' # p.595 of Nash et al. (2021).
+#' slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10
+#' )
+#'
+#' # Case/healthy-control parameters taken from a published paper, with no
+#' # dataset of individual participants available to fit slope_params() to.
+#' slope_params_manual(
+#'   slope = -1.672, slope_comparator = -0.5,
+#'   sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10,
+#'   comparator = "healthy"
+#' )
+#'
 #' @seealso [slope_params()] to estimate these from data.
 #' @export
 slope_params_manual <- function(slope,
@@ -671,6 +748,10 @@ new_slope_params <- function(slope, slope_comparator, comparator,
 #' @param x A `"slope_params"` object.
 #' @param ... Ignored.
 #' @return `x`, invisibly.
+#'
+#' @examples
+#' slope_params(sdmt ~ visit | id, data = slpower1)
+#'
 #' @export
 print.slope_params <- function(x, ...) {
   lab <- switch(x$comparator,

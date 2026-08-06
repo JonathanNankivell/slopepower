@@ -17,3 +17,8 @@
 \description{
 Print a slope sample-size calculation
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+
+}

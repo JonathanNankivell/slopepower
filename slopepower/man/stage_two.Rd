@@ -11,8 +11,8 @@ previously collected longitudinal data or from \code{\link[=slope_params_manual]
 vector of visit times beginning at 0.}
 
 \item{effectiveness}{Proportion of the slope difference the treatment is
-expected to remove, in (0, 1]. Must not be supplied when
-\code{target = "observed"}, which fixes it at 1.}
+expected to remove, in (0, 1] (see "The reference slope" below). Must not
+be supplied when \code{target = "observed"}, which fixes it at 1.}
 
 \item{target}{\code{"effectiveness"} (the default) or \code{"observed"}. The latter is
 the equivalent of the Stata command's \code{usetrt} option and requires

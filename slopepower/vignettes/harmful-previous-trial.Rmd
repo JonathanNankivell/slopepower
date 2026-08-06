@@ -349,8 +349,8 @@ pipeline rather than quote a point estimate:
 
 ```{r bootstrap}
 set.seed(2)
-slope_bootstrap(pars, R = 120, design = design, effectiveness = 0.25,
-                statistic = "n", type = "bca")
+slope_bootstrap(slope_sample_size(pars, design, effectiveness = 0.25),
+                R = 120, type = "bca")
 ```
 
 Use a much larger `R` in earnest — the paper uses 2000. Note that the bias

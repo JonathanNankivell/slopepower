@@ -2,14 +2,59 @@
 % Please edit documentation in R/bootstrap.R
 \name{slope_bootstrap}
 \alias{slope_bootstrap}
+\alias{slope_bootstrap.slope_sample_size}
+\alias{slope_bootstrap.slope_power}
+\alias{slope_bootstrap.slope_params}
+\alias{slope_bootstrap.default}
 \alias{print.slope_bootstrap}
 \title{Bootstrap the stage-one estimates}
 \usage{
 slope_bootstrap(
-  params,
+  x,
   R = 199,
   type = c("percentile", "bca"),
-  statistic = c("n", "power", "tte", "slope"),
+  ...,
+  level = 0.95,
+  seed = NULL,
+  progress = FALSE
+)
+
+\method{slope_bootstrap}{slope_sample_size}(
+  x,
+  R = 199,
+  type = c("percentile", "bca"),
+  statistic = c("n", "tte"),
+  ...,
+  level = 0.95,
+  seed = NULL,
+  progress = FALSE
+)
+
+\method{slope_bootstrap}{slope_power}(
+  x,
+  R = 199,
+  type = c("percentile", "bca"),
+  statistic = c("power", "tte"),
+  ...,
+  level = 0.95,
+  seed = NULL,
+  progress = FALSE
+)
+
+\method{slope_bootstrap}{slope_params}(
+  x,
+  R = 199,
+  type = c("percentile", "bca"),
+  ...,
+  level = 0.95,
+  seed = NULL,
+  progress = FALSE
+)
+
+\method{slope_bootstrap}{default}(
+  x,
+  R = 199,
+  type = c("percentile", "bca"),
   ...,
   level = 0.95,
   seed = NULL,
@@ -19,8 +64,12 @@ slope_bootstrap(
 \method{print}{slope_bootstrap}(x, ...)
 }
 \arguments{
-\item{params}{A \code{slope_params} object produced by \code{\link[=slope_params]{slope_params()}}. Objects
-from \code{\link[=slope_params_manual]{slope_params_manual()}} cannot be bootstrapped: they carry no data.}
+\item{x}{What to bootstrap: a \code{slope_sample_size} object from
+\code{\link[=slope_sample_size]{slope_sample_size()}}, a \code{slope_power} object from \code{\link[=slope_power]{slope_power()}}, or a
+\code{slope_params} object from \code{\link[=slope_params]{slope_params()}} for the fitted slope itself.
+The underlying parameters must come from \code{\link[=slope_params]{slope_params()}} in either case;
+\code{\link[=slope_params_manual]{slope_params_manual()}} objects carry no data to resample. For the \code{print()}
+method, the \code{slope_bootstrap} object to show.}
 
 \item{R}{Number of bootstrap replicates.}
 
@@ -28,13 +77,8 @@ from \code{\link[=slope_params_manual]{slope_params_manual()}} cannot be bootstr
 accelerated intervals. The paper recommends BCa because the distribution of
 estimated sample sizes is typically skewed.}
 
-\item{statistic}{Which quantity to bootstrap. \code{"n"}, \code{"power"} and \code{"tte"}
-require a \code{design} in \code{...}. Each is computed through the entry point that
-solves for it: \code{"power"} through \code{\link[=slope_power]{slope_power()}}, which needs \code{n}; \code{"n"} and
-\code{"tte"} through \code{\link[=slope_sample_size]{slope_sample_size()}}, which takes a target \code{power} instead.}
-
-\item{...}{Passed to \code{\link[=slope_power]{slope_power()}} or \code{\link[=slope_sample_size]{slope_sample_size()}} according to
-\code{statistic}; typically \code{design}, \code{effectiveness}, and \code{n} or \code{power}.}
+\item{...}{Not used. The calculation is taken from \code{x}, so any argument here
+is an error rather than something silently ignored.}
 
 \item{level}{Confidence level for the interval.}
 
@@ -42,19 +86,36 @@ solves for it: \code{"power"} through \code{\link[=slope_power]{slope_power()}},
 
 \item{progress}{Report progress while resampling.}
 
-\item{x}{A \code{slope_bootstrap} object.}
+\item{statistic}{Which of the object's quantities to bootstrap. Each method
+offers only what its object solved for or derived, and defaults to the
+quantity the object exists to report.}
 }
 \value{
 An object of class \code{slope_bootstrap}, with elements \code{observed}, \code{replicates},
-\code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed} and \code{se}.
+\code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed}, \code{level} and \code{se}.
 }
 \description{
 Resamples subjects with replacement, refits the stage-one mixed model on each
-replicate, and recomputes a statistic of interest. This propagates the
+replicate, and recomputes a quantity of interest. This propagates the
 estimation uncertainty in the slope and variance components through to the
 sample size or power, as recommended in section 2.6 of Nash et al. (2021).
 }
 \details{
+Hand it the result you want an interval around, not a fresh specification of
+the calculation. A \code{slope_sample_size} object knows the design, effectiveness,
+target power and significance level it was solved with, so the bootstrap
+re-solves exactly that calculation on each replicate:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+slope_bootstrap(ss, R = 999, type = "bca")
+}\if{html}{\out{</div>}}
+
+Dispatching on the result rather than on a \code{statistic} argument also makes it
+impossible to bootstrap one of the calculation's own inputs -- an interval
+around the \code{n} you supplied yourself is zero-width, and used to be an easy
+call to write. Each method offers only quantities its object solved for or
+derived.
+
 Subjects, not observations, are the sampling unit, and each drawn subject is
 given a fresh identifier so that a subject selected twice is treated as two
 people rather than as one person with twice as much data. When the parameters
@@ -66,6 +127,21 @@ Refitting a mixed model several hundred times is slow, and \code{type = "bca"} a
 a leave-one-subject-out jackknife on top, costing one further fit per subject.
 Start with a small \code{R} to gauge the cost.
 }
+\section{Methods (by class)}{
+\itemize{
+\item \code{slope_bootstrap(slope_sample_size)}: Bootstrap the required sample size (the default)
+or the target treatment effect behind it.
+
+\item \code{slope_bootstrap(slope_power)}: Bootstrap the power achieved (the default) or the
+target treatment effect behind it.
+
+\item \code{slope_bootstrap(slope_params)}: Bootstrap the fitted slope itself, which needs no
+trial design.
+
+\item \code{slope_bootstrap(default)}: Reject anything else, with a pointer to what is
+accepted.
+
+}}
 \section{Methods (by generic)}{
 \itemize{
 \item \code{print(slope_bootstrap)}: Print a bootstrap result.
@@ -74,21 +150,49 @@ Start with a small \code{R} to gauge the cost.
 \examples{
 # The parameters must come from slope_params(): bootstrapping resamples the
 # underlying subjects, which slope_params_manual() objects do not carry.
-set.seed(1)
-subject <- rep(1:40, each = 4)
-sim <- data.frame(
-  id    = subject,
-  visit = rep(0:3, times = 40),
-  sdmt  = rnorm(40, 50, 10)[subject] +
-          rnorm(40, -1.7, 1.4)[subject] * rep(0:3, times = 40) +
-          rnorm(160, 0, 3)
-)
-pars <- slope_params(sdmt ~ visit | id, data = sim)
+
+# No comparator: all two hundred participants of `slpower1`.
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 
 # One mixed-model fit per replicate, so a real run wants a much larger R.
 \donttest{
-slope_bootstrap(pars, R = 100, design = c(0, 1, 2),
-                effectiveness = 0.33, seed = 42)
+slope_bootstrap(ss, R = 100, seed = 42)
+
+# The same result also carries the target treatment effect.
+slope_bootstrap(ss, R = 100, statistic = "tte", seed = 42)
+
+# An interval around the slope needs no trial design at all.
+slope_bootstrap(pars, R = 100, seed = 42)
+}
+
+# Case/healthy-control comparator: forty cases and forty healthy controls,
+# simulated (rather than drawn from `slpower2`, whose 500 participants
+# would make every replicate refit the slowest model in the package) and
+# built subject by subject so each keeps one intercept and one slope
+# across its four visits.
+set.seed(2)
+subj2 <- data.frame(id = 1:80, case = rep(c(1, 0), each = 40))
+subj2$intercept <- rnorm(80, 50, 10)
+subj2$slope     <- rnorm(80, ifelse(subj2$case == 1, -1.7, -0.3), 1.4)
+sim2 <- merge(subj2, data.frame(visit = 0:3))
+sim2$sdmt <- sim2$intercept + sim2$slope * sim2$visit + rnorm(nrow(sim2), 0, 3)
+pars2 <- slope_params(sdmt ~ visit | id, data = sim2, healthy = case)
+
+\donttest{
+# Bootstrapping the power of a fixed sample size, rather than the size itself.
+pw2 <- slope_power(pars2, c(0, 1, 2), n = 400, effectiveness = 0.33)
+slope_bootstrap(pw2, R = 100, seed = 42)
+}
+
+# Randomised-trial comparator, target = "observed": all one hundred and
+# fifty participants of `slpower3`, bootstrapping the sample size needed
+# to detect the effect the trial actually found.
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+
+\donttest{
+ss3 <- slope_sample_size(pars3, c(0, 0.5, 2), target = "observed")
+slope_bootstrap(ss3, R = 100, seed = 42)
 }
 
 }
@@ -98,5 +202,6 @@ calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
 }
 \seealso{
-\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_params]{slope_params()}}
+\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_params]{slope_params()}},
+\code{\link[=slope_se]{slope_se()}} for the standard error behind the section 2.6 check
 }

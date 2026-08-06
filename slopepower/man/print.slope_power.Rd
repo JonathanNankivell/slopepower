@@ -17,3 +17,8 @@
 \description{
 Print a slope power calculation
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+
+}

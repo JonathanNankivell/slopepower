@@ -30,3 +30,12 @@ The Stata implementation builds this on the unit-integer grid
 matrix; the two agree exactly at integer times, and this form additionally
 supports fractional visit spacing without the \code{scale()} option.
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_sigma(pars, c(0, 1, 2))
+
+}
+\seealso{
+\code{\link[=slope_var]{slope_var()}}, the two-person treatment-effect variance built from
+this matrix; \code{\link[=slope_se]{slope_se()}}, the standard error of the fitted slope itself.
+}

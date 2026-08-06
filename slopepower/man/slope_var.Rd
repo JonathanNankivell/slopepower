@@ -21,3 +21,16 @@ trial with one participant in each arm, following equation (5) of Nash et al.
 \eqn{N} participants per arm is \eqn{s^*/\sqrt{N}}, this single quantity
 carries all of the design information needed for the sample-size formula.
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_var(pars, c(0, 1, 2))
+
+# A third follow-up visit adds information about the slope, so the
+# treatment-effect variance shrinks.
+slope_var(pars, c(0, 1, 2, 3))
+
+}
+\seealso{
+\code{\link[=slope_sigma]{slope_sigma()}}, the marginal covariance matrix this is built
+from; \code{\link[=slope_se]{slope_se()}}, the standard error of the fitted slope itself.
+}

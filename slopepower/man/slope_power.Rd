@@ -25,8 +25,8 @@ quantity whose power is being evaluated. Odd values are reduced by one so
 that the arms are equal, with the value as supplied kept in \code{n_requested}.}
 
 \item{effectiveness}{Proportion of the slope difference the treatment is
-expected to remove, in (0, 1]. Must not be supplied when
-\code{target = "observed"}, which fixes it at 1.}
+expected to remove, in (0, 1] (see "The reference slope" below). Must not
+be supplied when \code{target = "observed"}, which fixes it at 1.}
 
 \item{target}{\code{"effectiveness"} (the default) or \code{"observed"}. The latter is
 the equivalent of the Stata command's \code{usetrt} option and requires
@@ -75,11 +75,31 @@ Stata command's default behaviour for trial data.}
 }
 
 \examples{
-pars <- slope_params_manual(
-  slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10
-)
+# No comparator: measured toward a slope of zero, fitted to all two
+# hundred participants of `slpower1`. Reproduces the paper's p.588 result.
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+
+# Case/healthy-control comparator: measured toward the healthy controls'
+# slope. Two cases and two controls, a subset of `slpower2`, whose visits
+# are calendar dates and so are converted to years in the formula.
+df2 <- data.frame(
+  id    = rep(c(1, 2, 251, 252), each = 4),
+  case  = rep(c(0, 0, 1, 1), each = 4),
+  vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+                    "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+                    "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+                    "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+  sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+)
+pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
+
+# Randomised-trial comparator, target = "observed": what power would a
+# repeat trial have to detect the same effect the trial actually found,
+# fitted to all one hundred and fifty participants of `slpower3`.
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
 
 }
 \references{

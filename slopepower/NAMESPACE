@@ -7,40 +7,42 @@ S3method(print,slope_params)
 S3method(print,slope_power)
 S3method(print,slope_sample_size)
 S3method(print,trial_design)
+S3method(slope_bootstrap,default)
+S3method(slope_bootstrap,slope_params)
+S3method(slope_bootstrap,slope_power)
+S3method(slope_bootstrap,slope_sample_size)
 export(dropout_rate)
 export(slope_bootstrap)
 export(slope_effect_size)
+export(slope_lme_control)
 export(slope_params)
 export(slope_params_manual)
 export(slope_power)
 export(slope_power_grid)
 export(slope_sample_size)
 export(slope_sample_size_grid)
+export(slope_se)
 export(slope_sigma)
 export(slope_var)
 export(slopepower)
 export(trial_design)
-importFrom(nlme,
-  fixef,
-  getData,
-  getVarCov,
-  lme,
-  lmeControl,
-  pdBlocked,
-  pdIdent,
-  pdSymm,
-  varIdent
-)
-importFrom(stats,
-  as.formula,
-  ave,
-  coef,
-  na.omit,
-  pnorm,
-  qnorm,
-  quantile,
-  setNames,
-  sigma,
-  terms,
-  vcov
-)
+importFrom(nlme,fixef)
+importFrom(nlme,getData)
+importFrom(nlme,getVarCov)
+importFrom(nlme,lme)
+importFrom(nlme,lmeControl)
+importFrom(nlme,pdBlocked)
+importFrom(nlme,pdIdent)
+importFrom(nlme,pdSymm)
+importFrom(nlme,varIdent)
+importFrom(stats,as.formula)
+importFrom(stats,ave)
+importFrom(stats,coef)
+importFrom(stats,na.omit)
+importFrom(stats,pnorm)
+importFrom(stats,qnorm)
+importFrom(stats,quantile)
+importFrom(stats,setNames)
+importFrom(stats,sigma)
+importFrom(stats,terms)
+importFrom(stats,vcov)

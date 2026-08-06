@@ -179,6 +179,44 @@ and stepped-wedge designs.} Stage two assumes two equal parallel arms.
 }
 }
 
+\examples{
+# Neither `healthy` nor `treated`: a single group of untreated subjects.
+# Four of the two hundred participants of `slpower1`, kept small so the
+# example runs quickly -- see `slpower1` for the paper's fit on the full data.
+df <- data.frame(
+  id    = c(1,1,1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4),
+  visit = c(0,1,2,3, 0,1,2,3, 0,1,2,3, 0,1,2,3),
+  sdmt  = c(41,33,25,30, 16,14,13,6, 35,27,31,23, 38,33,33,20)
+)
+slope_params(sdmt ~ visit | id, data = df)
+
+# `healthy`: two cases and two healthy controls, a subset of `slpower2`.
+# Visits are recorded as calendar dates there, so the time term converts
+# them to years.
+df2 <- data.frame(
+  id    = rep(c(1, 2, 251, 252), each = 4),
+  case  = rep(c(0, 0, 1, 1), each = 4),
+  vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+                    "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+                    "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+                    "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+  sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+)
+slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+
+# `treated`: data from a completed trial, a subset of `slpower3`. Fitting the
+# random-effects structure shared by both arms needs more than a couple of
+# subjects per arm to converge, so this excerpt keeps six per arm.
+df3 <- data.frame(
+  id    = rep(c(1:6, 76:81), each = 3),
+  treat = rep(c(0,0,0,0,0,0, 1,1,1,1,1,1), each = 3),
+  visit = rep(c(0, 0.5, 2), times = 12),
+  sdmt  = c(35,36,34, 32,34,29, 27,29,22, 15,22,13, 16,17,14, 29,27,28,
+            29,33,35, 19,19,17, 19,14,7, 37,38,32, 19,18,23, 43,44,43)
+)
+slope_params(sdmt ~ visit | id, data = df3, treated = treat)
+
+}
 \references{
 Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
 sample-size calculations for trials that compare slopes over time:

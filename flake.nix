@@ -35,7 +35,7 @@
           packages = [ rEnv ] ++ sysPkgs;
 
           shellHook = ''
-            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, nlme, haven, testthat, roxygen2, devtools, knitr"
+            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, nlme, haven, testthat, roxygen2, devtools, knitr, rmarkdown"
             echo "pandoc $(pandoc --version | head -n1 | cut -d' ' -f2)"
           '';
         };

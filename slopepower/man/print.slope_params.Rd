@@ -17,3 +17,7 @@
 \description{
 Print stage-one slope parameters
 }
+\examples{
+slope_params(sdmt ~ visit | id, data = slpower1)
+
+}

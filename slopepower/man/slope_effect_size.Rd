@@ -39,3 +39,13 @@ reciprocals of the stratum-specific sample sizes.
 Participants who attend only the baseline visit contribute nothing, since a
 single measurement carries no information about a slope.
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_effect_size(pars, c(0, 1, 2))
+
+# A quarter of participants are expected to miss the final visit: the
+# effect size shrinks because they contribute less slope information.
+design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
+slope_effect_size(pars, design)
+
+}

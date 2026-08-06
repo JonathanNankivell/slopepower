@@ -29,3 +29,14 @@ its slope columns depending on which model was fitted.
 object's class, and exists so that a bound table stays interpretable; the
 functions themselves have no such switch.
 }
+\examples{
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+res <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+as.data.frame(res)
+
+# Stable column names make results from different designs and different
+# questions safe to bind into one comparison table.
+res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
+rbind(as.data.frame(res), as.data.frame(res2))
+
+}

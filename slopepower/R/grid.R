@@ -282,14 +282,50 @@ grid_impl <- function(visits, dropout, evaluate, context) {
 #'   `effect_size`. `n` is constant; `power` is what varies.
 #'
 #' @examples
+#' # Table 1, p.595 of Nash et al. (2021): explores how adding interim visits
+#' # changes power under three dropout rates, holding the sample size at the
+#' # trial's planned N = 450. No comparator: measured toward a slope of zero.
+#' # The stage-one estimates are the exact fit reported for `slpower1` (see
+#' # `slope_params(sdmt ~ visit | id, data = slpower1)`), passed here via
+#' # slope_params_manual() so the example does not have to refit the mixed
+#' # model on all two hundred participants.
 #' pars <- slope_params_manual(
-#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
+#'   slope = -1.6725, sigma2_intercept = 111.786636, sigma2_slope = 2.350021,
+#'   sigma_cov = 2.810881, sigma2_residual = 9.159780
 #' )
 #' slope_power_grid(
 #'   pars, n = 450, effectiveness = 0.33,
 #'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
 #'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
+#' )
+#'
+#' # Case/healthy-control comparator: two cases and two healthy controls, a
+#' # subset of `slpower2` whose visits are calendar dates converted to years.
+#' df2 <- data.frame(
+#'   id    = rep(c(1, 2, 251, 252), each = 4),
+#'   case  = rep(c(0, 0, 1, 1), each = 4),
+#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+#' )
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' slope_power_grid(
+#'   pars2, n = 40, effectiveness = 0.33,
+#'   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
+#'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+#' )
+#'
+#' # Randomised-trial comparator, target = "observed": compare a design with
+#' # only the trial's original two follow-up visits against a denser one, at
+#' # the effect size the trial actually found, fitted to all one hundred and
+#' # fifty participants of `slpower3`.
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' slope_power_grid(
+#'   pars3, n = 396, target = "observed",
+#'   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
+#'   dropout = NULL
 #' )
 #'
 #' @seealso [slope_power()], [slope_sample_size_grid()], [dropout_rate()]
@@ -335,14 +371,42 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #'   constant; `n` and `n_per_arm` are what vary.
 #'
 #' @examples
-#' pars <- slope_params_manual(
-#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
-#' )
+#' # No comparator: measured toward a slope of zero, fitted to all two
+#' # hundred participants of `slpower1`.
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 #' slope_sample_size_grid(
 #'   pars, power = 0.8, effectiveness = 0.33,
-#'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+#'   visits  = list(annual = c(0, 1, 2, 3), six_month = seq(0, 3, 0.5)),
 #'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+#' )
+#'
+#' # Case/healthy-control comparator: two cases and two healthy controls, a
+#' # subset of `slpower2` whose visits are calendar dates converted to years.
+#' df2 <- data.frame(
+#'   id    = rep(c(1, 2, 251, 252), each = 4),
+#'   case  = rep(c(0, 0, 1, 1), each = 4),
+#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+#' )
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' slope_sample_size_grid(
+#'   pars2, power = 0.8, effectiveness = 0.33,
+#'   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
+#'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+#' )
+#'
+#' # Randomised-trial comparator, target = "observed": the sample size needed
+#' # to detect the same effect the trial actually found, comparing its
+#' # original visit schedule against a denser one, fitted to all one hundred
+#' # and fifty participants of `slpower3`.
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' slope_sample_size_grid(
+#'   pars3, power = 0.8, target = "observed",
+#'   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
+#'   dropout = NULL
 #' )
 #'
 #' @seealso [slope_sample_size()], [slope_power_grid()], [dropout_rate()]

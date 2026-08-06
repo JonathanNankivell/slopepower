@@ -66,9 +66,44 @@ resample_frame <- function(frame, subject_index, groups) {
   do.call(rbind, parts)
 }
 
-#' Standard error of the reported slope, from the fitted model
-#' @noRd
+#' Standard error of the estimated slope
+#'
+#' The standard error of the untreated (or case) slope, taken from the fitted
+#' mixed model's fixed-effects covariance matrix: for `comparator = "healthy"`
+#' or `"treated"` this combines the variances of, and covariance between, the
+#' two fixed-effect terms whose sum is the slope, not just the variance of a
+#' single coefficient. [slope_bootstrap()] compares this to the slope itself
+#' as the check recommended in section 2.6 of Nash et al. (2021): a slope
+#' less than 2.5 times its standard error means bootstrap replicates can
+#' straddle zero, at which point the resulting interval stops meaning
+#' anything.
+#'
+#' @param params A `slope_params` object produced by [slope_params()]. Objects
+#'   from [slope_params_manual()] carry no fitted model, so `NA_real_` is
+#'   returned for them.
+#'
+#' @return A single non-negative number, or `NA_real_` if `params` has no
+#'   fitted model, or if the slope terms could not be identified in it (with
+#'   a warning).
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_se(pars)
+#'
+#' # slope_params_manual() objects carry no fitted model, so there is no
+#' # standard error to report.
+#' slope_se(slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10
+#' ))
+#'
+#' @seealso [slope_sigma()] and [slope_var()], the other quantities computed
+#'   from a `slope_params` object; [slope_bootstrap()], which uses this to
+#'   flag an unreliable interval.
+#' @export
 slope_se <- function(params) {
+  context <- "slope_se()"
+  check_params(params, context)
   fit <- params$fit
   if (is.null(fit)) return(NA_real_)
   b <- tryCatch(nlme::fixef(fit), error = function(e) return(NULL))
@@ -90,141 +125,101 @@ slope_se <- function(params) {
                   treated = c("sp_time", "sp_placebo_time"))
   if (anyNA(terms) || !all(terms %in% names(b))) {
     warning(sprintf(paste0(
-      "slope_bootstrap(): could not identify the slope terms in the fitted model ",
-      "(have %s), so the section 2.6 check on the slope-to-standard-error ratio ",
-      "was skipped."), paste(names(b), collapse = ", ")), call. = FALSE)
+      "%s: could not identify the slope terms in the fitted model (have %s); ",
+      "returning NA. If this call came from slope_bootstrap(), its section 2.6 ",
+      "check on the slope-to-standard-error ratio was skipped."),
+      context, paste(names(b), collapse = ", ")), call. = FALSE)
     return(NA_real_)
   }
   k <- as.numeric(names(b) %in% terms)
   sqrt(drop(k %*% as.matrix(V) %*% k))
 }
 
-#' Bootstrap the stage-one estimates
+#' Reject anything left in `...`
 #'
-#' Resamples subjects with replacement, refits the stage-one mixed model on each
-#' replicate, and recomputes a statistic of interest. This propagates the
-#' estimation uncertainty in the slope and variance components through to the
-#' sample size or power, as recommended in section 2.6 of Nash et al. (2021).
+#' The methods take no pass-through arguments: everything the calculation needs
+#' is already in the object being bootstrapped. Silently ignoring a stray
+#' `design =` or `n =` would be the worst outcome, because the result would look
+#' like a successful bootstrap of something else entirely -- and that is exactly
+#' the shape of a call written against the pre-generic interface, where the
+#' calculation was re-specified here rather than dispatched on.
+#' @noRd
+reject_dots <- function(dots, context, advice) {
+  if (length(dots) == 0L) return(invisible(NULL))
+  nms <- names(dots)
+  nms <- if (is.null(nms)) rep("", length(dots)) else nms
+  shown <- ifelse(nzchar(nms), nms, "<unnamed>")
+  stop(sprintf("%s: unused argument%s (%s).\n  %s",
+               context, if (length(dots) > 1L) "s" else "",
+               paste(shown, collapse = ", "), advice), call. = FALSE)
+}
+
+#' `match.arg()` for `statistic`, with a message that names the object
 #'
-#' Subjects, not observations, are the sampling unit, and each drawn subject is
-#' given a fresh identifier so that a subject selected twice is treated as two
-#' people rather than as one person with twice as much data. When the parameters
-#' came from two-group data, resampling is stratified so that each replicate has
-#' the same number of cases and controls (or treated and control subjects) as the
-#' original.
+#' Which statistics are on offer is now a property of the object being
+#' bootstrapped, so a rejected one almost always means the wrong object was
+#' handed over -- `statistic = "power"` on a result that solved for the sample
+#' size, say. Bare `match.arg()` reports only `'arg' should be one of ...`, which
+#' names neither the argument nor the object and leaves the caller to work out
+#' that the fix is upstream, in the call that built `x`.
+#' @noRd
+match_statistic <- function(statistic, choices, advice, context) {
+  if (identical(statistic, choices)) return(choices[1L])
+  if (is.character(statistic) && length(statistic) == 1L && statistic %in% choices) {
+    return(statistic)
+  }
+  stop(sprintf("%s: `statistic` must be %s, not %s.\n  %s",
+               context, paste(sQuote(choices), collapse = " or "),
+               sQuote(paste(as.character(statistic), collapse = ", ")), advice),
+       call. = FALSE)
+}
+
+#' The advice half of that message, for the two stage-two methods
+#' @noRd
+dots_advice_result <- function(entry) {
+  paste0("The calculation comes from the object being bootstrapped, so `design`,\n",
+         "  `effectiveness`, `target`, `alpha` and the sample size or power belong\n",
+         "  to the ", entry, " call that produced it, not here.")
+}
+
+#' Re-solve a stage-two result against resampled parameters
 #'
-#' Refitting a mixed model several hundred times is slow, and `type = "bca"` adds
-#' a leave-one-subject-out jackknife on top, costing one further fit per subject.
-#' Start with a small `R` to gauge the cost.
+#' Rebuilds the call that produced `result`, substituting the parameters fitted
+#' to one bootstrap replicate. Everything needed is stored on the result:
+#' `design` is already a `trial_design` object, and `alpha`, `target` and the
+#' solved-for input are carried alongside it.
 #'
-#' @param params A `slope_params` object produced by [slope_params()]. Objects
-#'   from [slope_params_manual()] cannot be bootstrapped: they carry no data.
-#' @param R Number of bootstrap replicates.
-#' @param type `"percentile"` (the default) or `"bca"` for bias-corrected and
-#'   accelerated intervals. The paper recommends BCa because the distribution of
-#'   estimated sample sizes is typically skewed.
-#' @param statistic Which quantity to bootstrap. `"n"`, `"power"` and `"tte"`
-#'   require a `design` in `...`. Each is computed through the entry point that
-#'   solves for it: `"power"` through [slope_power()], which needs `n`; `"n"` and
-#'   `"tte"` through [slope_sample_size()], which takes a target `power` instead.
-#' @param ... Passed to [slope_power()] or [slope_sample_size()] according to
-#'   `statistic`; typically `design`, `effectiveness`, and `n` or `power`.
-#' @param level Confidence level for the interval.
-#' @param seed Optional integer seed, for reproducibility.
-#' @param progress Report progress while resampling.
+#' `effectiveness` is omitted under `target = "observed"`, which fixes it at 1
+#' and stores `NA_real_`; the stage-two entry points reject the two together.
+#' @noRd
+resolve_args <- function(p, result) {
+  args <- list(params = p, design = result$design,
+               target = result$target, alpha = result$alpha)
+  if (!identical(result$target, "observed")) {
+    args$effectiveness <- result$effectiveness
+  }
+  args
+}
+
+#' Bootstrap a scalar computed from resampled stage-one parameters
 #'
-#' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,
-#'   `ci`, `type`, `statistic`, `R`, `n_failed` and `se`.
-#'
-#' @references
-#' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
-#' calculations for trials that compare slopes over time: Introducing the
-#' slopepower command. \emph{Stata Journal} 21(3): 575--601.
-#'
-#' @examples
-#' # The parameters must come from slope_params(): bootstrapping resamples the
-#' # underlying subjects, which slope_params_manual() objects do not carry.
-#' set.seed(1)
-#' subject <- rep(1:40, each = 4)
-#' sim <- data.frame(
-#'   id    = subject,
-#'   visit = rep(0:3, times = 40),
-#'   sdmt  = rnorm(40, 50, 10)[subject] +
-#'           rnorm(40, -1.7, 1.4)[subject] * rep(0:3, times = 40) +
-#'           rnorm(160, 0, 3)
-#' )
-#' pars <- slope_params(sdmt ~ visit | id, data = sim)
-#'
-#' # One mixed-model fit per replicate, so a real run wants a much larger R.
-#' \donttest{
-#' slope_bootstrap(pars, R = 100, design = c(0, 1, 2),
-#'                 effectiveness = 0.33, seed = 42)
-#' }
-#'
-#' @seealso [slope_sample_size()], [slope_power()], [slope_params()]
-#' @export
-slope_bootstrap <- function(params, R = 199,
-                            type = c("percentile", "bca"),
-                            statistic = c("n", "power", "tte", "slope"),
-                            ..., level = 0.95, seed = NULL, progress = FALSE) {
-  context <- "slope_bootstrap()"
-  type <- match.arg(type)
-  statistic <- match.arg(statistic)
+#' The resampling scheme, the section 2.6 check and the interval construction are
+#' the same whatever is being bootstrapped; only `compute` differs, and each
+#' method supplies one closure that reads its statistic off a refit.
+#' @noRd
+run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
+                          seed, progress, context) {
+  type <- match.arg(type, c("percentile", "bca"))
+  check_params(params, context)
   check_scalar(R, "R", context, lower = 1, upper = Inf, lower_open = FALSE)
   check_probability(level, "level", context)
   if (!is.null(seed)) set.seed(seed)
 
-  dots <- list(...)
-  needs_design <- !identical(statistic, "slope")
-  if (needs_design && is.null(dots$design)) {
-    stop(sprintf('%s: statistic = "%s" needs a trial design; pass `design` (and any of ',
-                 context, statistic),
-         "`effectiveness`, `alpha`, and `n` or `power`) through `...`.", call. = FALSE)
-  }
-  # Each statistic is bootstrapped through the entry point that solves for it, so
-  # the quantity being resampled must be an output of that call and not one of
-  # its inputs. Supplying it as an input bootstraps the user's own number:
-  # every replicate returns it unchanged, giving a zero-width interval that looks
-  # like a successful bootstrap.
-  if (identical(statistic, "power") && is.null(dots$n)) {
-    stop(sprintf(paste0(
-      '%s: statistic = "power" requires `n` -- it is the sample size whose power ',
-      "is being bootstrapped."), context), call. = FALSE)
-  }
-  if (identical(statistic, "power") && !is.null(dots$power)) {
-    stop(sprintf(paste0(
-      '%s: statistic = "power" bootstraps the power, so `power` must not be ',
-      "supplied as an input. Pass `n` instead."), context), call. = FALSE)
-  }
-  if (identical(statistic, "n") && !is.null(dots$n)) {
-    stop(sprintf(paste0(
-      '%s: statistic = "n" bootstraps the required sample size, so `n` must not ',
-      "be supplied as an input; every replicate would otherwise return the `n` ",
-      "you passed in. Pass a target `power` instead."), context), call. = FALSE)
-  }
-  # `tte` is a different case and needs its own message. It depends on neither
-  # `n` nor `power`, so passing `n` is not the bootstrap-your-own-input mistake
-  # above -- it is simply an argument slope_sample_size() does not take, and it
-  # is rejected only because silently discarding it is worse.
-  if (identical(statistic, "tte") && !is.null(dots$n)) {
-    stop(sprintf(paste0(
-      '%s: statistic = "tte" does not depend on the sample size -- the target ',
-      "treatment effect is fixed by the slopes and `effectiveness` alone. It is ",
-      "reached through slope_sample_size(), which takes no `n`, so drop the ",
-      "argument rather than have it silently ignored."), context), call. = FALSE)
-  }
-
-  compute <- function(p) {
-    switch(statistic,
-           slope = p$slope,
-           power = do.call(slope_power, c(list(params = p), dots))$power,
-           n     = do.call(slope_sample_size, c(list(params = p), dots))$n,
-           # tte depends on neither n nor power; slope_sample_size() is simply the
-           # entry point that needs no extra input to reach it.
-           tte   = do.call(slope_sample_size, c(list(params = p), dots))$tte)
-  }
-
-  observed <- compute(params)
+  # `observed` is read off the object rather than recomputed. It is the same
+  # number either way -- `compute` on the original parameters reproduces the
+  # result it was handed -- but recomputing would re-emit any warning the
+  # stage-two call made, and under this interface the caller has already run
+  # that exact call themselves to produce the object.
 
   # Section 2.6: if the slope is not large relative to its standard error the
   # replicates can straddle zero, and an interval for the sample size stops
@@ -248,12 +243,20 @@ slope_bootstrap <- function(params, R = 199,
     unname(split(ids, sub_group))
   }
 
+  # Warnings are suppressed per replicate. Anything worth saying about the
+  # calculation -- a target effect that makes the slope more extreme, say -- is a
+  # property of the data, and the caller has already heard it once from the
+  # stage-two call that built the object; repeating it several hundred times
+  # here, attributed to a function they did not call, tells them nothing new.
+  replicate_of <- function(p) suppressWarnings(compute(p))
+
   replicates <- rep(NA_real_, R)
   tick <- max(1L, floor(R / 10))
   for (b in seq_len(R)) {
-    replicates[b] <- tryCatch(compute(refit_frame(resample_frame(frame, subject_index, groups),
-                                                  params$comparator)),
-                              error = function(e) NA_real_)
+    replicates[b] <- tryCatch(
+      replicate_of(refit_frame(resample_frame(frame, subject_index, groups),
+                               params$comparator)),
+      error = function(e) NA_real_)
     if (isTRUE(progress) && b %% tick == 0L) {
       message(sprintf("%s: %d of %d replicates", context, b, R))
     }
@@ -276,7 +279,7 @@ slope_bootstrap <- function(params, R = 199,
 
   if (identical(type, "bca")) {
     bca <- bca_interval(good, observed, frame, subject_index, params$comparator,
-                        compute, probs, context)
+                        replicate_of, probs, context)
     if (is.null(bca)) {
       warning(sprintf(paste0("%s: the bias-correction could not be computed (every replicate ",
                              "falls on one side of the observed value); reporting a percentile ",
@@ -291,6 +294,203 @@ slope_bootstrap <- function(params, R = 199,
                  type = used_type, statistic = statistic, R = R,
                  n_failed = n_failed, level = level, se = se),
             class = "slope_bootstrap")
+}
+
+#' Bootstrap the stage-one estimates
+#'
+#' Resamples subjects with replacement, refits the stage-one mixed model on each
+#' replicate, and recomputes a quantity of interest. This propagates the
+#' estimation uncertainty in the slope and variance components through to the
+#' sample size or power, as recommended in section 2.6 of Nash et al. (2021).
+#'
+#' Hand it the result you want an interval around, not a fresh specification of
+#' the calculation. A `slope_sample_size` object knows the design, effectiveness,
+#' target power and significance level it was solved with, so the bootstrap
+#' re-solves exactly that calculation on each replicate:
+#'
+#' ```
+#' ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+#' slope_bootstrap(ss, R = 999, type = "bca")
+#' ```
+#'
+#' Dispatching on the result rather than on a `statistic` argument also makes it
+#' impossible to bootstrap one of the calculation's own inputs -- an interval
+#' around the `n` you supplied yourself is zero-width, and used to be an easy
+#' call to write. Each method offers only quantities its object solved for or
+#' derived.
+#'
+#' Subjects, not observations, are the sampling unit, and each drawn subject is
+#' given a fresh identifier so that a subject selected twice is treated as two
+#' people rather than as one person with twice as much data. When the parameters
+#' came from two-group data, resampling is stratified so that each replicate has
+#' the same number of cases and controls (or treated and control subjects) as the
+#' original.
+#'
+#' Refitting a mixed model several hundred times is slow, and `type = "bca"` adds
+#' a leave-one-subject-out jackknife on top, costing one further fit per subject.
+#' Start with a small `R` to gauge the cost.
+#'
+#' @param x What to bootstrap: a `slope_sample_size` object from
+#'   [slope_sample_size()], a `slope_power` object from [slope_power()], or a
+#'   `slope_params` object from [slope_params()] for the fitted slope itself.
+#'   The underlying parameters must come from [slope_params()] in either case;
+#'   [slope_params_manual()] objects carry no data to resample. For the `print()`
+#'   method, the `slope_bootstrap` object to show.
+#' @param R Number of bootstrap replicates.
+#' @param type `"percentile"` (the default) or `"bca"` for bias-corrected and
+#'   accelerated intervals. The paper recommends BCa because the distribution of
+#'   estimated sample sizes is typically skewed.
+#' @param ... Not used. The calculation is taken from `x`, so any argument here
+#'   is an error rather than something silently ignored.
+#' @param level Confidence level for the interval.
+#' @param seed Optional integer seed, for reproducibility.
+#' @param progress Report progress while resampling.
+#'
+#' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,
+#'   `ci`, `type`, `statistic`, `R`, `n_failed`, `level` and `se`.
+#'
+#' @references
+#' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
+#' calculations for trials that compare slopes over time: Introducing the
+#' slopepower command. \emph{Stata Journal} 21(3): 575--601.
+#'
+#' @examples
+#' # The parameters must come from slope_params(): bootstrapping resamples the
+#' # underlying subjects, which slope_params_manual() objects do not carry.
+#'
+#' # No comparator: all two hundred participants of `slpower1`.
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+#'
+#' # One mixed-model fit per replicate, so a real run wants a much larger R.
+#' \donttest{
+#' slope_bootstrap(ss, R = 100, seed = 42)
+#'
+#' # The same result also carries the target treatment effect.
+#' slope_bootstrap(ss, R = 100, statistic = "tte", seed = 42)
+#'
+#' # An interval around the slope needs no trial design at all.
+#' slope_bootstrap(pars, R = 100, seed = 42)
+#' }
+#'
+#' # Case/healthy-control comparator: forty cases and forty healthy controls,
+#' # simulated (rather than drawn from `slpower2`, whose 500 participants
+#' # would make every replicate refit the slowest model in the package) and
+#' # built subject by subject so each keeps one intercept and one slope
+#' # across its four visits.
+#' set.seed(2)
+#' subj2 <- data.frame(id = 1:80, case = rep(c(1, 0), each = 40))
+#' subj2$intercept <- rnorm(80, 50, 10)
+#' subj2$slope     <- rnorm(80, ifelse(subj2$case == 1, -1.7, -0.3), 1.4)
+#' sim2 <- merge(subj2, data.frame(visit = 0:3))
+#' sim2$sdmt <- sim2$intercept + sim2$slope * sim2$visit + rnorm(nrow(sim2), 0, 3)
+#' pars2 <- slope_params(sdmt ~ visit | id, data = sim2, healthy = case)
+#'
+#' \donttest{
+#' # Bootstrapping the power of a fixed sample size, rather than the size itself.
+#' pw2 <- slope_power(pars2, c(0, 1, 2), n = 400, effectiveness = 0.33)
+#' slope_bootstrap(pw2, R = 100, seed = 42)
+#' }
+#'
+#' # Randomised-trial comparator, target = "observed": all one hundred and
+#' # fifty participants of `slpower3`, bootstrapping the sample size needed
+#' # to detect the effect the trial actually found.
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#'
+#' \donttest{
+#' ss3 <- slope_sample_size(pars3, c(0, 0.5, 2), target = "observed")
+#' slope_bootstrap(ss3, R = 100, seed = 42)
+#' }
+#'
+#' @seealso [slope_sample_size()], [slope_power()], [slope_params()],
+#'   [slope_se()] for the standard error behind the section 2.6 check
+#' @export
+slope_bootstrap <- function(x, R = 199, type = c("percentile", "bca"), ...,
+                            level = 0.95, seed = NULL, progress = FALSE) {
+  UseMethod("slope_bootstrap")
+}
+
+#' @describeIn slope_bootstrap Bootstrap the required sample size (the default)
+#'   or the target treatment effect behind it.
+#' @param statistic Which of the object's quantities to bootstrap. Each method
+#'   offers only what its object solved for or derived, and defaults to the
+#'   quantity the object exists to report.
+#' @export
+slope_bootstrap.slope_sample_size <- function(x, R = 199,
+                                              type = c("percentile", "bca"),
+                                              statistic = c("n", "tte"), ...,
+                                              level = 0.95, seed = NULL,
+                                              progress = FALSE) {
+  context <- "slope_bootstrap()"
+  statistic <- match_statistic(statistic, c("n", "tte"), paste0(
+    "This result solved for the sample size, so `n` and the target treatment\n",
+    "  effect `tte` behind it are what it can offer. For the power a fixed\n",
+    "  sample size achieves, bootstrap a slope_power() result instead."), context)
+  reject_dots(list(...), context, dots_advice_result("slope_sample_size()"))
+  # `power` is the target this result was solved to, and so is an input that is
+  # held fixed across replicates -- it is what makes `n` vary.
+  compute <- function(p) {
+    do.call(slope_sample_size, c(resolve_args(p, x), list(power = x$power)))[[statistic]]
+  }
+  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
+                seed, progress, context)
+}
+
+#' @describeIn slope_bootstrap Bootstrap the power achieved (the default) or the
+#'   target treatment effect behind it.
+#' @export
+slope_bootstrap.slope_power <- function(x, R = 199,
+                                        type = c("percentile", "bca"),
+                                        statistic = c("power", "tte"), ...,
+                                        level = 0.95, seed = NULL,
+                                        progress = FALSE) {
+  context <- "slope_bootstrap()"
+  statistic <- match_statistic(statistic, c("power", "tte"), paste0(
+    "This result solved for the power a fixed sample size achieves, so `power`\n",
+    "  and the target treatment effect `tte` behind it are what it can offer. For\n",
+    "  the sample size a target power needs, bootstrap a slope_sample_size()\n",
+    "  result instead."), context)
+  reject_dots(list(...), context, dots_advice_result("slope_power()"))
+  # `x$n` rather than `x$n_requested`: the even number actually used, so the
+  # replicates answer the question the observed value answered.
+  compute <- function(p) {
+    do.call(slope_power, c(resolve_args(p, x), list(n = x$n)))[[statistic]]
+  }
+  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
+                seed, progress, context)
+}
+
+#' @describeIn slope_bootstrap Bootstrap the fitted slope itself, which needs no
+#'   trial design.
+#' @export
+slope_bootstrap.slope_params <- function(x, R = 199,
+                                         type = c("percentile", "bca"), ...,
+                                         level = 0.95, seed = NULL,
+                                         progress = FALSE) {
+  context <- "slope_bootstrap()"
+  reject_dots(list(...), context, paste0(
+    "Bootstrapping a `slope_params` object gives an interval for the fitted\n",
+    "  slope, which needs no trial design. For an interval around a sample size\n",
+    "  or a power, bootstrap the result instead:\n",
+    "    slope_bootstrap(slope_sample_size(params, design, ...), R = 999)"))
+  run_bootstrap(x, function(p) p$slope, x$slope, "slope", R, type, level, seed,
+                progress, context)
+}
+
+#' @describeIn slope_bootstrap Reject anything else, with a pointer to what is
+#'   accepted.
+#' @export
+slope_bootstrap.default <- function(x, R = 199, type = c("percentile", "bca"),
+                                    ..., level = 0.95, seed = NULL,
+                                    progress = FALSE) {
+  stop(sprintf(paste0(
+    "slope_bootstrap(): cannot bootstrap an object of class %s. Pass the result\n",
+    "  you want an interval around -- a slope_sample_size object from\n",
+    "  slope_sample_size(), a slope_power object from slope_power(), or a\n",
+    "  slope_params object from slope_params() for the slope itself.\n",
+    "  The grid functions return one row per design; bootstrap the design you\n",
+    "  settle on rather than the grid."),
+    paste(sQuote(class(x)), collapse = "/")), call. = FALSE)
 }
 
 #' Bias-corrected and accelerated interval
@@ -325,7 +525,10 @@ bca_interval <- function(theta, observed, frame, subject_index, comparator,
 }
 
 #' @describeIn slope_bootstrap Print a bootstrap result.
-#' @param x A `slope_bootstrap` object.
+# No `@param x` here: this block and the generic share one help topic, and the
+# later of the two wins. Documenting `x` as a `slope_bootstrap` object silently
+# replaced the generic's description with the one class slope_bootstrap.default()
+# refuses, so the help page told the reader to pass exactly the wrong thing.
 #' @export
 print.slope_bootstrap <- function(x, ...) {
   cat("<slope_bootstrap>\n")

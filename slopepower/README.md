@@ -216,18 +216,24 @@ each.
 ## Uncertainty in the stage-one estimates
 
 ```r
-slope_bootstrap(pars, R = 200, design = c(0, 1, 2), effectiveness = 0.33,
-                statistic = "n", type = "bca", seed = 1)
+ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+slope_bootstrap(ss, R = 200, type = "bca", seed = 1)
 ```
 
 Resamples subjects (stratified by group where relevant) and refits the mixed model
-each time, so it is slow — start with a small `R`. Needs a `slope_params` object
-from `slope_params()`; manually supplied parameters carry no data to resample.
+each time, so it is slow — start with a small `R`. Needs parameters from
+`slope_params()`; manually supplied parameters carry no data to resample.
 
-`statistic` picks the entry point: `"power"` goes through `slope_power()` and so
-needs an `n` in `...`, while `"n"` and `"tte"` go through `slope_sample_size()`
-and take a target `power` instead. Passing the statistic you are bootstrapping as
-an input is an error rather than a zero-width interval.
+Hand it the result you want an interval around, not a fresh specification of the
+calculation: the result already carries the design, effectiveness, target and
+significance level it was solved with, and each replicate re-solves exactly that.
+`slope_bootstrap()` dispatches on what it is given — a `slope_sample_size` object
+for the required `n`, a `slope_power` object for the power achieved, or a
+`slope_params` object for the fitted slope itself. Use `statistic = "tte"` on
+either stage-two result for the target treatment effect behind it. Because each
+method offers only quantities its object solved for or derived, bootstrapping one
+of the calculation's own inputs — a zero-width interval dressed up as a result —
+cannot be expressed.
 
 ## Example data
 

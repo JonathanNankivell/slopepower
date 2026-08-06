@@ -38,6 +38,24 @@ Builds a \code{"slope_params"} object from values supplied by hand, for planning
 trial from published estimates when no suitable dataset is available. Paper
 section 2.6 anticipates exactly this situation.
 }
+\examples{
+# A single group, powered toward a slope of zero. Figures from Table 1,
+# p.595 of Nash et al. (2021).
+slope_params_manual(
+  slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+  sigma_cov = 5, sigma2_residual = 10
+)
+
+# Case/healthy-control parameters taken from a published paper, with no
+# dataset of individual participants available to fit slope_params() to.
+slope_params_manual(
+  slope = -1.672, slope_comparator = -0.5,
+  sigma2_intercept = 100, sigma2_slope = 2,
+  sigma_cov = 5, sigma2_residual = 10,
+  comparator = "healthy"
+)
+
+}
 \seealso{
 \code{\link[=slope_params]{slope_params()}} to estimate these from data.
 }

@@ -91,40 +91,101 @@ test_that("the covariate guard catches term removal and offsets, not just additi
                tolerance = 1e-6)
 })
 
-test_that("slope_bootstrap() rejects a statistic that would bootstrap its own input", {
+test_that("slope_bootstrap() cannot be asked to bootstrap its own input", {
   p <- paper_fit("slpower1")
+  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
+  pw <- slope_power(p, c(0, 1, 2), n = 712, effectiveness = 0.33)
 
-  # slope_power() used to solve for whichever of n and power was absent, so
-  # these combinations returned the user's own input in every replicate -- a
-  # zero-width interval that looked like a successful bootstrap. The split makes
-  # the mismatch explicit, but the guards stay: the error a caller sees should
-  # name the statistic, not just report an unused argument.
-  expect_error(
-    slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2),
-                    effectiveness = 0.33),
-    'requires `n`')
-  expect_error(
-    slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2), n = 400,
-                    effectiveness = 0.33),
-    'must not be supplied as an input')
-  expect_error(
-    slope_bootstrap(p, R = 5, statistic = "power", design = c(0, 1, 2), n = 400,
-                    power = 0.8, effectiveness = 0.33),
-    'must not be')
-  # "tte" gets its own message. It depends on neither n nor power, so the
-  # bootstrap-your-own-input rationale above does not apply to it; saying it did
-  # would have told a caller something false about their own call.
+  # slope_bootstrap() used to re-specify the calculation through `...`, so a
+  # caller could name a statistic that was also one of the inputs: every
+  # replicate returned the number they had passed in, giving a zero-width
+  # interval that looked like a successful bootstrap. Four hand-written guards
+  # existed only to catch those combinations. Dispatching on the result removes
+  # the possibility rather than policing it -- a result object already knows
+  # which of n and power it solved for -- so the regression is now pinned by
+  # what each method will accept at all.
+  # The refusal must still diagnose, not just reject: bare match.arg() reports
+  # `'arg' should be one of ...`, naming neither the argument nor the object, and
+  # the fix is upstream in the call that built the object rather than here.
+  err <- tryCatch(slope_bootstrap(ss, R = 5, statistic = "power"),
+                  error = conditionMessage)
+  expect_match(err, "`statistic`")
+  expect_match(err, "bootstrap a slope_power\\(\\) result")
+  expect_false(grepl("'arg'", err, fixed = TRUE))
+
+  expect_match(tryCatch(slope_bootstrap(pw, R = 5, statistic = "n"),
+                        error = conditionMessage),
+               "bootstrap a slope_sample_size\\(\\)\\s+result")
+
+  # And the inputs cannot be smuggled in alongside: they are not silently
+  # ignored, which would be the worst outcome of all.
+  expect_error(slope_bootstrap(ss, R = 5, n = 400), "unused argument")
+  expect_error(slope_bootstrap(pw, R = 5, power = 0.8), "unused argument")
+
+  # A call written against the old interface fails loudly rather than quietly
+  # bootstrapping the slope and discarding the design.
   err <- tryCatch(
-    slope_bootstrap(p, R = 5, statistic = "tte", design = c(0, 1, 2), n = 400,
+    slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2),
                     effectiveness = 0.33),
     error = conditionMessage)
-  expect_match(err, "does not depend on the sample size")
-  expect_false(grepl("every replicate", err))
+  expect_match(err, "unused argument")
+  expect_match(err, "slope_bootstrap\\(slope_sample_size\\(")
 
-  # and it still works once the irrelevant argument is dropped
-  b <- suppressWarnings(slope_bootstrap(p, R = 3, statistic = "tte",
-                                        design = c(0, 1, 2), effectiveness = 0.33))
-  expect_equal(b$observed, slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$tte)
+  # "tte" is reachable from either result: it depends on neither n nor power.
+  b <- suppressWarnings(slope_bootstrap(ss, R = 3, statistic = "tte"))
+  expect_equal(b$observed, ss$tte)
+  expect_equal(suppressWarnings(slope_bootstrap(pw, R = 3, statistic = "tte"))$observed,
+               ss$tte)
+})
+
+test_that("slope_bootstrap() re-solves the calculation the result was built with", {
+  # The bootstrap must hold every input fixed and vary only the parameters. The
+  # observed value therefore has to reproduce the result it was handed, for each
+  # of the settings carried on the object -- design, effectiveness, alpha and
+  # the target power or sample size.
+  p <- paper_fit("slpower1")
+  ss <- slope_sample_size(p, trial_design(c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1)),
+                          effectiveness = 0.4, power = 0.9, alpha = 0.01)
+  expect_equal(suppressWarnings(slope_bootstrap(ss, R = 3))$observed, ss$n)
+
+  pw <- slope_power(p, c(0, 1, 2), n = 401, effectiveness = 0.33, alpha = 0.1)
+  # n = 401 is rounded down to 400 for equal arms; the replicates must answer
+  # for the number actually used, not the one requested.
+  expect_equal(suppressWarnings(slope_bootstrap(pw, R = 3))$observed, pw$power)
+
+  # target = "observed" stores effectiveness as NA and rejects it as an input,
+  # so it must be omitted when the call is rebuilt rather than passed along.
+  p3 <- paper_fit("slpower3")
+  ss3 <- slope_sample_size(p3, c(0, 0.5, 2), target = "observed")
+  expect_equal(suppressWarnings(slope_bootstrap(ss3, R = 3))$observed, ss3$n)
+})
+
+test_that("slope_bootstrap() does not repeat the stage-two call's own warning", {
+  # The caller has already run the stage-two call themselves to produce the
+  # object being bootstrapped, and heard anything it had to say. Recomputing the
+  # observed value here said it a second time, attributed to slope_bootstrap()
+  # -- a function that had not made the choice being warned about.
+  set.seed(2)
+  s <- data.frame(id = 1:60, case = rep(c(1, 0), each = 30))
+  s$intercept <- rnorm(60, 50, 10)
+  # controls declining faster than cases, so the comparator slope is further
+  # from zero and the target effect makes the treated slope more extreme
+  s$slope <- rnorm(60, ifelse(s$case == 1, -0.3, -1.7), 1.2)
+  d <- merge(s, data.frame(visit = 0:3))
+  d$sdmt <- d$intercept + d$slope * d$visit + rnorm(nrow(d), 0, 3)
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, healthy = case))
+
+  ss <- suppressWarnings(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33))
+  msgs <- character()
+  withCallingHandlers(
+    slope_bootstrap(ss, R = 2, seed = 1),
+    warning = function(w) {
+      msgs <<- c(msgs, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    })
+  expect_false(any(grepl("makes the slope more extreme", msgs)))
+  # the observed value is still exactly the one the result reported
+  expect_equal(suppressWarnings(slope_bootstrap(ss, R = 2, seed = 1))$observed, ss$n)
 })
 
 test_that("an explicit n = NULL is caught by the guard, not by the solver", {

@@ -147,6 +147,13 @@ as_trial_design <- function(design, context) {
 #'   the same units as the `time` variable used to estimate `params`.
 #'
 #' @return A symmetric `length(visits)` by `length(visits)` matrix.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_sigma(pars, c(0, 1, 2))
+#'
+#' @seealso [slope_var()], the two-person treatment-effect variance built from
+#'   this matrix; [slope_se()], the standard error of the fitted slope itself.
 #' @export
 slope_sigma <- function(params, visits) {
   context <- "slope_sigma()"
@@ -179,6 +186,17 @@ slope_sigma <- function(params, visits) {
 #' @param visits Numeric vector of visit times.
 #'
 #' @return A single positive number, \eqn{s^{*2}}.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_var(pars, c(0, 1, 2))
+#'
+#' # A third follow-up visit adds information about the slope, so the
+#' # treatment-effect variance shrinks.
+#' slope_var(pars, c(0, 1, 2, 3))
+#'
+#' @seealso [slope_sigma()], the marginal covariance matrix this is built
+#'   from; [slope_se()], the standard error of the fitted slope itself.
 #' @export
 slope_var <- function(params, visits) {
   context <- "slope_var()"
@@ -326,6 +344,16 @@ effect_components <- function(params, design, target, effectiveness,
 #'   understates it by \eqn{1/e^2}. Use [slope_sample_size()] unless you
 #'   specifically want the unscaled quantity. The sign follows the slope
 #'   difference; only the magnitude affects the sample size.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_effect_size(pars, c(0, 1, 2))
+#'
+#' # A quarter of participants are expected to miss the final visit: the
+#' # effect size shrinks because they contribute less slope information.
+#' design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
+#' slope_effect_size(pars, design)
+#'
 #' @export
 slope_effect_size <- function(params, design,
                               target = c("effectiveness", "observed")) {
@@ -431,8 +459,8 @@ solve_slope <- function(params, design, effectiveness, effectiveness_supplied,
 #' @param design A `trial_design` object, from [trial_design()], or a numeric
 #'   vector of visit times beginning at 0.
 #' @param effectiveness Proportion of the slope difference the treatment is
-#'   expected to remove, in (0, 1]. Must not be supplied when
-#'   `target = "observed"`, which fixes it at 1.
+#'   expected to remove, in (0, 1] (see "The reference slope" below). Must not
+#'   be supplied when `target = "observed"`, which fixes it at 1.
 #' @param target `"effectiveness"` (the default) or `"observed"`. The latter is
 #'   the equivalent of the Stata command's `usetrt` option and requires
 #'   parameters estimated from a previous trial.
@@ -499,12 +527,32 @@ NULL
 #' @inherit stage_two references
 #'
 #' @examples
-#' pars <- slope_params_manual(
-#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
-#' )
+#' # No comparator: measured toward a slope of zero, fitted to all two
+#' # hundred participants of `slpower1`. Reproduces the paper's p.588 result.
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33, power = 0.9)
+#'
+#' # Case/healthy-control comparator: measured toward the healthy controls'
+#' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
+#' # are calendar dates and so are converted to years in the formula.
+#' df2 <- data.frame(
+#'   id    = rep(c(1, 2, 251, 252), each = 4),
+#'   case  = rep(c(0, 0, 1, 1), each = 4),
+#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+#' )
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' slope_sample_size(pars2, c(0, 1, 2), effectiveness = 0.33)
+#'
+#' # Randomised-trial comparator, target = "observed": size a repeat trial to
+#' # detect the same effect the trial actually found, fitted to all one
+#' # hundred and fifty participants of `slpower3`.
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' slope_sample_size(pars3, c(0, 0.5, 2), target = "observed")
 #'
 #' @seealso [trial_design()] to build the `design` argument,
 #'   [slope_power()] for the power of a given `n`,
@@ -554,11 +602,31 @@ slope_sample_size <- function(params, design,
 #' @inherit stage_two references
 #'
 #' @examples
-#' pars <- slope_params_manual(
-#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
-#' )
+#' # No comparator: measured toward a slope of zero, fitted to all two
+#' # hundred participants of `slpower1`. Reproduces the paper's p.588 result.
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 #' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+#'
+#' # Case/healthy-control comparator: measured toward the healthy controls'
+#' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
+#' # are calendar dates and so are converted to years in the formula.
+#' df2 <- data.frame(
+#'   id    = rep(c(1, 2, 251, 252), each = 4),
+#'   case  = rep(c(0, 0, 1, 1), each = 4),
+#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
+#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
+#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
+#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
+#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
+#' )
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
+#'
+#' # Randomised-trial comparator, target = "observed": what power would a
+#' # repeat trial have to detect the same effect the trial actually found,
+#' # fitted to all one hundred and fifty participants of `slpower3`.
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
 #'
 #' @seealso [trial_design()] to build the `design` argument,
 #'   [slope_sample_size()] for the `n` a target power needs,
@@ -655,6 +723,11 @@ print_design_block <- function(x) {
 #' @param x A `slope_sample_size` object.
 #' @param ... Ignored.
 #' @return `x`, invisibly.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+#'
 #' @export
 print.slope_sample_size <- function(x, ...) {
   print_data_block(x)
@@ -674,6 +747,11 @@ print.slope_sample_size <- function(x, ...) {
 #' @param x A `slope_power` object.
 #' @param ... Ignored.
 #' @return `x`, invisibly.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+#'
 #' @export
 print.slope_power <- function(x, ...) {
   print_data_block(x)
@@ -706,6 +784,17 @@ print.slope_power <- function(x, ...) {
 #' @param row.names,optional Passed on for consistency with the generic; ignored.
 #' @param ... Ignored.
 #' @return A one-row data frame.
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' res <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+#' as.data.frame(res)
+#'
+#' # Stable column names make results from different designs and different
+#' # questions safe to bind into one comparison table.
+#' res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
+#' rbind(as.data.frame(res), as.data.frame(res2))
+#'
 #' @export
 as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ...) {
   data.frame(
