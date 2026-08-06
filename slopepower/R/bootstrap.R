@@ -144,13 +144,13 @@ slope_se <- function(params) {
 #' the shape of a call written against the pre-generic interface, where the
 #' calculation was re-specified here rather than dispatched on.
 #' @noRd
-reject_dots <- function(dots, context, advice) {
+reject_dots <- function(dots, advice) {
   if (length(dots) == 0L) return(invisible(NULL))
   nms <- names(dots)
   nms <- if (is.null(nms)) rep("", length(dots)) else nms
   shown <- ifelse(nzchar(nms), nms, "<unnamed>")
-  stop(sprintf("%s: unused argument%s (%s).\n  %s",
-               context, if (length(dots) > 1L) "s" else "",
+  stop(sprintf("slope_bootstrap(): unused argument%s (%s).\n  %s",
+               if (length(dots) > 1L) "s" else "",
                paste(shown, collapse = ", "), advice), call. = FALSE)
 }
 
@@ -161,17 +161,19 @@ reject_dots <- function(dots, context, advice) {
 #' handed over -- `statistic = "power"` on a result that solved for the sample
 #' size, say. Bare `match.arg()` reports only `'arg' should be one of ...`, which
 #' names neither the argument nor the object and leaves the caller to work out
-#' that the fix is upstream, in the call that built `x`.
+#' that the fix is upstream, in the call that built `x`. The matching itself
+#' (including the "whole default vector passed through" case) is still
+#' `match.arg()`'s; only the error message is replaced.
 #' @noRd
-match_statistic <- function(statistic, choices, advice, context) {
-  if (identical(statistic, choices)) return(choices[1L])
-  if (is.character(statistic) && length(statistic) == 1L && statistic %in% choices) {
-    return(statistic)
+match_statistic <- function(statistic, choices, advice) {
+  matched <- tryCatch(match.arg(statistic, choices), error = function(e) NULL)
+  if (is.null(matched)) {
+    stop(sprintf("slope_bootstrap(): `statistic` must be %s, not %s.\n  %s",
+                 paste(sQuote(choices), collapse = " or "),
+                 sQuote(paste(as.character(statistic), collapse = ", ")), advice),
+         call. = FALSE)
   }
-  stop(sprintf("%s: `statistic` must be %s, not %s.\n  %s",
-               context, paste(sQuote(choices), collapse = " or "),
-               sQuote(paste(as.character(statistic), collapse = ", ")), advice),
-       call. = FALSE)
+  matched
 }
 
 #' The advice half of that message, for the two stage-two methods
@@ -208,9 +210,9 @@ resolve_args <- function(p, result) {
 #' method supplies one closure that reads its statistic off a refit.
 #' @noRd
 run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
-                          seed, progress, context) {
+                          seed, progress) {
+  context <- "slope_bootstrap()"
   type <- match.arg(type, c("bca", "percentile"))
-  check_params(params, context)
   check_scalar(R, "R", context, lower = 1, upper = Inf, lower_open = FALSE)
   check_probability(level, "level", context)
   if (!is.null(seed)) set.seed(seed)
@@ -243,24 +245,25 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     unname(split(ids, sub_group))
   }
 
-  # Warnings are suppressed per replicate. Anything worth saying about the
+  # Warnings are suppressed for every replicate. Anything worth saying about the
   # calculation -- a target effect that makes the slope more extreme, say -- is a
   # property of the data, and the caller has already heard it once from the
   # stage-two call that built the object; repeating it several hundred times
   # here, attributed to a function they did not call, tells them nothing new.
-  replicate_of <- function(p) suppressWarnings(compute(p))
-
+  # Suppressed once around the whole loop rather than per replicate: messages
+  # (the progress ticks below) are a different condition class and pass through
+  # regardless.
   replicates <- rep(NA_real_, R)
   tick <- max(1L, floor(R / 10))
-  for (b in seq_len(R)) {
+  suppressWarnings(for (b in seq_len(R)) {
     replicates[b] <- tryCatch(
-      replicate_of(refit_frame(resample_frame(frame, subject_index, groups),
-                               params$comparator)),
+      compute(refit_frame(resample_frame(frame, subject_index, groups),
+                          params$comparator)),
       error = function(e) NA_real_)
     if (isTRUE(progress) && b %% tick == 0L) {
       message(sprintf("%s: %d of %d replicates", context, b, R))
     }
-  }
+  })
 
   n_failed <- sum(is.na(replicates))
   good <- replicates[!is.na(replicates)]
@@ -279,7 +282,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 
   if (identical(type, "bca")) {
     bca <- bca_interval(good, observed, frame, subject_index, params$comparator,
-                        replicate_of, probs, context)
+                        compute, probs)
     if (is.null(bca)) {
       warning(sprintf(paste0("%s: the bias-correction could not be computed (every replicate ",
                              "falls on one side of the observed value); reporting a percentile ",
@@ -421,19 +424,18 @@ slope_bootstrap.slope_sample_size <- function(x, R = 199,
                                               statistic = c("n", "tte"), ...,
                                               level = 0.95, seed = NULL,
                                               progress = FALSE) {
-  context <- "slope_bootstrap()"
   statistic <- match_statistic(statistic, c("n", "tte"), paste0(
     "This result solved for the sample size, so `n` and the target treatment\n",
     "  effect `tte` behind it are what it can offer. For the power a fixed\n",
-    "  sample size achieves, bootstrap a slope_power() result instead."), context)
-  reject_dots(list(...), context, dots_advice_result("slope_sample_size()"))
+    "  sample size achieves, bootstrap a slope_power() result instead."))
+  reject_dots(list(...), dots_advice_result("slope_sample_size()"))
   # `power` is the target this result was solved to, and so is an input that is
   # held fixed across replicates -- it is what makes `n` vary.
   compute <- function(p) {
     do.call(slope_sample_size, c(resolve_args(p, x), list(power = x$power)))[[statistic]]
   }
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
-                seed, progress, context)
+                seed, progress)
 }
 
 #' @describeIn slope_bootstrap Bootstrap the power achieved (the default) or the
@@ -444,20 +446,19 @@ slope_bootstrap.slope_power <- function(x, R = 199,
                                         statistic = c("power", "tte"), ...,
                                         level = 0.95, seed = NULL,
                                         progress = FALSE) {
-  context <- "slope_bootstrap()"
   statistic <- match_statistic(statistic, c("power", "tte"), paste0(
     "This result solved for the power a fixed sample size achieves, so `power`\n",
     "  and the target treatment effect `tte` behind it are what it can offer. For\n",
     "  the sample size a target power needs, bootstrap a slope_sample_size()\n",
-    "  result instead."), context)
-  reject_dots(list(...), context, dots_advice_result("slope_power()"))
+    "  result instead."))
+  reject_dots(list(...), dots_advice_result("slope_power()"))
   # `x$n` rather than `x$n_requested`: the even number actually used, so the
   # replicates answer the question the observed value answered.
   compute <- function(p) {
     do.call(slope_power, c(resolve_args(p, x), list(n = x$n)))[[statistic]]
   }
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
-                seed, progress, context)
+                seed, progress)
 }
 
 #' @describeIn slope_bootstrap Bootstrap the fitted slope itself, which needs no
@@ -467,14 +468,13 @@ slope_bootstrap.slope_params <- function(x, R = 199,
                                          type = c("bca", "percentile"), ...,
                                          level = 0.95, seed = NULL,
                                          progress = FALSE) {
-  context <- "slope_bootstrap()"
-  reject_dots(list(...), context, paste0(
+  reject_dots(list(...), paste0(
     "Bootstrapping a `slope_params` object gives an interval for the fitted\n",
     "  slope, which needs no trial design. For an interval around a sample size\n",
     "  or a power, bootstrap the result instead:\n",
     "    slope_bootstrap(slope_sample_size(params, design, ...), R = 999)"))
   run_bootstrap(x, function(p) p$slope, x$slope, "slope", R, type, level, seed,
-                progress, context)
+                progress)
 }
 
 #' @describeIn slope_bootstrap Reject anything else, with a pointer to what is
@@ -499,18 +499,18 @@ slope_bootstrap.default <- function(x, R = 199, type = c("bca", "percentile"),
 #' clustering used for the bootstrap itself.
 #' @noRd
 bca_interval <- function(theta, observed, frame, subject_index, comparator,
-                         compute, probs, context) {
+                         compute, probs) {
   prop <- mean(theta < observed)
   if (prop <= 0 || prop >= 1) return(NULL)
   z0 <- stats::qnorm(prop)
 
   ids <- names(subject_index)
   jack <- rep(NA_real_, length(ids))
-  for (i in seq_along(ids)) {
+  suppressWarnings(for (i in seq_along(ids)) {
     drop_rows <- subject_index[[i]]
     jack[i] <- tryCatch(compute(refit_frame(frame[-drop_rows, , drop = FALSE], comparator)),
                         error = function(e) NA_real_)
-  }
+  })
   jack <- jack[!is.na(jack)]
   if (length(jack) < 3L) return(NULL)
 
