@@ -224,5 +224,6 @@ Introducing the slopepower command. \emph{The Stata Journal} 21(3): 575--601.
 }
 \seealso{
 \code{\link[=slope_params_manual]{slope_params_manual()}} to supply parameters directly,
-\code{\link[=slope_sample_size]{slope_sample_size()}} and \code{\link[=slope_power]{slope_power()}} for stage two.
+\code{\link[=slope_sample_size]{slope_sample_size()}} and \code{\link[=slope_power]{slope_power()}} for stage two,
+\code{\link[=slope_bootstrap]{slope_bootstrap()}} for an interval around the fitted slope.
 }

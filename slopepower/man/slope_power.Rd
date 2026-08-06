@@ -110,5 +110,6 @@ slopepower command. \emph{Stata Journal} 21(3): 575--601.
 \seealso{
 \code{\link[=trial_design]{trial_design()}} to build the \code{design} argument,
 \code{\link[=slope_sample_size]{slope_sample_size()}} for the \code{n} a target power needs,
-\code{\link[=slope_power_grid]{slope_power_grid()}} to compare many designs at once.
+\code{\link[=slope_power_grid]{slope_power_grid()}} to compare many designs at once,
+\code{\link[=slope_bootstrap]{slope_bootstrap()}} for an interval around the result.
 }

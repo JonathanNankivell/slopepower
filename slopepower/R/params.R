@@ -427,7 +427,8 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' Introducing the slopepower command. \emph{The Stata Journal} 21(3): 575--601.
 #'
 #' @seealso [slope_params_manual()] to supply parameters directly,
-#'   [slope_sample_size()] and [slope_power()] for stage two.
+#'   [slope_sample_size()] and [slope_power()] for stage two,
+#'   [slope_bootstrap()] for an interval around the fitted slope.
 #' @export
 slope_params <- function(formula, data,
                          healthy = NULL, treated = NULL,

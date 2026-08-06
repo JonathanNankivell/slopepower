@@ -556,7 +556,8 @@ NULL
 #'
 #' @seealso [trial_design()] to build the `design` argument,
 #'   [slope_power()] for the power of a given `n`,
-#'   [slope_sample_size_grid()] to compare many designs at once.
+#'   [slope_sample_size_grid()] to compare many designs at once,
+#'   [slope_bootstrap()] for an interval around the result.
 #' @export
 slope_sample_size <- function(params, design,
                               effectiveness = 0.25,
@@ -630,7 +631,8 @@ slope_sample_size <- function(params, design,
 #'
 #' @seealso [trial_design()] to build the `design` argument,
 #'   [slope_sample_size()] for the `n` a target power needs,
-#'   [slope_power_grid()] to compare many designs at once.
+#'   [slope_power_grid()] to compare many designs at once,
+#'   [slope_bootstrap()] for an interval around the result.
 #' @export
 slope_power <- function(params, design, n,
                         effectiveness = 0.25,
