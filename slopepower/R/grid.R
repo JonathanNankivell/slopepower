@@ -102,7 +102,21 @@ expand_dropout <- function(spec, visits, context, label = NULL) {
 
 #' Render a numeric vector as a short label
 #' @noRd
-label_numeric <- function(x) paste(format(x, trim = TRUE, drop0trailing = TRUE), collapse = ", ")
+label_numeric <- function(x) paste(fmt_num(x), collapse = ", ")
+
+#' Fill in any blank names of a list via `label`, then dedupe
+#'
+#' The common tail of `as_visits_list()` and `as_dropout_list()`, once each has
+#' normalised its argument to a (possibly partly-named) list.
+#' @noRd
+fill_list_names <- function(x, label) {
+  nms <- names(x)
+  if (is.null(nms)) nms <- rep("", length(x))
+  blank <- !nzchar(nms)
+  nms[blank] <- vapply(x[blank], label, character(1L))
+  names(x) <- make.unique(nms, sep = "_")
+  x
+}
 
 #' Normalise `visits` to a named list of numeric vectors
 #' @noRd
@@ -112,14 +126,7 @@ as_visits_list <- function(visits, context) {
     stop(sprintf(paste0("%s: `visits` must be a numeric vector of visit times, or a named list ",
                         "of such vectors."), context), call. = FALSE)
   }
-  nms <- names(visits)
-  if (is.null(nms)) nms <- rep("", length(visits))
-  blank <- !nzchar(nms)
-  nms[blank] <- vapply(visits[blank], function(v) {
-    if (is.numeric(v)) label_numeric(v) else "design"
-  }, character(1L))
-  names(visits) <- make.unique(nms, sep = "_")
-  visits
+  fill_list_names(visits, function(v) if (is.numeric(v)) label_numeric(v) else "design")
 }
 
 #' Normalise `dropout` to a named list of specifications
@@ -133,12 +140,7 @@ as_dropout_list <- function(dropout, context) {
     stop(sprintf(paste0("%s: `dropout` must be NULL, a numeric vector, a dropout_rate() object, ",
                         "or a named list of these."), context), call. = FALSE)
   }
-  nms <- names(dropout)
-  if (is.null(nms)) nms <- rep("", length(dropout))
-  blank <- !nzchar(nms)
-  nms[blank] <- vapply(dropout[blank], label_dropout, character(1L))
-  names(dropout) <- make.unique(nms, sep = "_")
-  dropout
+  fill_list_names(dropout, label_dropout)
 }
 
 #' @noRd
@@ -155,21 +157,16 @@ label_dropout <- function(x) {
 # the grid
 # ---------------------------------------------------------------------------
 
-#' Reject `effectiveness` alongside target = "observed"
+#' Build the base stage-two args, omitting `effectiveness` under target = "observed"
 #'
-#' Raised in the grid wrappers rather than left to the stage-two functions,
-#' because the loop below omits `effectiveness` from the call when the target is
-#' the previously observed effect. Without this check the omission would bypass
-#' the guard and silently return a whole table computed at effectiveness = 1.
+#' The loop below always calls the stage-two function through this base list,
+#' because target = "observed" fixes effectiveness at 1 internally and the two
+#' must not be supplied together (`check_target_effectiveness()`, called by both
+#' grid wrappers before their loop, is what rejects that combination).
 #' @noRd
-check_target_effectiveness <- function(target, supplied, context) {
-  if (identical(target, "observed") && isTRUE(supplied)) {
-    stop(sprintf(paste0(
-      "%s: supply only one of `effectiveness` and target = \"observed\".\n",
-      "  target = \"observed\" reuses the treatment effect observed in the ",
-      "previous trial, which fixes effectiveness at 1."), context), call. = FALSE)
-  }
-  invisible(NULL)
+grid_base_args <- function(args, effectiveness, target) {
+  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+  args
 }
 
 #' Walk the visits x dropout cross product, evaluating one design per cell
@@ -202,14 +199,14 @@ grid_impl <- function(visits, dropout, evaluate, context) {
 
       # trial_design() warns when the first stratum attends baseline only. That is
       # correct and expected here -- it fires for most non-zero rates -- so it is
-      # collected and reported once rather than once per cell.
+      # collected and reported once rather than once per cell. Matched by
+      # condition class, not message text, so a copy-edit of the warning's
+      # wording in design.R cannot silently break this.
       des <- withCallingHandlers(
         trial_design(v, inc),
-        warning = function(w) {
-          if (grepl("last attended visit is", conditionMessage(w), fixed = TRUE)) {
-            baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
-            invokeRestart("muffleWarning")
-          }
+        slopepower_baseline_dropout = function(w) {
+          baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
+          invokeRestart("muffleWarning")
         }
       )
 
@@ -347,8 +344,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  args <- list(params = params, n = n, target = target, alpha = alpha)
-  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+  args <- grid_base_args(list(params = params, n = n, target = target, alpha = alpha),
+                         effectiveness, target)
 
   grid_impl(visits, dropout,
             function(des) do.call(slope_power, c(args, list(design = des))),
@@ -419,8 +416,8 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  args <- list(params = params, power = power, target = target, alpha = alpha)
-  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+  args <- grid_base_args(list(params = params, power = power, target = target, alpha = alpha),
+                         effectiveness, target)
 
   grid_impl(visits, dropout,
             function(des) do.call(slope_sample_size, c(args, list(design = des))),

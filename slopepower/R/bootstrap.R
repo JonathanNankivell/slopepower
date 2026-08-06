@@ -52,9 +52,15 @@ refit_frame <- function(frame, comparator) {
 }
 
 #' Build one cluster-resampled frame, stratified by group where present
+#'
+#' `groups` holds each stratum's members as *positions* in `subject_index`
+#' rather than as subject-label strings, so that looking a pick up is a
+#' constant-time integer index into the list rather than a linear scan of its
+#' names -- the same random draws either way, since `sample()`'s draws depend
+#' only on a vector's length, not its values.
 #' @noRd
 resample_frame <- function(frame, subject_index, groups) {
-  picks <- unlist(lapply(groups, function(ids) sample(ids, length(ids), replace = TRUE)),
+  picks <- unlist(lapply(groups, function(pos) sample(pos, length(pos), replace = TRUE)),
                   use.names = FALSE)
   parts <- vector("list", length(picks))
   for (i in seq_along(picks)) {
@@ -110,18 +116,14 @@ slope_se <- function(params) {
   V <- tryCatch(stats::vcov(fit), error = function(e) return(NULL))
   if (is.null(b) || is.null(V)) return(NA_real_)
   # The interaction label depends on the order its components appear in the
-  # internal formula, so resolve it rather than assuming a spelling -- the same
-  # reason params.R extracts through fixef_term(). Getting this wrong used to
-  # return NA silently, which switched off the section 2.6 warning below that is
-  # the entire reason for computing the standard error.
-  resolve <- function(parts) {
-    cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
-    hit <- cand[cand %in% names(b)]
-    if (length(hit)) hit[1L] else NA_character_
-  }
+  # internal formula, so resolve it via resolve_fixef_name() rather than
+  # assuming a spelling -- the same reason params.R extracts through
+  # fixef_term(). Getting this wrong used to return NA silently, which switched
+  # off the section 2.6 warning below that is the entire reason for computing
+  # the standard error.
   terms <- switch(params$comparator,
                   none    = "sp_time",
-                  healthy = c("sp_time", resolve(c("sp_case", "sp_time"))),
+                  healthy = c("sp_time", resolve_fixef_name(b, c("sp_case", "sp_time"))),
                   treated = c("sp_time", "sp_placebo_time"))
   if (anyNA(terms) || !all(terms %in% names(b))) {
     warning(sprintf(paste0(
@@ -237,12 +239,12 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 
   frame <- boot_frame(params, context)
   subject_index <- split(seq_len(nrow(frame)), frame$subject)
-  ids <- names(subject_index)
+  positions <- seq_along(subject_index)
   groups <- if (is.null(frame$group)) {
-    list(ids)
+    list(positions)
   } else {
     sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
-    unname(split(ids, sub_group))
+    unname(split(positions, sub_group))
   }
 
   # Warnings are suppressed for every replicate. Anything worth saying about the
@@ -265,8 +267,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     }
   })
 
-  n_failed <- sum(is.na(replicates))
-  good <- replicates[!is.na(replicates)]
+  failed <- is.na(replicates)
+  n_failed <- sum(failed)
+  good <- replicates[!failed]
   if (length(good) < 2L) {
     stop(sprintf("%s: %d of %d replicates failed; not enough succeeded to form an interval.",
                  context, n_failed, R), call. = FALSE)
@@ -413,6 +416,24 @@ slope_bootstrap <- function(x, R = 199, type = c("bca", "percentile"), ...,
   UseMethod("slope_bootstrap")
 }
 
+#' Shared body of the two stage-two `slope_bootstrap()` methods
+#'
+#' `slope_bootstrap.slope_sample_size()` and `slope_bootstrap.slope_power()`
+#' differ only in which stage-two function is re-solved on each replicate,
+#' which of the object's own inputs is held fixed while doing so, and which
+#' statistics are on offer; everything else -- matching `statistic`, rejecting
+#' `...`, and the call to `run_bootstrap()` -- is identical.
+#' @noRd
+bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
+                                R, type, statistic, level, seed, progress, dots) {
+  statistic <- match_statistic(statistic, choices, advice)
+  reject_dots(dots, dots_advice_result(label))
+  fixed <- stats::setNames(list(x[[fixed_name]]), fixed_name)
+  compute <- function(p) do.call(fn, c(resolve_args(p, x), fixed))[[statistic]]
+  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
+               seed, progress)
+}
+
 #' @describeIn slope_bootstrap Bootstrap the required sample size (the default)
 #'   or the target treatment effect behind it.
 #' @param statistic Which of the object's quantities to bootstrap. Each method
@@ -424,18 +445,13 @@ slope_bootstrap.slope_sample_size <- function(x, R = 199,
                                               statistic = c("n", "tte"), ...,
                                               level = 0.95, seed = NULL,
                                               progress = FALSE) {
-  statistic <- match_statistic(statistic, c("n", "tte"), paste0(
-    "This result solved for the sample size, so `n` and the target treatment\n",
-    "  effect `tte` behind it are what it can offer. For the power a fixed\n",
-    "  sample size achieves, bootstrap a slope_power() result instead."))
-  reject_dots(list(...), dots_advice_result("slope_sample_size()"))
   # `power` is the target this result was solved to, and so is an input that is
   # held fixed across replicates -- it is what makes `n` vary.
-  compute <- function(p) {
-    do.call(slope_sample_size, c(resolve_args(p, x), list(power = x$power)))[[statistic]]
-  }
-  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
-                seed, progress)
+  bootstrap_stage_two(x, slope_sample_size, "power", c("n", "tte"), paste0(
+    "This result solved for the sample size, so `n` and the target treatment\n",
+    "  effect `tte` behind it are what it can offer. For the power a fixed\n",
+    "  sample size achieves, bootstrap a slope_power() result instead."),
+    "slope_sample_size()", R, type, statistic, level, seed, progress, list(...))
 }
 
 #' @describeIn slope_bootstrap Bootstrap the power achieved (the default) or the
@@ -446,19 +462,14 @@ slope_bootstrap.slope_power <- function(x, R = 199,
                                         statistic = c("power", "tte"), ...,
                                         level = 0.95, seed = NULL,
                                         progress = FALSE) {
-  statistic <- match_statistic(statistic, c("power", "tte"), paste0(
+  # `x$n` rather than `x$n_requested`: the even number actually used, so the
+  # replicates answer the question the observed value answered.
+  bootstrap_stage_two(x, slope_power, "n", c("power", "tte"), paste0(
     "This result solved for the power a fixed sample size achieves, so `power`\n",
     "  and the target treatment effect `tte` behind it are what it can offer. For\n",
     "  the sample size a target power needs, bootstrap a slope_sample_size()\n",
-    "  result instead."))
-  reject_dots(list(...), dots_advice_result("slope_power()"))
-  # `x$n` rather than `x$n_requested`: the even number actually used, so the
-  # replicates answer the question the observed value answered.
-  compute <- function(p) {
-    do.call(slope_power, c(resolve_args(p, x), list(n = x$n)))[[statistic]]
-  }
-  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
-                seed, progress)
+    "  result instead."),
+    "slope_power()", R, type, statistic, level, seed, progress, list(...))
 }
 
 #' @describeIn slope_bootstrap Bootstrap the fitted slope itself, which needs no

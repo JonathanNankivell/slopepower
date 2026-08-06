@@ -12,7 +12,7 @@ test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 15, seed = 1))
   expect_true(is.list(b))
   expect_equal(b$statistic, "slope")
-  reps <- b$replicates %||% b$t
+  reps <- b$replicates
   expect_true(!is.null(reps))
   expect_gt(stats::sd(reps, na.rm = TRUE), 0)
   # the replicate slopes should surround the observed one
@@ -22,7 +22,7 @@ test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
 test_that("slope_bootstrap() is reproducible under a fixed seed", {
   a <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10, seed = 42))
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10, seed = 42))
-  expect_equal(a$replicates %||% a$t, b$replicates %||% b$t)
+  expect_equal(a$replicates, b$replicates)
 })
 
 test_that("slope_bootstrap() dispatches on what it is handed", {
@@ -43,7 +43,7 @@ test_that("slope_bootstrap() can bootstrap the sample size itself", {
   ss <- slope_sample_size(paper_fit("slpower1"), trial_design(c(0, 1, 2)),
                           effectiveness = 0.33)
   b <- suppressWarnings(slope_bootstrap(ss, R = 15, seed = 7))
-  reps <- b$replicates %||% b$t
+  reps <- b$replicates
   expect_true(all(reps > 0, na.rm = TRUE))
   expect_gt(stats::sd(reps, na.rm = TRUE), 0)
   expect_equal(b$observed, ss$n)

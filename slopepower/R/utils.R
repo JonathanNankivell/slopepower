@@ -119,6 +119,47 @@ parse_slope_formula <- function(formula, context) {
   list(outcome = lhs, time = rhs, subject = subject)
 }
 
+#' Format a numeric vector compactly for messages and printing
+#' @noRd
+fmt_num <- function(x) {
+  vapply(x, function(v) format(v, trim = TRUE, drop0trailing = TRUE), character(1L))
+}
+
+#' Find a fixed-effect name accounting for `lme`'s two possible interaction
+#' spellings
+#'
+#' `lme` names an interaction after the order its components appear in the
+#' model formula, so `sp_case * sp_time` yields `sp_case:sp_time` while
+#' `sp_time * sp_case` yields `sp_time:sp_case`. The two fits are identical --
+#' only the label differs -- so extraction must not depend on which spelling
+#' arose.
+#'
+#' @return The matching name in `names(b)`, or `NA_character_` if neither
+#'   spelling is present.
+#' @noRd
+resolve_fixef_name <- function(b, parts) {
+  cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
+  hit <- cand[cand %in% names(b)]
+  if (length(hit)) hit[1L] else NA_character_
+}
+
+#' Reject `effectiveness` alongside target = "observed"
+#'
+#' The one place this rule is enforced: called directly by `effect_components()`
+#' and, separately, by the grid wrappers before their loop -- the grid loop
+#' omits `effectiveness` from the call it builds when target = "observed",
+#' which would otherwise bypass the check inside `effect_components()` itself.
+#' @noRd
+check_target_effectiveness <- function(target, supplied, context) {
+  if (identical(target, "observed") && isTRUE(supplied)) {
+    stop(sprintf(paste0(
+      "%s: supply only one of `effectiveness` and target = \"observed\".\n",
+      "  target = \"observed\" reuses the treatment effect observed in the ",
+      "previous trial, which fixes effectiveness at 1."), context), call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 #' Format a labelled value the way the Stata command does, for print methods
 #' @noRd
 fmt_line <- function(label, value, width = 39L, digits = 3L) {

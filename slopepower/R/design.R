@@ -1,11 +1,5 @@
 # Layer 2 --- the proposed trial design: visit schedule and dropout pattern.
 
-#' Format numbers compactly for messages and printing
-#' @noRd
-fmt_num <- function(x) {
-  vapply(x, function(v) format(v, trim = TRUE, drop0trailing = TRUE), character(1L))
-}
-
 #' Render a numeric vector as the R call that would create it
 #' @noRd
 fmt_call_vec <- function(x) {
@@ -88,12 +82,17 @@ trial_design <- function(visits,
   dropout <- validate_dropout(dropout, n_intervals, dropout_type, visits, ctx)
 
   if (dropout[1L] > 0) {
-    warning(sprintf(
-      paste0("%s: dropout[1] = %s applies to participants whose last attended visit is ",
-             "baseline (t = %s). With no follow-up measurement they contribute nothing to ",
-             "the comparison of slopes and are excluded from the calculation. The Stata ",
-             "original skips this stratum silently."),
-      ctx, fmt_num(dropout[1L]), fmt_num(visits[1L])), call. = FALSE)
+    # Classed rather than left as a plain warning: slope_power_grid() and
+    # slope_sample_size_grid() collect this one specifically, by class, to
+    # report it once per grid rather than once per cell.
+    warning(warningCondition(
+      sprintf(
+        paste0("%s: dropout[1] = %s applies to participants whose last attended visit is ",
+               "baseline (t = %s). With no follow-up measurement they contribute nothing to ",
+               "the comparison of slopes and are excluded from the calculation. The Stata ",
+               "original skips this stratum silently."),
+        ctx, fmt_num(dropout[1L]), fmt_num(visits[1L])),
+      class = "slopepower_baseline_dropout"))
   }
 
   structure(

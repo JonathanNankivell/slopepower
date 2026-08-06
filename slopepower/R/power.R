@@ -242,12 +242,7 @@ effect_components <- function(params, design, target, effectiveness,
            sprintf('and requires `params` with comparator = "treated"; got "%s".',
                    comparator), call. = FALSE)
     }
-    if (isTRUE(effectiveness_supplied)) {
-      stop(sprintf('%s: supply only one of `effectiveness` and target = "observed". ',
-                   context),
-           'target = "observed" targets the previously observed effect in full.',
-           call. = FALSE)
-    }
+    check_target_effectiveness(target, effectiveness_supplied, context)
     reference_slope <- params$slope_comparator
     effectiveness <- 1
   } else {
@@ -664,16 +659,12 @@ slope_power <- function(params, design, n,
 # output
 # ---------------------------------------------------------------------------
 
-#' Compact numeric formatting for visit times
-#' @noRd
-fmt_compact <- function(x) format(x, trim = TRUE, scientific = FALSE, digits = 7L)
-
 #' Render the follow-up schedule the way the Stata command does
 #' @noRd
 schedule_string <- function(design) {
   follow_up <- design$visits[-1L]
-  if (!design$has_dropout) return(paste(fmt_compact(follow_up), collapse = ", "))
-  paste(sprintf("%s (%s)", fmt_compact(follow_up), fmt_compact(design$dropout)),
+  if (!design$has_dropout) return(paste(fmt_num(follow_up), collapse = ", "))
+  paste(sprintf("%s (%s)", fmt_num(follow_up), fmt_num(design$dropout)),
         collapse = ", ")
 }
 

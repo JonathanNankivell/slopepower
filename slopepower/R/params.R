@@ -27,8 +27,13 @@
 #' factor path used to trust alphabetical order, which made
 #' `healthy = <"case"/"control" column>` return the healthy controls' slope
 #' labelled as the cases'.
+#'
+#' @param meaning What "1" means for this column (e.g. `"case"` or
+#'   `"treated"`), for the error messages below. The caller knows this; the
+#'   coercion itself is agnostic to which of `slope_params()`'s arguments
+#'   supplied `x`.
 #' @noRd
-coerce_binary <- function(x, name, context) {
+coerce_binary <- function(x, name, context, meaning) {
   if (inherits(x, "haven_labelled")) x <- as.numeric(x)
   if (is.logical(x)) return(as.numeric(x))
   if (is.factor(x) || is.character(x)) {
@@ -38,7 +43,6 @@ coerce_binary <- function(x, name, context) {
                    context, name, nlevels(f)), call. = FALSE)
     }
     if (!identical(levels(f), c("0", "1"))) {
-      meaning <- if (identical(name, "healthy")) "case" else "treated"
       stop(sprintf(paste0(
         "%s: `%s` is a %s with levels %s, so which level means \"%s\" cannot be ",
         "determined.\n  Recode it explicitly as 0/1, e.g.",
@@ -60,8 +64,7 @@ coerce_binary <- function(x, name, context) {
   }
   if (!isTRUE(all.equal(u, c(0, 1)))) {
     stop(sprintf("%s: `%s` must be coded 0/1 (1 = %s); got values %s.",
-                 context, name,
-                 if (identical(name, "healthy")) "case" else "treated",
+                 context, name, meaning,
                  paste(format(u), collapse = "/")), call. = FALSE)
   }
   as.numeric(x)
@@ -78,13 +81,13 @@ coerce_binary <- function(x, name, context) {
 #' the internal formula, loudly rather than silently, but break nonetheless.
 #' @noRd
 fixef_term <- function(b, parts, context) {
-  cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
-  hit <- cand[cand %in% names(b)]
-  if (length(hit) == 0L) {
+  hit <- resolve_fixef_name(b, parts)
+  if (is.na(hit)) {
     stop(sprintf("%s: fixed effect `%s` not found in the fitted model; have %s.",
-                 context, cand[1L], paste(names(b), collapse = ", ")), call. = FALSE)
+                 context, paste(parts, collapse = ":"), paste(names(b), collapse = ", ")),
+         call. = FALSE)
   }
-  unname(b[[hit[1L]]])
+  unname(b[[hit]])
 }
 
 #' Evaluate a bare column name (or expression) against `data`, then the caller
@@ -479,7 +482,8 @@ slope_params <- function(formula, data,
   if (comparator != "none") {
     gexpr <- if (comparator == "healthy") healthy_expr else treated_expr
     graw  <- eval_column(gexpr, data, env, context, comparator)
-    grp   <- coerce_binary(graw, comparator, context)
+    grp   <- coerce_binary(graw, comparator, context,
+                           meaning = if (comparator == "healthy") "case" else "treated")
     if (length(grp) != length(y)) {
       stop(sprintf("%s: `%s` has length %d but the data have %d rows.",
                    context, comparator, length(grp), length(y)), call. = FALSE)
@@ -549,9 +553,9 @@ slope_params <- function(formula, data,
                      random = ~ sp_time | sp_subject,
                      data = dat, method = "REML", control = ctrl)
     b <- nlme::fixef(fit)
-    slope            <- fixef_term(b, "sp_time", context) +
-                        fixef_term(b, "sp_placebo_time", context)   # control arm
-    slope_comparator <- fixef_term(b, "sp_time", context)                 # treated arm
+    time_term        <- fixef_term(b, "sp_time", context)
+    slope            <- time_term + fixef_term(b, "sp_placebo_time", context)  # control arm
+    slope_comparator <- time_term                                              # treated arm
     re <- extract_re(fit, "(Intercept)", "sp_time", context)
     s2r <- extract_residual(fit, NULL, context)
 
@@ -591,9 +595,9 @@ slope_params <- function(formula, data,
     }
 
     b <- nlme::fixef(fit)
-    slope            <- fixef_term(b, "sp_time", context) +
-                        fixef_term(b, c("sp_case", "sp_time"), context)  # cases
-    slope_comparator <- fixef_term(b, "sp_time", context)                  # controls
+    time_term        <- fixef_term(b, "sp_time", context)
+    slope            <- time_term + fixef_term(b, c("sp_case", "sp_time"), context)  # cases
+    slope_comparator <- time_term                                                    # controls
     re  <- extract_re(fit, "sp_case", "sp_case_time", context)
     s2r <- extract_residual(fit, "case", context)
   }
@@ -707,8 +711,10 @@ new_slope_params <- function(slope, slope_comparator, comparator,
   if (!is.finite(slope)) {
     stop(sprintf("%s: the estimated slope is not finite.", context), call. = FALSE)
   }
-  for (nm in c("sigma2_intercept", "sigma2_slope", "sigma2_residual")) {
-    v <- get(nm)
+  variances <- list(sigma2_intercept = sigma2_intercept, sigma2_slope = sigma2_slope,
+                    sigma2_residual = sigma2_residual)
+  for (nm in names(variances)) {
+    v <- variances[[nm]]
     if (!is.finite(v) || v <= 0) {
       stop(sprintf("%s: `%s` must be a positive number; got %s.",
                    context, nm, format(v)), call. = FALSE)
