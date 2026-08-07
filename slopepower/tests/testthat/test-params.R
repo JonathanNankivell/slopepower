@@ -202,6 +202,43 @@ test_that("common_variance does not change the case estimates", {
   expect_equal(reduced$sigma2_residual, full$sigma2_residual, tolerance = 1e-4)
 })
 
+# --- data adequacy regressions -----------------------------------------------
+# Code-review regressions: too little data to identify the random-slope model
+# used to fit silently and return an unstable estimate rather than fail.
+
+test_that("a subject seen only once does not count toward the repeat-visit floor", {
+  # 2 subjects, 3 rows, one subject with a single visit: fewer than 3 usable
+  # rows would already be rejected, but 3 rows is enough to slip past that
+  # guard while still being unidentifiable (only 1 of 2 subjects contributes
+  # any information about the random-slope variance).
+  d <- data.frame(id = c(1, 1, 2), visit = c(0, 1, 0), sdmt = c(40, 38, 35))
+  expect_error(slope_params(sdmt ~ visit | id, d), "repeat visits")
+})
+
+test_that("a comparator group of 1 subject is rejected, not silently fit", {
+  set.seed(2)
+  subj <- data.frame(id = 1:41, case = c(1, rep(0, 40)))
+  subj$intercept <- rnorm(41, 50, 10)
+  subj$slope <- rnorm(41, ifelse(subj$case == 1, -1.7, -0.3), 0.5)
+  sim <- merge(subj, data.frame(visit = 0:3))
+  sim$sdmt <- sim$intercept + sim$slope * sim$visit + rnorm(nrow(sim), 0, 3)
+  expect_error(
+    suppressMessages(slope_params(sdmt ~ visit | id, sim, healthy = case)),
+    "at least 2 participants")
+})
+
+test_that("small or unbalanced comparator groups warn but still fit", {
+  set.seed(2)
+  subj <- data.frame(id = 1:22, case = c(rep(1, 2), rep(0, 20)))
+  subj$intercept <- rnorm(22, 50, 10)
+  subj$slope <- rnorm(22, ifelse(subj$case == 1, -1.7, -0.3), 1.4)
+  sim <- merge(subj, data.frame(visit = 0:3))
+  sim$sdmt <- sim$intercept + sim$slope * sim$visit + rnorm(nrow(sim), 0, 3)
+  expect_warning(
+    suppressMessages(slope_params(sdmt ~ visit | id, sim, healthy = case)),
+    "small or unbalanced")
+})
+
 # --- printing ---------------------------------------------------------------
 
 test_that("print.slope_params() runs for each scenario", {

@@ -514,6 +514,21 @@ slope_params <- function(formula, data,
   }
   dat$sp_subject <- droplevels(dat$sp_subject)
 
+  # A random-slope model needs subjects with repeat visits to identify the
+  # slope variance at all; a subject seen once contributes nothing to it. Row
+  # count alone does not catch this -- 3 rows can be 2 subjects, one of them
+  # seen only once -- so check participants directly. Two is the bare
+  # mathematical minimum (with one, there is no between-subject variance to
+  # estimate); it is not a claim that two is *enough* for a trustworthy fit.
+  n_repeat <- sum(table(dat$sp_subject) >= 2L)
+  if (n_repeat < 2L) {
+    stop(sprintf(paste0(
+      "%s: too little repeated-measures data to fit a random-slope model: only %d ",
+      "of %d participant(s) have more than one visit. At least 2 participants with ",
+      "repeat visits are needed to identify the slope variance."),
+      context, n_repeat, nlevels(dat$sp_subject)), call. = FALSE)
+  }
+
   # per-subject time origin
   time_shifted <- FALSE
   if (origin == "subject") {
@@ -527,9 +542,33 @@ slope_params <- function(formula, data,
     dat$sp_time <- dat$sp_time - first
   }
 
-  if (comparator != "none" && length(unique(dat$sp_case)) != 2L) {
-    stop(sprintf("%s: `%s` must contain both groups after removing missing values.",
-                 context, comparator), call. = FALSE)
+  if (comparator != "none") {
+    if (length(unique(dat$sp_case)) != 2L) {
+      stop(sprintf("%s: `%s` must contain both groups after removing missing values.",
+                   context, comparator), call. = FALSE)
+    }
+    # Presence of both groups is not enough: for `healthy`/`treated` each group
+    # gets its own variance components (the `healthy` model factorises into two
+    # fully independent per-group fits -- see the note above), so a group too
+    # small to have a between-subject variance of its own returns a fit that
+    # looks exactly like a well-supported one instead of failing. Two per group
+    # is the same bare mathematical minimum as the repeat-visit check above,
+    # applied per group instead of overall; below it, `nlme` still "converges"
+    # and returns an unstable, misleadingly precise-looking number.
+    group_n <- tapply(dat$sp_subject, dat$sp_case, function(s) length(unique(s)))
+    if (any(group_n < 2L)) {
+      stop(sprintf(paste0(
+        "%s: each level of `%s` needs at least 2 participants to identify its own ",
+        "variance components; got %d (coded 0) and %d (coded 1)."),
+        context, comparator, group_n[["0"]], group_n[["1"]]), call. = FALSE)
+    }
+    if (min(group_n) < 5L || max(group_n) / min(group_n) >= 5) {
+      warning(sprintf(paste0(
+        "%s: the two `%s` groups are small or unbalanced (%d coded 0, %d coded 1). ",
+        "The variance components estimated for the smaller group -- and any sample ",
+        "size or power computed from them -- may be unstable."),
+        context, comparator, group_n[["0"]], group_n[["1"]]), call. = FALSE)
+    }
   }
 
   ctrl <- slope_lme_control()

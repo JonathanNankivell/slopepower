@@ -58,10 +58,18 @@ refit_frame <- function(frame, comparator) {
 #' constant-time integer index into the list rather than a linear scan of its
 #' names -- the same random draws either way, since `sample()`'s draws depend
 #' only on a vector's length, not its values.
+#'
+#' Drawing is done via `sample.int(length(pos), ...)`, indexed back into `pos`,
+#' rather than `sample(pos, ...)` directly. `sample(x, size)` treats a
+#' length-one `x` as a range to draw *from* (`1:x`) rather than a single value
+#' to draw *with replacement*, so a stratum of exactly one subject -- one case
+#' in a `healthy` comparison, say -- would silently have its "resample" drawn
+#' from the wrong distribution instead of always returning that subject.
 #' @noRd
 resample_frame <- function(frame, subject_index, groups) {
-  picks <- unlist(lapply(groups, function(pos) sample(pos, length(pos), replace = TRUE)),
-                  use.names = FALSE)
+  picks <- unlist(lapply(groups, function(pos) {
+    pos[sample.int(length(pos), length(pos), replace = TRUE)]
+  }), use.names = FALSE)
   parts <- vector("list", length(picks))
   for (i in seq_along(picks)) {
     rows <- subject_index[[picks[i]]]
@@ -193,16 +201,13 @@ dots_advice_result <- function(entry) {
 #' `design` is already a `trial_design` object, and `alpha`, `target` and the
 #' solved-for input are carried alongside it.
 #'
-#' `effectiveness` is omitted under `target = "observed"`, which fixes it at 1
-#' and stores `NA_real_`; the stage-two entry points reject the two together.
+#' `effectiveness` is omitted under `target = "observed"` via
+#' `maybe_add_effectiveness()`, shared with the grid functions' base args.
 #' @noRd
 resolve_args <- function(p, result) {
   args <- list(params = p, design = result$design,
                target = result$target, alpha = result$alpha)
-  if (!identical(result$target, "observed")) {
-    args$effectiveness <- result$effectiveness
-  }
-  args
+  maybe_add_effectiveness(args, result$effectiveness, result$target)
 }
 
 #' Bootstrap a scalar computed from resampled stage-one parameters

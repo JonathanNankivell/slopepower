@@ -159,14 +159,14 @@ label_dropout <- function(x) {
 
 #' Build the base stage-two args, omitting `effectiveness` under target = "observed"
 #'
-#' The loop below always calls the stage-two function through this base list,
-#' because target = "observed" fixes effectiveness at 1 internally and the two
-#' must not be supplied together (`check_target_effectiveness()`, called by both
-#' grid wrappers before their loop, is what rejects that combination).
+#' The loop below always calls the stage-two function through this base list.
+#' `check_target_effectiveness()`, called by both grid wrappers before their
+#' loop, rejects `effectiveness` alongside target = "observed"; the omission
+#' rule itself lives in `maybe_add_effectiveness()`, shared with
+#' `slope_bootstrap()`'s `resolve_args()`.
 #' @noRd
 grid_base_args <- function(args, effectiveness, target) {
-  if (!identical(target, "observed")) args$effectiveness <- effectiveness
-  args
+  maybe_add_effectiveness(args, effectiveness, target)
 }
 
 #' Walk the visits x dropout cross product, evaluating one design per cell
@@ -215,20 +215,22 @@ grid_impl <- function(visits, dropout, evaluate, context) {
                      context, vname, dname, conditionMessage(e)), call. = FALSE)
       })
 
-      rows[[k]] <- data.frame(
-        design        = vname,
-        dropout       = dname,
-        n_visits      = length(v),
-        n_follow_up   = length(v) - 1L,
-        last_visit    = v[length(v)],
-        dropout_total = sum(des$dropout),
-        n             = res$n,
-        n_per_arm     = res$n_per_arm,
-        power         = res$power,
-        tte           = res$tte,
-        var_tte       = res$var_tte,
-        effect_size   = res$effect_size,
-        stringsAsFactors = FALSE
+      # The six result columns are pulled from as.data.frame.slope_result()
+      # rather than off `res` directly, so this row can never drift from what
+      # that method reports for the same object.
+      res_cols <- as.data.frame(res)[c("n", "n_per_arm", "power", "tte",
+                                       "var_tte", "effect_size")]
+      rows[[k]] <- cbind(
+        data.frame(
+          design        = vname,
+          dropout       = dname,
+          n_visits      = length(v),
+          n_follow_up   = length(v) - 1L,
+          last_visit    = v[length(v)],
+          dropout_total = sum(des$dropout),
+          stringsAsFactors = FALSE
+        ),
+        res_cols
       )
     }
   }

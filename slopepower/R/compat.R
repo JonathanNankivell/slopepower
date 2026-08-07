@@ -91,14 +91,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
 
   if (!is.data.frame(data)) data <- as.data.frame(data)
   for (nm in c("depvar", "subject", "time")) {
-    v <- get(nm)
-    if (!is.character(v) || length(v) != 1L) {
-      stop(sprintf("%s: `%s` must be a single column name.", context, nm), call. = FALSE)
-    }
-    if (!v %in% names(data)) {
-      stop(sprintf("%s: `%s` = \"%s\" is not a column of `data`.", context, nm, v),
-           call. = FALSE)
-    }
+    check_column_name(get(nm), nm, data, context)
   }
 
   # ---- model selection, following slopepower.ado lines 48-64 ----------------
@@ -145,13 +138,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   group_arg <- if (model == 1L) "healthy" else if (model == 3L) "treated" else NULL
   group_col <- if (model == 1L) casecon else if (model == 3L) treat else NULL
   if (!is.null(group_col)) {
-    if (!is.character(group_col) || length(group_col) != 1L) {
-      stop(sprintf("%s: `%s` must be a single column name.", context,
-                   if (model == 1L) "casecon" else "treat"), call. = FALSE)
-    }
-    if (!group_col %in% names(data)) {
-      stop(sprintf("%s: \"%s\" is not a column of `data`.", context, group_col), call. = FALSE)
-    }
+    check_column_name(group_col, if (model == 1L) "casecon" else "treat", data, context)
   }
 
   # ---- schedule and scale --------------------------------------------------

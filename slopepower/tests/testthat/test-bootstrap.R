@@ -65,6 +65,43 @@ test_that("slope_bootstrap() warns when the slope is weak relative to its error"
   expect_warning(slope_bootstrap(flat, R = 5, seed = 1))
 })
 
+# --- resample_frame() ---------------------------------------------------
+# `resample_frame` is internal -- these exercise the resampling primitive
+# directly rather than through a full fit, since a single-subject stratum
+# needs a stage-one fit that has since been rejected by slope_params() itself
+# (see test-params.R's "comparator group of 1 subject" regression) for
+# healthy/treated data, but resample_frame() itself must still be correct for
+# any stratum it is handed.
+resample_frame <- slopepower:::resample_frame
+
+test_that("resample_frame() always returns the sole member of a size-1 stratum", {
+  # sample(x, size) treats a length-one x as a range to draw *from* (1:x)
+  # rather than a value to draw *with replacement*, so a stratum whose lone
+  # *position* is not 1 used to have its "resample" drawn from 1:pos instead
+  # of always returning pos. (A lone position of exactly 1 cannot expose this,
+  # since 1:1 = 1 either way -- hence subject 3 below, not subject 1.)
+  frame <- data.frame(marker = rep(c("A", "B", "C"), each = 2),
+                      time = rep(c(0, 1), 3), subject = rep(1:3, each = 2))
+  subject_index <- split(seq_len(nrow(frame)), frame$subject)   # positions 1,2,3
+  one_stratum <- 3L   # subject 3 ("C") is the sole member of its stratum
+
+  markers <- vapply(1:200, function(i) {
+    unique(resample_frame(frame, subject_index, list(one_stratum))$marker)
+  }, character(1L))
+  expect_true(all(markers == "C"))
+})
+
+test_that("resample_frame() keeps each replicate's stratum sizes fixed", {
+  frame <- data.frame(y = rnorm(6), time = rep(c(0, 1), 3), subject = rep(1:3, each = 2))
+  subject_index <- split(seq_len(nrow(frame)), frame$subject)
+  groups <- list(3L, 1:2)   # stratum sizes 1 (position 3) and 2 (positions 1:2)
+  for (i in 1:20) {
+    out <- resample_frame(frame, subject_index, groups)
+    expect_equal(length(unique(out$subject)), 3L)
+    expect_equal(nrow(out), nrow(frame))
+  }
+})
+
 test_that("slope_bootstrap() refuses parameters that carry no data", {
   manual <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
                                 sigma2_slope = 2, sigma_cov = 5,

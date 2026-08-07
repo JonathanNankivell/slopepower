@@ -202,8 +202,26 @@ slope_var <- function(params, visits) {
   context <- "slope_var()"
   check_params(params, context)
   t <- check_visits(visits, context)
+  treatment_effect_var(slope_sigma(params, t), t, context)
+}
 
-  sigma <- slope_sigma(params, t)
+#' The GLS half of `slope_var()`: everything after `slope_sigma()` has built
+#' and validated the covariance matrix
+#'
+#' Split out so [effect_components()] can pass a leading submatrix of an
+#' already-validated covariance matrix for each dropout stratum, rather than
+#' rebuilding it from `outer()` and re-running `slope_sigma()`'s
+#' eigendecomposition-based positive-definite check on it. That re-check can
+#' only ever confirm what is already known: a leading principal submatrix of a
+#' positive definite matrix is itself always positive definite (Sylvester's
+#' criterion), since its leading principal minors are a subset of the full
+#' matrix's, which are all positive.
+#'
+#' @param sigma A covariance matrix already validated positive definite, e.g.
+#'   by [slope_sigma()] or by being a leading submatrix of one.
+#' @param t The visit times `sigma` was built at, already validated.
+#' @noRd
+treatment_effect_var <- function(sigma, t, context) {
   m <- length(t)
   zero <- matrix(0, m, m)
 
@@ -268,16 +286,24 @@ effect_components <- function(params, design, target, effectiveness,
   dropout <- design$dropout
   n_follow_up <- length(visits) - 1L
 
-  var_full <- slope_var(params, visits)
+  sigma_full <- slope_sigma(params, visits)
+  var_full <- treatment_effect_var(sigma_full, visits, "slope_var()")
   es_full <- slope_difference / sqrt(var_full)
 
   # Dawson-Lagakos pattern mixture. Stratum j attends visits[1:j]; stratum 1 sees
   # baseline only and carries no slope information, so it is skipped -- an
   # infinite stratum-specific sample size contributes nothing to the sum.
+  #
+  # Stratum j's covariance is exactly the leading j x j submatrix of
+  # `sigma_full` (Sigma_ik depends only on visits i and k, not on what other
+  # visits exist), so it is sliced out rather than rebuilt and re-validated
+  # from scratch -- see treatment_effect_var()'s note on why that re-check
+  # would be redundant.
   eff2 <- (1 - sum(dropout)) * es_full^2
   for (j in seq_len(n_follow_up)[-1L]) {
     if (dropout[j] == 0) next
-    var_j <- slope_var(params, visits[seq_len(j)])
+    idx <- seq_len(j)
+    var_j <- treatment_effect_var(sigma_full[idx, idx, drop = FALSE], visits[idx], "slope_var()")
     eff2 <- eff2 + dropout[j] * (slope_difference / sqrt(var_j))^2
   }
 

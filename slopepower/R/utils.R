@@ -143,6 +143,20 @@ resolve_fixef_name <- function(b, parts) {
   if (length(hit)) hit[1L] else NA_character_
 }
 
+#' Add `effectiveness` to an argument list, unless target = "observed" implies it
+#'
+#' `target = "observed"` fixes `effectiveness` at 1 internally, and
+#' [check_target_effectiveness()] rejects the two supplied together. Anything
+#' that rebuilds a stage-two call must therefore omit `effectiveness` under
+#' that target rather than supply it -- the rule belongs here once, rather than
+#' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`
+#' and the grid functions' `grid_base_args()` both use this.
+#' @noRd
+maybe_add_effectiveness <- function(args, effectiveness, target) {
+  if (!identical(target, "observed")) args$effectiveness <- effectiveness
+  args
+}
+
 #' Reject `effectiveness` alongside target = "observed"
 #'
 #' The one place this rule is enforced: called directly by `effect_components()`
@@ -158,6 +172,23 @@ check_target_effectiveness <- function(target, supplied, context) {
       "previous trial, which fixes effectiveness at 1."), context), call. = FALSE)
   }
   invisible(NULL)
+}
+
+#' Validate that a value is a single column name present in `data`
+#'
+#' Shared by the two places [slopepower()], the Stata-interface wrapper, takes
+#' a column name as a string rather than a bare name: `depvar`/`subject`/`time`
+#' and, separately, whichever of `casecon`/`treat` applies to the chosen model.
+#' @noRd
+check_column_name <- function(value, name, data, context) {
+  if (!is.character(value) || length(value) != 1L) {
+    stop(sprintf("%s: `%s` must be a single column name.", context, name), call. = FALSE)
+  }
+  if (!value %in% names(data)) {
+    stop(sprintf("%s: `%s` = \"%s\" is not a column of `data`.", context, name, value),
+         call. = FALSE)
+  }
+  invisible(value)
 }
 
 #' Format a labelled value the way the Stata command does, for print methods
