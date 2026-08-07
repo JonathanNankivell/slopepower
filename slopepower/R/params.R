@@ -385,7 +385,11 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' * **more than two arms, unequal allocation, or cluster-randomised, crossover
 #'   and stepped-wedge designs.** Stage two assumes two equal parallel arms.
 #'
-#' @return An object of class `"slope_params"`.
+#' @return An object of class `"slope_params"`. Its `$fit` component is the
+#'   fitted `"lme"` object itself, useful for `nlme`'s diagnostic plots (e.g.
+#'   `plot(fit)`, `qqnorm(fit)`) -- note that these must reference the
+#'   internal column names (`sp_y`, `sp_time`, `sp_subject`, ...) described
+#'   above, not the originals from `data`.
 #'
 #' @examples
 #' # Neither `healthy` nor `treated`: a single group of untreated subjects.

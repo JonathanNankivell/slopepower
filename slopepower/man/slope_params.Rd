@@ -48,7 +48,11 @@ the full structure and errors on failure. Ignored unless \code{healthy} is given
 \code{\link[stats:na.omit]{stats::na.omit()}}.}
 }
 \value{
-An object of class \code{"slope_params"}.
+An object of class \code{"slope_params"}. Its \verb{$fit} component is the
+fitted \code{"lme"} object itself, useful for \code{nlme}'s diagnostic plots (e.g.
+\code{plot(fit)}, \code{qqnorm(fit)}) -- note that these must reference the
+internal column names (\code{sp_y}, \code{sp_time}, \code{sp_subject}, ...) described
+above, not the originals from \code{data}.
 }
 \description{
 Stage one of the two-stage sample-size method of Nash et al. (2021). Fits a
