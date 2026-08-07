@@ -367,8 +367,13 @@ test_that("with Stata's own variance components the arithmetic is exact", {
   # Every design grid, grid 4 included: the loose N bound above is excused on
   # the grounds that this exact test carries the real burden, which is only
   # true if the grid it excuses reaches this loop.
+  # Per grid, not for the test as a whole: skipping the whole test because one
+  # grid is absent would silently drop the exact comparison for every grid that
+  # is present, which is the opposite of what a missing CSV should cost.
+  compared <- 0
   for (stem in names(DESIGN_GRIDS)) {
-    skip_without_stata_reference(stem)
+    if (!have_stata_reference(stem)) next
+    compared <- compared + 1
     grid <- read_stata_reference(stem)
     grid <- grid[grid$rc == 0 & !grid$tag %in% c(STATA_ONLY, KNOWN_DIVERGENCES),
                  , drop = FALSE]
@@ -421,6 +426,9 @@ test_that("with Stata's own variance components the arithmetic is exact", {
                  info = stata_mismatch_report(bad, c("o_var_tte", "r_var_tte"),
                                               paste0(stem, ": exact var_tte")))
   }
+
+  # Grid 5 was present, so at least one design grid must have been too.
+  expect_gt(compared, 0)
 })
 
 # ---------------------------------------------------------------------------

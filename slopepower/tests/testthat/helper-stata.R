@@ -111,7 +111,8 @@ DESIGN_GRIDS <- c(
   "01_grid_arithmetic"  = "grid 1: the stage-two arithmetic matches Stata",
   "02_grid_comparators" = "grid 2: the comparator branches match Stata",
   "03_grid_fits"        = "grid 3: scaled and subsetted fits match Stata",
-  "04_edge_cases"       = "grid 4: boundaries and guards match Stata where they should"
+  "04_edge_cases"       = "grid 4: boundaries and guards match Stata where they should",
+  "06_table1"           = "grid 6: the paper's table 1 matches Stata"
 )
 
 # Fitting is the slow part and many rows share a fit, so cache on everything

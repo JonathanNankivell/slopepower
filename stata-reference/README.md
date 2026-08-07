@@ -42,6 +42,7 @@ do 02_grid_comparators.do
 do 03_grid_fits.do
 do 04_edge_cases.do
 do 05_variance_components.do
+do 06_table1.do
 ```
 
 Only `00` opens a log, and it now starts with `capture log close _all`. On the
@@ -50,7 +51,7 @@ other four files appended to its still-open log and question 2 never ran — if
 `00_open_questions.log` comes out at hundreds of KB, that is what happened
 again.
 
-`00` writes a log to read by eye. The other five write `<stem>.dta` and
+`00` writes a log to read by eye. The other six write `<stem>.dta` and
 `<stem>.csv` beside themselves; the R suite reads the CSVs. Grid 5 must be
 regenerated alongside the others: the exact test joins its fits to the design
 grids on dataset, model, scale, subset and `nocontvar`, so a stale grid 5 either
@@ -67,8 +68,9 @@ number of rows times the cost of one fit. Rough shape:
 | `03_grid_fits` | 77 | all three | mixed |
 | `04_edge_cases` | 71 | mostly slpower1; many rows error before fitting | cheap |
 | `05_variance_components` | 37 | all three, one row per distinct fit | one fit per row, no repeats |
+| `06_table1` | 18 | slpower1, as grid 1 | cheap |
 
-Around 580 calls in total. If that is too slow to iterate on, cut sweep B in
+Around 600 calls in total. If that is too slow to iterate on, cut sweep B in
 `01` first — it is the largest block and the most redundant, since alpha and
 power enter only through `z_{1-α/2} + z_{1-β}`.
 
@@ -133,6 +135,28 @@ upward while the R port's closed form stays finite), `SUM1-` (a dropout list
 summing to exactly 1 in decimal, which both implementations accept), `ODD-`
 (`n(451)` must come back as 450, and does), and `IGN-` (options Stata warns about
 and then ignores, which the R port has no way to express).
+
+**`06_table1.do`** — the paper's table 1 (p.595), run from the nine commands the
+appendix gives for it (p.601). Table 1 is the one published result the port could
+otherwise only check against a rounded figure: nine powers printed as percentages
+to one decimal place, so `test-paper-parity.R` can pin them no tighter than
+±5e-4. Three of the nine already fall out of grid 1's sweep by coincidence
+(`A-3-none-P`, `A-1 2 3-none-P`, `A-1 2 3-flat05-P`); the other six do not, and
+they are the ones worth having. The three six-month cells need `scale(0.5)`,
+which no other design grid uses at all — that is the one design in the paper
+where Stata's integer schedule and the R port's real visit times have to meet
+through `scale()`. The two final-visit-only dropout cells use a single-element
+`dropouts(0.15)` / `dropouts(0.3)`, the smallest case the Dawson–Lagakos
+weighting handles and one nothing else generates at that magnitude.
+
+Rows tagged `T1-` are the published cells, `n(450)` solving for power. Rows
+tagged `T1N-` are the same nine designs solving for N at 80% power instead —
+nine more cheap fits, a second independent comparison per cell, and on the mode
+where the two implementations define `var_tte` the same way (CONTRACT.md 5.6), so
+`var_tte` is comparable on those rows and not on the published ones.
+
+No new fits: every row uses `F1-sc1` or `F1-sc0.5`, both already in grid 5, so
+the tolerance-free test joins straight on and pins all nine powers to 1e-12.
 
 ## CSV layout
 

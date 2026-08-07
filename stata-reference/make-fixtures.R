@@ -18,14 +18,14 @@
 # the wrong fit.
 
 STEMS <- c("01_grid_arithmetic", "02_grid_comparators", "03_grid_fits",
-           "04_edge_cases", "05_variance_components")
+           "04_edge_cases", "05_variance_components", "06_table1")
 
-# Row counts as generated on 2026-08-04. A mismatch means a .do file changed
-# without this manifest being updated, which is exactly when a stale fixture
-# would otherwise slip through unnoticed.
+# Row counts as generated on 2026-08-04 (06_table1 on 2026-08-07). A mismatch
+# means a .do file changed without this manifest being updated, which is
+# exactly when a stale fixture would otherwise slip through unnoticed.
 EXPECTED_ROWS <- c("01_grid_arithmetic" = 348, "02_grid_comparators" = 88,
                    "03_grid_fits" = 77, "04_edge_cases" = 71,
-                   "05_variance_components" = 37)
+                   "05_variance_components" = 37, "06_table1" = 18)
 
 here <- normalizePath(".")
 dest <- normalizePath(file.path(here, "..", "slopepower", "tests", "testthat",

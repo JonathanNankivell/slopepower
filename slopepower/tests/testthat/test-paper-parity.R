@@ -167,6 +167,39 @@ test_that("Table 1: all nine published powers reproduce", {
   }
 })
 
+test_that("Table 1: Stata's own output rounds to the published percentages", {
+  # The nine cells above are pinned only to the paper's printed figures, which
+  # are percentages to one decimal place: a +/- 5e-4 window on power, and the
+  # loosest assertion anywhere in the parity suite. Grid 6 runs the appendix's
+  # nine commands (p.601) through slopepower.ado and records the powers at 17
+  # significant digits, which closes the gap two ways at once.
+  #
+  # This test is the first half: Stata's own answer must round to what the
+  # journal printed. That is a check on the transcription -- the appendix
+  # converts "5% per year" into dropouts(0.15) for the final-visit-only design
+  # and dropouts(0.05 0.05 0.05) for annual visits, and if this port had read
+  # that conversion wrongly the printed table is the only thing that would ever
+  # have said so. The second half is in test-stata-reference.R, where grid 6
+  # joins onto grid 5's fits and the powers are pinned to 1e-12.
+  skip_without_stata_reference("06_table1")
+
+  ref <- read_stata_reference("06_table1")
+  cells <- ref[startsWith(ref$tag, "T1-"), , drop = FALSE]
+  expect_equal(nrow(cells), 9)
+  expect_true(all(cells$rc == 0))
+
+  tag_of <- c(final_only = "final", annual = "annual", six_month = "sixmonth")
+
+  for (i in seq_len(nrow(paper_table1))) {
+    tag <- sprintf("T1-%s-%s", tag_of[[paper_table1$design[i]]],
+                   paper_table1$dropout[i])
+    row <- cells[cells$tag == tag, , drop = FALSE]
+    expect_equal(nrow(row), 1, info = tag)
+    expect_printed(row$o_power, paper_table1$power[i],
+                   sprintf("Stata, Table 1 [%s]", tag))
+  }
+})
+
 test_that("Table 1: extra visits buy more power as dropout worsens", {
   # The paper's substantive conclusion: interim visits are worth
   # disproportionately more when dropout is high, because a mixed model uses
