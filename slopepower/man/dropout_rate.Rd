@@ -38,6 +38,11 @@ section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
 visit is \code{visits[j]} is \code{rate * (visits[j + 1] - visits[j])}. Every dropout is
 expressed as a fraction of the randomised cohort, not of those still in
 follow-up, so the increments sum to \code{rate * total_duration}.
+
+This object only produces the per-visit proportions. What the calculation then
+does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
+what it assumes about why people withdraw --- is described in
+\code{\link[=trial_design]{trial_design()}}.
 }
 \section{Methods (by generic)}{
 \itemize{

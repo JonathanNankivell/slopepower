@@ -43,7 +43,38 @@ Stata command's default behaviour for trial data.}
 }
 }
 
+\section{Dropout}{
+
+
+When \code{design} carries a dropout pattern, the calculation is adjusted by the
+pattern-mixture method of Dawson and Lagakos (1991, 1993), following section
+2.5 of Nash et al. (2021). Participants are stratified by the visits they
+attend, each stratum is sized as though the whole trial followed that pattern,
+and the strata are combined as the reciprocal of the weighted mean of the
+reciprocals of those sizes. Withdrawers thus still contribute the visits they
+attended, which is less conservative than dividing a completers-only sample
+size by the completion rate, and is the right adjustment when the trial will
+be analysed with a mixed model on all observed measurements. Only monotone
+dropout from a schedule common to all participants is modelled, and every
+stratum is assumed to share the same variance components, so withdrawal is
+taken to be unrelated to a participant's own trajectory. See \code{\link[=trial_design]{trial_design()}}
+for the full account and for how the \code{dropout} vector itself is read.
+
+One field of the result changes meaning under dropout. No single \eqn{s^{*2}}
+applies across strata, so \code{var_tte} reports the effective value obtained by
+inverting the sample-size formula, rather than \code{\link[=slope_var]{slope_var()}} at the full visit
+schedule.
+}
+
 \references{
+Dawson, J. D., and S. W. Lagakos. 1991. Analyzing laboratory marker changes in
+AIDS clinical trials. \emph{Journal of Acquired Immune Deficiency Syndromes}
+4: 667--676.
+
+Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
+repeated measures data. \emph{Biometrics} 49: 1022--1032.
+\doi{10.2307/2532244}
+
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.

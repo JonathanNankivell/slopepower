@@ -37,7 +37,11 @@ reciprocals of the stratum-specific sample sizes.
 }
 \details{
 Participants who attend only the baseline visit contribute nothing, since a
-single measurement carries no information about a slope.
+single measurement carries no information about a slope. Every stratum uses
+the same slope difference and the same variance components, so withdrawal is
+assumed unrelated to a participant's own trajectory, and only monotone dropout
+from a common schedule can be expressed. See \code{\link[=trial_design]{trial_design()}} for what that
+does and does not cover.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
@@ -48,4 +52,21 @@ slope_effect_size(pars, c(0, 1, 2))
 design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
 slope_effect_size(pars, design)
 
+}
+\references{
+Dawson, J. D., and S. W. Lagakos. 1991. Analyzing laboratory marker changes in
+AIDS clinical trials. \emph{Journal of Acquired Immune Deficiency Syndromes}
+4: 667--676.
+
+Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
+repeated measures data. \emph{Biometrics} 49: 1022--1032.
+\doi{10.2307/2532244}
+
+Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
+calculations for trials that compare slopes over time: Introducing the
+slopepower command. \emph{Stata Journal} 21(3): 575--601.
+}
+\seealso{
+\code{\link[=trial_design]{trial_design()}} for how dropout is specified and what the
+pattern-mixture weighting assumes.
 }

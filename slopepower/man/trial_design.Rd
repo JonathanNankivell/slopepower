@@ -78,6 +78,35 @@ from the calculation entirely, and \code{trial_design()} warns when \code{dropou
 non-zero so that this is visible rather than silent.
 }
 
+\section{How dropout enters the calculation}{
+Dropout is accommodated by the pattern-mixture approach of Dawson and Lagakos
+(1991, 1993), which is what section 2.5 of Nash et al. (2021) adopts and what
+the Stata command's \code{dropouts()} option does. Participants are divided into
+strata by the visits they attend: stratum \code{j} attends \code{visits[1:j]} and
+nothing after, and the completers --- a proportion \code{1 - sum(dropout)} ---
+attend everything. Each stratum is sized as though the entire trial followed
+that one visit pattern, and the strata are combined as the reciprocal of the
+weighted mean of the reciprocals of those stratum-specific sample sizes, the
+weights being \code{dropout}. Equivalently, and this is how it is actually
+computed, the squared standardised effect sizes are averaged with those
+weights; see \code{\link[=slope_effect_size]{slope_effect_size()}}.
+
+Withdrawers therefore still contribute the visits they did attend. That makes
+the adjustment less conservative than inflating a completers-only sample size
+by \code{1 / (1 - sum(dropout))}, and it is the appropriate one when the trial will
+be analysed with a mixed model fitted to all observed measurements, as in
+\code{\link[=slope_params]{slope_params()}}. If the planned analysis instead discards partial records,
+this will understate the sample size needed.
+
+Two assumptions come with it. Dropout is monotone and truncates a schedule
+common to every participant: withdrawal is permanent, and intermittent
+missingness --- a visit missed and follow-up resumed --- has no representation
+here, as in the Stata original. And every stratum is given the same slope
+difference and the same variance components, so withdrawal is assumed
+unrelated to a participant's own trajectory; dropout driven by how fast
+someone is declining is outside the model.
+}
+
 \examples{
 trial_design(c(0, 1, 2))
 trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
@@ -85,6 +114,24 @@ trial_design(seq(0, 3, by = 0.5), dropout = rep(0.025, 6))
 trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
              dropout_type = "cumulative")
 
+}
+\references{
+Dawson, J. D., and S. W. Lagakos. 1991. Analyzing laboratory marker changes in
+AIDS clinical trials. \emph{Journal of Acquired Immune Deficiency Syndromes}
+4: 667--676.
+
+Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
+repeated measures data. \emph{Biometrics} 49: 1022--1032.
+\doi{10.2307/2532244}
+
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+clinical trials where the outcome is a rate. Can estimating a baseline rate in
+a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+3717--3731. \doi{10.1002/sim.3280}
+
+Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
+calculations for trials that compare slopes over time: Introducing the
+slopepower command. \emph{Stata Journal} 21(3): 575--601.
 }
 \seealso{
 \code{\link[=slope_params]{slope_params()}}, \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}

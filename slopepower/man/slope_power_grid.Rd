@@ -46,7 +46,9 @@ the power of a trial under different rates of loss to follow-up.
 Because dropout proportions are supplied per visit, a single numeric vector
 cannot describe the same withdrawal behaviour across designs with different
 numbers of visits. Use \code{\link[=dropout_rate]{dropout_rate()}} to state the rate once and have it
-expanded correctly for each schedule.
+expanded correctly for each schedule. However the proportions are arrived at,
+each cell of the grid handles them exactly as \code{\link[=slope_power]{slope_power()}} does, by the
+Dawson and Lagakos (1991, 1993) pattern mixture described in \code{\link[=trial_design]{trial_design()}}.
 
 Use \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} for the converse table: the sample size each
 design needs to reach a target power.

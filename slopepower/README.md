@@ -175,6 +175,18 @@ trial_design(visits = c(0, 1, 2, 5), dropout = c(0.05, 0.1, 0.2),
 Participants who attend baseline only carry no slope information; a non-zero
 first element warns.
 
+Whatever the proportions, they are handled by the pattern-mixture method of
+Dawson and Lagakos (1991, 1993), as in §2.5 of the paper: participants are
+stratified by the visits they attend, each stratum is sized as if the whole trial
+followed that pattern, and the strata are combined as the reciprocal of the
+weighted mean of the reciprocals of those sizes. Withdrawers therefore still
+contribute the visits they attended, which is less conservative than dividing a
+completers-only sample size by the completion rate, and is the right adjustment
+when the trial is to be analysed by a mixed model on all observed measurements.
+Dropout is assumed monotone and unrelated to a participant's own trajectory —
+every stratum shares the same variance components. `?trial_design` spells this
+out.
+
 ## Parameters without data
 
 If you have published estimates rather than raw data:

@@ -38,6 +38,12 @@ the sample size each combination of visit schedule and dropout assumption
 requires. Section 4.2 of Nash et al. (2021) is the power version of this table;
 this is the same exploration read the other way round.
 }
+\details{
+Dropout is handled cell by cell exactly as in \code{\link[=slope_sample_size]{slope_sample_size()}}, by the
+Dawson and Lagakos (1991, 1993) pattern mixture described in \code{\link[=trial_design]{trial_design()}}.
+Use \code{\link[=dropout_rate]{dropout_rate()}} rather than a fixed vector when the schedules being
+compared have different numbers of visits.
+}
 \examples{
 # No comparator: measured toward a slope of zero, fitted to all two
 # hundred participants of `slpower1`.

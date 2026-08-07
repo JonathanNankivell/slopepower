@@ -45,7 +45,9 @@ with \code{obs}.}
 Used with \code{rct}.}
 
 \item{dropouts}{Numeric vector of incremental dropout proportions aligned with
-\code{schedule}.}
+\code{schedule}: element \code{j} is the proportion whose last attended visit is
+\code{schedule[j]}. They are handled by the Dawson and Lagakos (1991, 1993)
+pattern mixture, as in the Stata original; see \code{\link[=trial_design]{trial_design()}}.}
 
 \item{scale}{Number of \code{time} units in one \code{schedule} unit. Defaults to 1.}
 

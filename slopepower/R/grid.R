@@ -25,6 +25,11 @@
 #' expressed as a fraction of the randomised cohort, not of those still in
 #' follow-up, so the increments sum to `rate * total_duration`.
 #'
+#' This object only produces the per-visit proportions. What the calculation then
+#' does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
+#' what it assumes about why people withdraw --- is described in
+#' [trial_design()].
+#'
 #' @param rate Expected proportion of the randomised sample withdrawing per `per`
 #'   units of time. Must be non-negative.
 #' @param per Length of time `rate` refers to, in the units of the `time` variable
@@ -260,7 +265,9 @@ grid_impl <- function(visits, dropout, evaluate, context) {
 #' Because dropout proportions are supplied per visit, a single numeric vector
 #' cannot describe the same withdrawal behaviour across designs with different
 #' numbers of visits. Use [dropout_rate()] to state the rate once and have it
-#' expanded correctly for each schedule.
+#' expanded correctly for each schedule. However the proportions are arrived at,
+#' each cell of the grid handles them exactly as [slope_power()] does, by the
+#' Dawson and Lagakos (1991, 1993) pattern mixture described in [trial_design()].
 #'
 #' Use [slope_sample_size_grid()] for the converse table: the sample size each
 #' design needs to reach a target power.
@@ -360,6 +367,11 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #' the sample size each combination of visit schedule and dropout assumption
 #' requires. Section 4.2 of Nash et al. (2021) is the power version of this table;
 #' this is the same exploration read the other way round.
+#'
+#' Dropout is handled cell by cell exactly as in [slope_sample_size()], by the
+#' Dawson and Lagakos (1991, 1993) pattern mixture described in [trial_design()].
+#' Use [dropout_rate()] rather than a fixed vector when the schedules being
+#' compared have different numbers of visits.
 #'
 #' @inheritParams slope_power_grid
 #' @param power Target power, held constant across the grid. Defaults to 0.8.

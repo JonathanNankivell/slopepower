@@ -51,7 +51,9 @@
 #' @param treat Column name identifying the treated arm (1) and control arm (0).
 #'   Used with `rct`.
 #' @param dropouts Numeric vector of incremental dropout proportions aligned with
-#'   `schedule`.
+#'   `schedule`: element `j` is the proportion whose last attended visit is
+#'   `schedule[j]`. They are handled by the Dawson and Lagakos (1991, 1993)
+#'   pattern mixture, as in the Stata original; see [trial_design()].
 #' @param scale Number of `time` units in one `schedule` unit. Defaults to 1.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
 #' @param power,n Supply one, as in Stata. `n` gives the power that sample size
