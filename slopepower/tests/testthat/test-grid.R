@@ -173,3 +173,158 @@ test_that("slope_power_grid() collects the baseline-only warning once", {
   expect_length(w, 1L)
   expect_match(w, "baseline visit only")
 })
+
+# --- automatic row labels ---------------------------------------------------
+#
+# `design` and `dropout` are the row identifiers of the returned table: they are
+# the columns a caller subsets on to pull out one result, as the Table 1 tests
+# above do. What the grid puts in them when the inputs are *not* named is
+# therefore part of the interface rather than cosmetic, and every test above
+# supplies named lists. These supply the unnamed forms and assert the labels
+# together with the numbers on the rows they identify.
+
+test_that("a bare numeric `visits` vector is labelled by its visit times", {
+  # The one-design shorthand -- `visits = c(0, 1, 2)` instead of a list of one --
+  # and `dropout` left at its default, which stands for a single no-dropout row.
+  p <- paper_fit("slpower1")
+  out <- slope_sample_size_grid(p, visits = c(0, 1, 2),
+                                power = 0.8, effectiveness = 0.33)
+  expect_equal(nrow(out), 1L)
+  expect_identical(out$design, "0, 1, 2")
+  expect_identical(out$dropout, "none")
+  expect_equal(out$dropout_total, 0)
+  # CONTRACT.md 7, paper p.588: the shorthand must reach the same calculation
+  # the list form does, so the headline N of the first worked example stands.
+  expect_equal(out$n, 712)
+  expect_equal(out$n_per_arm, 356)
+})
+
+test_that("a bare dropout vector or dropout_rate() is labelled by its contents", {
+  p <- paper_fit("slpower1")
+  vec <- suppressWarnings(slope_power_grid(
+    p, visits = list(annual = 0:3), dropout = c(0.05, 0.05, 0.05),
+    n = 450, effectiveness = 0.33))
+  expect_identical(vec$dropout, "0.05, 0.05, 0.05")
+  expect_equal(vec$dropout_total, 0.15)
+
+  # A dropout_rate() is labelled by the rate it states, not by the vector it
+  # expands to. That is the only stable choice: the same object deliberately
+  # yields a different vector for every schedule (0.15 across one interval,
+  # rep(0.05, 3) across three), so a vector label would differ from row to row
+  # of a single column.
+  rate <- suppressWarnings(slope_power_grid(
+    p, visits = table1_visits, dropout = dropout_rate(0.05),
+    n = 450, effectiveness = 0.33))
+  expect_identical(unique(rate$dropout), "0.05 per 1")
+  expect_equal(rate$dropout_total, rep(0.15, 3))
+  # and the rows so labelled are the `5pc` column of Table 1, p.595
+  for (i in seq_len(nrow(rate))) {
+    expect_lt(abs(rate$power[i] - paper_table1$power[paper_table1$dropout == "5pc" &
+                                                       paper_table1$design == rate$design[i]]),
+              5e-4)
+  }
+
+  # `per` is carried into the label as well as into the expansion, because 10%
+  # per twelve units of time and 10% per unit time are different assumptions
+  # and would otherwise key the same row.
+  per <- suppressWarnings(slope_power_grid(
+    p, visits = list(annual = 0:3), dropout = dropout_rate(0.1, per = 12),
+    n = 450, effectiveness = 0.33))
+  expect_identical(per$dropout, "0.1 per 12")
+  expect_equal(per$dropout_total, 0.025)
+})
+
+test_that("a wholly unnamed list is labelled element by element and deduped", {
+  # names() is NULL rather than a vector of blanks when nothing at all is named,
+  # which is a distinct case from the partly-named list below.
+  p <- paper_fit("slpower1")
+  out <- slope_power_grid(p, visits = list(c(0, 3), 0:3, c(0, 3)),
+                          n = 450, effectiveness = 0.33)
+  # The repeated schedule generates a repeated label, and make.unique() suffixes
+  # it rather than emitting two rows the caller cannot tell apart.
+  expect_identical(out$design, c("0, 3", "0, 1, 2, 3", "0, 3_1"))
+  expect_equal(out$n_visits, c(2L, 4L, 2L))
+  # the suffixed row is genuinely the same design, evaluated a second time
+  expect_equal(out$power[3], out$power[1])
+  # first two rows of the `none` column of Table 1, p.595
+  expect_lt(abs(out$power[1] - 0.798), 5e-4)
+  expect_lt(abs(out$power[2] - 0.817), 5e-4)
+})
+
+test_that("labels fill in only the blanks of a partly named list", {
+  p <- paper_fit("slpower1")
+  out <- suppressWarnings(slope_power_grid(
+    p,
+    visits  = list(final_only = c(0, 3), 0:3),
+    dropout = list(NULL, `5pc` = dropout_rate(0.05)),
+    n = 450, effectiveness = 0.33))
+  expect_identical(out$design,
+                   c("final_only", "final_only", "0, 1, 2, 3", "0, 1, 2, 3"))
+  # A NULL element inside a list is labelled "none", the same string the
+  # `dropout = NULL` shorthand produces, so the two routes to a no-dropout row
+  # are keyed identically and results from the two calls line up.
+  expect_identical(out$dropout, rep(c("none", "5pc"), 2))
+  expect_equal(out$dropout_total, c(0, 0.15, 0, 0.15))
+  # visits varies slowest, dropout fastest -- the order the Table 1 tests rely on
+  expect_equal(out$n_visits, c(2L, 2L, 4L, 4L))
+})
+
+test_that("duplicate names supplied by the caller are deduped too", {
+  # make.unique() runs over the whole name vector, not just the filled-in
+  # blanks, so reusing a name still yields distinguishable rows.
+  p <- paper_fit("slpower1")
+  out <- slope_power_grid(p, visits = list(sparse = c(0, 3), sparse = 0:3),
+                          n = 450, effectiveness = 0.33)
+  expect_identical(out$design, c("sparse", "sparse_1"))
+  expect_equal(out$n_visits, c(2L, 4L))
+})
+
+test_that("visits and dropout must be of a shape the grid can normalise", {
+  p <- paper_fit("slpower1")
+  # Not a numeric vector and not a non-empty list. An empty list is rejected
+  # rather than returning a zero-row table, because a grid with no cells is a
+  # mistake in the call rather than a result.
+  expect_error(slope_power_grid(p, visits = "0 1 2", n = 450),
+               "must be a numeric vector of visit times")
+  expect_error(slope_power_grid(p, visits = list(), n = 450),
+               "must be a numeric vector of visit times")
+  expect_error(slope_sample_size_grid(p, visits = list(), power = 0.8),
+               "must be a numeric vector of visit times")
+  expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2)), dropout = "5%", n = 450),
+               "must be NULL, a numeric vector, a dropout_rate")
+  expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2)), dropout = list(), n = 450),
+               "must be NULL, a numeric vector, a dropout_rate")
+})
+
+test_that("a bad list element is reported against the label of its own row", {
+  # Normalisation only checks the shape of the container; a bad *element*
+  # surfaces later, from inside the loop. With many cells the message has to say
+  # which one, so it quotes the row label -- including the fallback label the
+  # element gets when it cannot be labelled from its contents.
+  p <- paper_fit("slpower1")
+  expect_error(slope_power_grid(p, visits = list(bad = "0 1 2"), n = 450),
+               'element "bad" of `visits` is not numeric')
+  expect_error(slope_power_grid(p, visits = list("0 1 2"), n = 450),
+               'element "design" of `visits` is not numeric')
+
+  err <- expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2)),
+                                       dropout = list("5%"), n = 450))
+  expect_match(conditionMessage(err), '(dropout = "dropout")', fixed = TRUE)
+  expect_match(conditionMessage(err), "got character", fixed = TRUE)
+})
+
+test_that("a cell that fails is reported by its labels, with the cause attached", {
+  # A stage-two failure is not the grid's own error, so it is re-raised with the
+  # two labels naming the offending cell and the original message kept beneath.
+  # Here the labels are generated ones, which is the case that matters: the
+  # caller has nothing else to identify the row by.
+  p <- slope_params_manual(slope = 1, sigma2_intercept = 100, sigma2_slope = 2,
+                           sigma_cov = 5, sigma2_residual = 10,
+                           slope_comparator = 1, comparator = "healthy")
+  err <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450,
+                                       effectiveness = 0.33))
+  expect_match(conditionMessage(err),
+               'design "0, 1, 2" with dropout "none" failed', fixed = TRUE)
+  # CONTRACT.md 6: a zero slope difference errors rather than yielding N = .
+  expect_match(conditionMessage(err), "slope difference is exactly zero", fixed = TRUE)
+})

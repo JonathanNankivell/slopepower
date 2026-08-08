@@ -486,6 +486,54 @@ test_that("print.slope_power() shows the requested N and the achieved power", {
   expect_false(any(grepl("Estimated sample size", out)))
 })
 
+test_that("the printed schedule renders the dropout at each follow-up visit", {
+  # The "schedule (and dropouts)" line is built by slopepower.ado:285-292 and
+  # printed at :744; reproducing it is the whole job of schedule_string(),
+  # because that line is how a reader checks a result against the worked
+  # examples in Nash et al. (2021). Two renderings, chosen by has_dropout, and
+  # both are pinned here: the file's other print tests exercise the no-dropout
+  # branch without asserting what it produces, and nothing reached the dropout
+  # branch at all.
+  schedule_of <- function(x) {
+    line <- grep("schedule (and dropouts)", capture.output(print(x)),
+                 fixed = TRUE, value = TRUE)
+    sub("^[^=]*= ", "", line)
+  }
+  p <- ref_params("healthy", -1.715, 0.975)
+
+  # The design of the paper's p.593 power example: 5% of the randomised cohort
+  # withdraws after each of two annual visits. trial_design() warns because
+  # dropout[1] covers baseline-only attenders (CONTRACT.md 5.4) -- expected for
+  # a flat rate, and not what is under test here.
+  d593 <- suppressWarnings(trial_design(c(0, 1, 2), c(0.05, 0.05)))
+  expect_identical(schedule_of(slope_power(p, d593, n = 200, effectiveness = 0.33)),
+                   "1 (0.05), 2 (0.05)")
+
+  # A zero keeps its "(0)" rather than the visit being dropped from the list --
+  # ado:288 is an explicit else branch for exactly that. This is the p.588
+  # extended design, where only the final visit loses anyone.
+  expect_identical(
+    schedule_of(slope_sample_size(p, trial_design(c(0, 1, 2, 5), c(0, 0, 0.1)),
+                                  effectiveness = 0.33)),
+    "1 (0), 2 (0), 5 (0.1)")
+
+  # Stata's string is built from the integer schedule positions because Sigma is
+  # assembled on a unit grid; this port carries real visit times (CONTRACT.md
+  # 5.1), so the six-monthly row of Table 1, p.595 prints half-year times rather
+  # than 1..6.
+  d_half <- suppressWarnings(trial_design(seq(0, 3, 0.5), rep(0.025, 6)))
+  expect_identical(
+    schedule_of(suppressWarnings(slope_power(p, d_half, n = 450, effectiveness = 0.33))),
+    "0.5 (0.025), 1 (0.025), 1.5 (0.025), 2 (0.025), 2.5 (0.025), 3 (0.025)")
+
+  # Without dropout the parenthesised rates vanish entirely -- ado:248-252 uses
+  # a separate loop for that case -- on both print methods.
+  expect_identical(schedule_of(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)),
+                   "1, 2")
+  expect_identical(schedule_of(slope_power(p, seq(0, 3, 0.5), n = 450, effectiveness = 0.33)),
+                   "0.5, 1, 1.5, 2, 2.5, 3")
+})
+
 test_that("the two print methods share the data-characteristics block verbatim", {
   # Split methods must not drift: the block above "Parameters for planned study"
   # is produced by shared code and depends only on params, not on the question.
