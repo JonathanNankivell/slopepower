@@ -90,8 +90,7 @@ expand_dropout <- function(spec, visits, context, label = NULL) {
       stop(sprintf(paste0("%s%s: dropout vector has %d element(s) but the design %s has %d ",
                           "follow-up visit(s).\n  Use dropout_rate() to express a rate that ",
                           "applies across designs with different visit schedules."),
-                   context, where, length(spec),
-                   paste0("c(", paste(format(visits, trim = TRUE), collapse = ", "), ")"),
+                   context, where, length(spec), fmt_call_vec(visits),
                    length(visits) - 1L), call. = FALSE)
     }
     return(spec)
@@ -161,18 +160,6 @@ label_dropout <- function(x) {
 # ---------------------------------------------------------------------------
 # the grid
 # ---------------------------------------------------------------------------
-
-#' Build the base stage-two args, omitting `effectiveness` under target = "observed"
-#'
-#' The loop below always calls the stage-two function through this base list.
-#' `check_target_effectiveness()`, called by both grid wrappers before their
-#' loop, rejects `effectiveness` alongside target = "observed"; the omission
-#' rule itself lives in `maybe_add_effectiveness()`, shared with
-#' `slope_bootstrap()`'s `resolve_args()`.
-#' @noRd
-grid_base_args <- function(args, effectiveness, target) {
-  maybe_add_effectiveness(args, effectiveness, target)
-}
 
 #' Walk the visits x dropout cross product, evaluating one design per cell
 #'
@@ -353,8 +340,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  args <- grid_base_args(list(params = params, n = n, target = target, alpha = alpha),
-                         effectiveness, target)
+  args <- maybe_add_effectiveness(list(params = params, n = n, target = target, alpha = alpha),
+                                  effectiveness, target)
 
   grid_impl(visits, dropout,
             function(des) do.call(slope_power, c(args, list(design = des))),
@@ -430,8 +417,9 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  args <- grid_base_args(list(params = params, power = power, target = target, alpha = alpha),
-                         effectiveness, target)
+  args <- maybe_add_effectiveness(
+    list(params = params, power = power, target = target, alpha = alpha),
+    effectiveness, target)
 
   grid_impl(visits, dropout,
             function(des) do.call(slope_sample_size, c(args, list(design = des))),

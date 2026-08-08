@@ -19,9 +19,8 @@ PARAM_FIELDS <- c("slope", "slope_comparator", "comparator",
 #' @noRd
 check_params <- function(params, context) {
   if (!inherits(params, "slope_params")) {
-    stop(sprintf("%s: `params` must be a `slope_params` object, as returned by ",
-                 context),
-         "`slope_params()` or `slope_params_manual()`.", call. = FALSE)
+    stop(sprintf(paste0("%s: `params` must be a `slope_params` object, as returned by ",
+                        "`slope_params()` or `slope_params_manual()`."), context), call. = FALSE)
   }
   missing_fields <- setdiff(PARAM_FIELDS, names(params))
   if (length(missing_fields) > 0L) {
@@ -65,7 +64,7 @@ check_visits <- function(visits, context) {
   }
   if (any(diff(visits) <= 0)) {
     stop(sprintf("%s: `visits` must be strictly increasing; got %s.",
-                 context, paste(format(visits), collapse = ", ")), call. = FALSE)
+                 context, paste(fmt_num(visits), collapse = ", ")), call. = FALSE)
   }
   invisible(as.numeric(visits))
 }
@@ -166,11 +165,10 @@ slope_sigma <- function(params, visits) {
     diag(params$sigma2_residual, length(t))
 
   if (!is_positive_definite(sigma)) {
-    stop(sprintf("%s: the implied covariance matrix is not positive definite. ",
-                 context),
-         "Check the variance components in `params`.", call. = FALSE)
+    stop(sprintf(paste0("%s: the implied covariance matrix is not positive definite. ",
+                        "Check the variance components in `params`."), context), call. = FALSE)
   }
-  dimnames(sigma) <- list(format(t), format(t))
+  dimnames(sigma) <- list(fmt_num(t), fmt_num(t))
   sigma
 }
 
@@ -231,10 +229,10 @@ treatment_effect_var <- function(sigma, t, context) {
 
   info <- t(x_star) %*% solve(sigma_star) %*% x_star
   f_star <- tryCatch(solve(info), error = function(e) {
-    stop(sprintf("%s: the information matrix is singular at visit times %s. ",
-                 context, paste(format(t), collapse = ", ")),
-         "At least two distinct follow-up times are needed to identify a slope difference.",
-         call. = FALSE)
+    stop(sprintf(paste0("%s: the information matrix is singular at visit times %s. ",
+                        "At least two distinct follow-up times are needed to identify ",
+                        "a slope difference."),
+                 context, paste(fmt_num(t), collapse = ", ")), call. = FALSE)
   })
   f_star[3L, 3L]
 }
@@ -255,10 +253,9 @@ effect_components <- function(params, design, target, effectiveness,
 
   if (identical(target, "observed")) {
     if (!identical(comparator, "treated")) {
-      stop(sprintf('%s: target = "observed" reuses the treatment effect from a previous trial ',
-                   context),
-           sprintf('and requires `params` with comparator = "treated"; got "%s".',
-                   comparator), call. = FALSE)
+      stop(sprintf(paste0('%s: target = "observed" reuses the treatment effect from a previous ',
+                          'trial and requires `params` with comparator = "treated"; got "%s".'),
+                   context, comparator), call. = FALSE)
     }
     check_target_effectiveness(target, effectiveness_supplied, context)
     reference_slope <- params$slope_comparator
@@ -275,10 +272,9 @@ effect_components <- function(params, design, target, effectiveness,
 
   slope_difference <- params$slope - reference_slope
   if (slope_difference == 0) {
-    stop(sprintf("%s: the slope difference is exactly zero, so the target treatment ",
-                 context),
-         "effect is zero and no finite sample size gives power against it.",
-         call. = FALSE)
+    stop(sprintf(paste0("%s: the slope difference is exactly zero, so the target treatment ",
+                        "effect is zero and no finite sample size gives power against it."),
+                 context), call. = FALSE)
   }
   tte <- -effectiveness * slope_difference
 
@@ -308,10 +304,9 @@ effect_components <- function(params, design, target, effectiveness,
   }
 
   if (eff2 <= 0) {
-    stop(sprintf("%s: every participant is expected to drop out before contributing ",
-                 context),
-         "slope information, so the effect size is zero. Check `design$dropout`.",
-         call. = FALSE)
+    stop(sprintf(paste0("%s: every participant is expected to drop out before contributing ",
+                        "slope information, so the effect size is zero. Check `design$dropout`."),
+                 context), call. = FALSE)
   }
   effect_size <- sign(slope_difference) * sqrt(eff2)
 

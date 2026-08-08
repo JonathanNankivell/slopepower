@@ -446,13 +446,9 @@ slope_params <- function(formula, data,
   cl <- match.call()
   origin <- match.arg(origin)
 
-  if (missing(data) || !is.data.frame(data)) {
-    data <- tryCatch(as.data.frame(data), error = function(e) {
-      stop(sprintf("%s: `data` must be a data frame.", context), call. = FALSE)
-    })
-  } else {
-    data <- as.data.frame(data)
-  }
+  data <- tryCatch(as.data.frame(data), error = function(e) {
+    stop(sprintf("%s: `data` must be a data frame.", context), call. = FALSE)
+  })
 
   parts <- parse_slope_formula(formula, context)
   if (is.null(parts$subject)) {
@@ -751,21 +747,11 @@ new_slope_params <- function(slope, slope_comparator, comparator,
                              sigma2_residual, n_obs, n_subjects,
                              common_variance, time_shifted, fit, call,
                              context) {
-  if (!is.finite(slope)) {
-    stop(sprintf("%s: the estimated slope is not finite.", context), call. = FALSE)
-  }
-  variances <- list(sigma2_intercept = sigma2_intercept, sigma2_slope = sigma2_slope,
-                    sigma2_residual = sigma2_residual)
-  for (nm in names(variances)) {
-    v <- variances[[nm]]
-    if (!is.finite(v) || v <= 0) {
-      stop(sprintf("%s: `%s` must be a positive number; got %s.",
-                   context, nm, format(v)), call. = FALSE)
-    }
-  }
-  if (!is.finite(sigma_cov)) {
-    stop(sprintf("%s: `sigma_cov` is not finite.", context), call. = FALSE)
-  }
+  check_scalar(slope, "slope", context)
+  check_variance(sigma2_intercept, "sigma2_intercept", context)
+  check_variance(sigma2_slope, "sigma2_slope", context)
+  check_variance(sigma2_residual, "sigma2_residual", context)
+  check_scalar(sigma_cov, "sigma_cov", context)
 
   G <- matrix(c(sigma2_intercept, sigma_cov, sigma_cov, sigma2_slope), 2L, 2L)
   if (!is_positive_definite(G)) {

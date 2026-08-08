@@ -70,14 +70,10 @@ resample_frame <- function(frame, subject_index, groups) {
   picks <- unlist(lapply(groups, function(pos) {
     pos[sample.int(length(pos), length(pos), replace = TRUE)]
   }), use.names = FALSE)
-  parts <- vector("list", length(picks))
-  for (i in seq_along(picks)) {
-    rows <- subject_index[[picks[i]]]
-    part <- frame[rows, , drop = FALSE]
-    part$subject <- i          # fresh identifier: a subject drawn twice is two people
-    parts[[i]] <- part
-  }
-  do.call(rbind, parts)
+  picked <- subject_index[picks]
+  out <- frame[unlist(picked, use.names = FALSE), , drop = FALSE]
+  out$subject <- rep(seq_along(picks), lengths(picked))  # fresh identifiers:
+  out                              # a subject drawn twice is two people
 }
 
 #' Standard error of the estimated slope

@@ -150,7 +150,7 @@ resolve_fixef_name <- function(b, parts) {
 #' that rebuilds a stage-two call must therefore omit `effectiveness` under
 #' that target rather than supply it -- the rule belongs here once, rather than
 #' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`
-#' and the grid functions' `grid_base_args()` both use this.
+#' and both grid functions use this directly.
 #' @noRd
 maybe_add_effectiveness <- function(args, effectiveness, target) {
   if (!identical(target, "observed")) args$effectiveness <- effectiveness
