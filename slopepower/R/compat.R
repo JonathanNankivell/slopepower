@@ -171,7 +171,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
 
   # ---- fit stage one -------------------------------------------------------
   work <- data
-  work[[".slopepower_time"]] <- as.numeric(coerce_time(data[[time]], context)) / scale
+  work[[".slopepower_time"]] <- coerce_time(data[[time]], context) / scale
 
   fml <- stats::as.formula(sprintf("`%s` ~ `.slopepower_time` | `%s`", depvar, subject))
 

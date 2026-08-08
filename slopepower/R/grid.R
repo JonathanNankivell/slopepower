@@ -58,7 +58,7 @@ dropout_rate <- function(rate, per = 1) {
 #' @export
 print.dropout_rate <- function(x, ...) {
   cat(sprintf("<dropout_rate> %s per %s unit%s of time\n",
-              format(x$rate), format(x$per), if (x$per == 1) "" else "s"))
+              fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s"))
   invisible(x)
 }
 
@@ -79,8 +79,8 @@ expand_dropout <- function(spec, visits, context, label = NULL) {
     if (total > 1 + DROPOUT_TOL) {
       stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
                           "implies total dropout of %s, which exceeds 1."),
-                   context, where, format(spec$rate), format(spec$per),
-                   format(diff(range(visits))), format(total)), call. = FALSE)
+                   context, where, fmt_num(spec$rate), fmt_num(spec$per),
+                   fmt_num(diff(range(visits))), fmt_num(total)), call. = FALSE)
     }
     return(increments)
   }
@@ -151,7 +151,7 @@ as_dropout_list <- function(dropout, context) {
 label_dropout <- function(x) {
   if (is.null(x)) return("none")
   if (inherits(x, "dropout_rate")) {
-    return(sprintf("%s per %s", format(x$rate), format(x$per)))
+    return(sprintf("%s per %s", fmt_num(x$rate), fmt_num(x$per)))
   }
   if (is.numeric(x)) return(label_numeric(x))
   "dropout"

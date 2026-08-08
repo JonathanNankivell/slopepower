@@ -223,7 +223,8 @@ test_that("bca_interval() falls back when under three jackknife values survive",
   # not the already-covered qnorm(0)/qnorm(1) guard above it.
   expect_null(bca_interval(theta = c(1, 2, 3, 4, 5), observed = 3,
                            frame = frame, subject_index = subject_index,
-                           comparator = "none", compute = function(p) p$slope,
+                           refitter = slopepower:::make_refitter("none"),
+                           compute = function(p) p$slope,
                            probs = c(0.025, 0.975)))
 })
 

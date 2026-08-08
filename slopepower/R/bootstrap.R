@@ -37,18 +37,27 @@ boot_frame <- function(params, context) {
   out
 }
 
-#' Refit stage one on a resampled frame
+#' Build a closure that refits stage one on a resampled frame
 #'
-#' The times in the recovered frame have already been re-origined per subject, so
-#' `origin = "none"` avoids repeating that work and the message that goes with it.
+#' The call to `slope_params()` -- formula, `origin = "none"` (the times in the
+#' recovered frame have already been re-origined per subject, so this avoids
+#' repeating that work and the message that goes with it), and which comparator
+#' argument to pass -- is identical for every replicate of a given bootstrap;
+#' only the resampled frame differs. Assembling it once here, rather than once
+#' per replicate, means [run_bootstrap()]'s loop -- run several hundred times,
+#' plus once per subject for the BCa jackknife -- reconstructs only what
+#' actually changes between replicates.
 #' @noRd
-refit_frame <- function(frame, comparator) {
-  args <- list(formula = y ~ time | subject, data = frame, origin = "none")
+make_refitter <- function(comparator) {
+  args <- list(formula = y ~ time | subject, data = quote(frame), origin = "none")
   cl <- as.call(c(list(quote(slope_params)), args,
                   if (identical(comparator, "healthy")) list(healthy = quote(group))
                   else if (identical(comparator, "treated")) list(treated = quote(group))
                   else NULL))
-  suppressMessages(suppressWarnings(eval(cl, list(frame = frame), parent.frame())))
+  enclos <- parent.frame()
+  function(frame) {
+    suppressMessages(suppressWarnings(eval(cl, list(frame = frame), enclos)))
+  }
 }
 
 #' Build one cluster-resampled frame, stratified by group where present
@@ -247,6 +256,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
     unname(split(positions, sub_group))
   }
+  refitter <- make_refitter(params$comparator)
 
   # Warnings are suppressed for every replicate. Anything worth saying about the
   # calculation -- a target effect that makes the slope more extreme, say -- is a
@@ -260,8 +270,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   tick <- max(1L, floor(R / 10))
   suppressWarnings(for (b in seq_len(R)) {
     replicates[b] <- tryCatch(
-      compute(refit_frame(resample_frame(frame, subject_index, groups),
-                          params$comparator)),
+      compute(refitter(resample_frame(frame, subject_index, groups))),
       error = function(e) NA_real_)
     if (isTRUE(progress) && b %% tick == 0L) {
       message(sprintf("%s: %d of %d replicates", context, b, R))
@@ -285,7 +294,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   used_type <- "percentile"
 
   if (identical(type, "bca")) {
-    bca <- bca_interval(good, observed, frame, subject_index, params$comparator,
+    bca <- bca_interval(good, observed, frame, subject_index, refitter,
                         compute, probs)
     if (is.null(bca)) {
       warning(sprintf(paste0("%s: the bias-correction could not be computed (every replicate ",
@@ -430,7 +439,11 @@ bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
   statistic <- match_statistic(statistic, choices, advice)
   reject_dots(dots, dots_advice_result(label))
   fixed <- stats::setNames(list(x[[fixed_name]]), fixed_name)
-  compute <- function(p) do.call(fn, c(resolve_args(p, x), fixed))[[statistic]]
+  # `compute` closes over `slim` -- just the four inputs resolve_args() reads --
+  # rather than `x` itself, so it does not keep x$params$fit (the original fit
+  # and its model frame) reachable through every one of several hundred replicates.
+  slim <- x[c("design", "target", "alpha", "effectiveness")]
+  compute <- function(p) do.call(fn, c(resolve_args(p, slim), fixed))[[statistic]]
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
                seed, progress)
 }
@@ -510,7 +523,7 @@ slope_bootstrap.default <- function(x, R = 199, type = c("bca", "percentile"),
 #' The acceleration comes from a leave-one-subject-out jackknife, matching the
 #' clustering used for the bootstrap itself.
 #' @noRd
-bca_interval <- function(theta, observed, frame, subject_index, comparator,
+bca_interval <- function(theta, observed, frame, subject_index, refitter,
                          compute, probs) {
   prop <- mean(theta < observed)
   if (prop <= 0 || prop >= 1) return(NULL)
@@ -520,7 +533,7 @@ bca_interval <- function(theta, observed, frame, subject_index, comparator,
   jack <- rep(NA_real_, length(ids))
   suppressWarnings(for (i in seq_along(ids)) {
     drop_rows <- subject_index[[i]]
-    jack[i] <- tryCatch(compute(refit_frame(frame[-drop_rows, , drop = FALSE], comparator)),
+    jack[i] <- tryCatch(compute(refitter(frame[-drop_rows, , drop = FALSE])),
                         error = function(e) NA_real_)
   })
   jack <- jack[!is.na(jack)]
