@@ -45,6 +45,7 @@
           nlme      # lme()/gls(), correlation & variance structures
           haven     # read Stata .dta files
           testthat  # unit tests
+          covr      # test coverage reports
           roxygen2  # generate NAMESPACE and man/ from #' comments -- 8.1.0, pinned above
           devtools  # load_all(), document(), check(), test()
           knitr     # vignette engine
@@ -63,7 +64,7 @@
           packages = [ rEnv ] ++ sysPkgs;
 
           shellHook = ''
-            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, nlme, haven, testthat, roxygen2, devtools, knitr, rmarkdown"
+            echo "R $(R --version | head -n1 | cut -d' ' -f3) — tidyverse, nlme, haven, testthat, covr, roxygen2, devtools, knitr, rmarkdown"
             echo "pandoc $(pandoc --version | head -n1 | cut -d' ' -f2)"
           '';
         };
