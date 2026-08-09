@@ -312,3 +312,58 @@ test_that("slopepower() announces fractional visits, and gets them right", {
     obs = TRUE, nocontrols = TRUE, effectiveness = 0.33))
   expect_false(any(grepl("non-integer|`scale`", msgs)))
 })
+
+# --- the namespace, without the search path ---------------------------------
+
+test_that("slopepower() works when the package is loaded but not attached", {
+  # Regression. slopepower() builds the stage-one call as language and evaluates
+  # it, and the environment it evaluated in was parented on parent.frame() --
+  # the *caller's* environment. `slope_params` is a free symbol in that call, so
+  # the lookup walked the user's search path and reached this package only when
+  # something had already run library(slopepower). Every other test in the suite
+  # has, which is exactly why this went unseen: `slopepower::slopepower(...)` on
+  # its own failed with `could not find function "slope_params"`.
+  #
+  # A child process is the only way to assert it. Attachment is a property of
+  # the session, and testthat's session has the package attached before the
+  # first test runs; nothing inside it can undo that without unloading the
+  # namespace being tested. So the check is: a fresh R with a bare `::` call.
+  skip_on_cran()
+  rscript <- file.path(R.home("bin"),
+                       if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
+  skip_if_not(file.exists(rscript), "Rscript not found")
+
+  script <- tempfile(fileext = ".R")
+  on.exit(unlink(script), add = TRUE)
+  writeLines(c(
+    # Not installed anywhere the child can see it -- running from load_all(),
+    # say. Nothing to test rather than something failing.
+    'if (!requireNamespace("slopepower", quietly = TRUE)) {',
+    '  cat("SKIP\\n"); quit(save = "no")',
+    '}',
+    # `::` loads the namespace without attaching, which is the whole point;
+    # assert that rather than trusting it, so the test cannot quietly become a
+    # duplicate of the ordinary attached-session ones above.
+    'stopifnot(!"slopepower" %in% .packages())',
+    'r <- slopepower::slopepower(slopepower::slpower1, "sdmt", "id", "visit",',
+    '                            schedule = c(1, 2), obs = TRUE,',
+    '                            nocontrols = TRUE, effectiveness = 0.33)',
+    'cat("N=", r$n, "\\n", sep = "")'
+  ), script)
+
+  # --vanilla for a clean session; R_LIBS so the child looks where this one
+  # found the package, which under R CMD check is the temporary check library.
+  out <- suppressWarnings(system2(
+    rscript, c("--vanilla", shQuote(script)), stdout = TRUE, stderr = TRUE,
+    env = paste0("R_LIBS=",
+                 shQuote(paste(.libPaths(), collapse = .Platform$path.sep)))))
+  status <- attr(out, "status")
+
+  if (any(out == "SKIP")) {
+    skip("slopepower is not installed in a library the child process can load")
+  }
+  # The whole transcript on failure: the diagnostic *is* the error text.
+  info <- paste(out, collapse = "\n")
+  expect_null(status, info = info)
+  expect_true(any(out == "N=712"), info = info)
+})

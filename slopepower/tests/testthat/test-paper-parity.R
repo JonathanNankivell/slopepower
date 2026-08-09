@@ -136,12 +136,41 @@ test_that("p.594: targeting the previously observed effect gives N = 318", {
 })
 
 test_that("p.594: powering for a fraction p of the observed effect scales as p^-2", {
-  # Paper section 4.1.3: "multiply the sample size above by 4" for p = 0.5.
+  # Paper section 4.1.3: "multiply the sample size above by 4" for p = 0.5,
+  # "so we would need a sample size of 1,272".
   d <- suppressWarnings(trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)))
-  n_observed <- slope_sample_size(paper_fit("slpower3"), d, target = "observed")$n
-  expect_equal(n_observed, 318)
-  # 318 * 4 = 1272, the figure quoted in the paper
-  expect_equal(n_observed * 4, 1272)
+  p3 <- paper_fit("slpower3")
+  ss <- slope_sample_size(p3, d, target = "observed")
+  expect_equal(ss$n, 318)
+  expect_equal(ss$n * 4, 1272)
+
+  # The published shortcut is slightly conservative, and the two figures it
+  # sits between are what this pins. The scaling law is exact on the unrounded
+  # per-arm requirement; `n` is already ceiling()-rounded (see solve_slope()),
+  # so multiplying magnifies that rounding. Round last instead and the answer
+  # is 1,266 -- six people fewer, and the number the rest of the package is
+  # consistent with. Neither is wrong; a reader comparing against the paper
+  # needs to know both exist, which an assertion that 318 * 4 is 1272 -- true
+  # of arithmetic, not of this package -- never told them.
+  exact <- 2 * ceiling((stats::qnorm(1 - ss$alpha / 2) + stats::qnorm(ss$power))^2 /
+                       (0.5 * ss$effect_size)^2)
+  expect_equal(exact, 1266)
+
+  # And that it really is the same calculation, not a coincidence of rounding:
+  # halving the previous trial's observed effect at source and re-solving must
+  # land on the same 1,266.
+  halved <- slope_params_manual(
+    slope            = p3$slope,
+    slope_comparator = p3$slope + (p3$slope_comparator - p3$slope) / 2,
+    sigma2_intercept = p3$sigma2_intercept, sigma2_slope = p3$sigma2_slope,
+    sigma_cov        = p3$sigma_cov,        sigma2_residual = p3$sigma2_residual,
+    comparator       = "treated")
+  expect_equal(slope_sample_size(halved, d, target = "observed")$n, 1266)
+
+  # The gap is bounded by p^-2 participants per arm, which is what makes the
+  # shortcut safe to use: it over-recruits, never under-recruits.
+  expect_gte(ss$n * 4, exact)
+  expect_lt((ss$n * 4 - exact) / 2, 0.5^-2)
 })
 
 # ---------------------------------------------------------------------------

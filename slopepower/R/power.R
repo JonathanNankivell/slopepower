@@ -564,7 +564,23 @@ NULL
 #'
 #' To power a trial for an effect that is a fraction `p` of a previously observed
 #' one, obtain the sample size with `target = "observed"` and multiply it by
-#' `p^-2` (Nash et al. 2021, section 4.1.3).
+#' `p^-2` (Nash et al. 2021, section 4.1.3, whose p.594 worked example scales
+#' N = 318 to 1,272 for `p = 0.5`).
+#'
+#' That shortcut is very slightly conservative. The scaling law is exact on the
+#' unrounded per-arm requirement, but `n` has already been rounded up to a whole
+#' participant per arm, so multiplying magnifies the rounding. Rounding last
+#' instead gives 1,266 on that example, and agrees with what this function
+#' returns for parameters whose reference slope has been halved directly:
+#'
+#' ```
+#' ss <- slope_sample_size(params, design, target = "observed")
+#' 2 * ceiling((qnorm(1 - ss$alpha / 2) + qnorm(ss$power))^2 /
+#'             (p * ss$effect_size)^2)
+#' ```
+#'
+#' The gap is bounded by `p^-2` participants per arm. Either is defensible ---
+#' the published figure recruits a few people more than it strictly needs.
 #'
 #' @inheritParams stage_two
 #' @param power Desired power, in (0, 1). Defaults to 0.8.

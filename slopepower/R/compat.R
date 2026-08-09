@@ -50,10 +50,15 @@
 #'   with `obs`.
 #' @param treat Column name identifying the treated arm (1) and control arm (0).
 #'   Used with `rct`.
-#' @param dropouts Numeric vector of incremental dropout proportions aligned with
-#'   `schedule`: element `j` is the proportion whose last attended visit is
-#'   `schedule[j]`. They are handled by the Dawson and Lagakos (1991, 1993)
-#'   pattern mixture, as in the Stata original; see [trial_design()].
+#' @param dropouts Numeric vector of incremental dropout proportions, one per
+#'   entry of `schedule`: element `j` is the proportion whose **first missed
+#'   visit is `schedule[j]`**, so their last attended visit is the one before it
+#'   --- `schedule[j - 1]`, or the implicit baseline at time 0 when `j` is 1.
+#'   `dropouts[1]` therefore describes participants seen at baseline only, who
+#'   contribute nothing to a slope; that alignment is the Stata original's, and
+#'   [trial_design()] prints both readings side by side. They are handled by the
+#'   Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata original;
+#'   see [trial_design()].
 #' @param scale Number of `time` units in one `schedule` unit. Defaults to 1.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
 #' @param power,n Supply one, as in Stata. `n` gives the power that sample size
@@ -175,7 +180,18 @@ slopepower <- function(data, depvar, subject, time, schedule,
 
   fml <- stats::as.formula(sprintf("`%s` ~ `.slopepower_time` | `%s`", depvar, subject))
 
-  env <- new.env(parent = parent.frame())
+  # Parented on this frame, which encloses the package namespace -- not on
+  # parent.frame(), which roots the lookup in the caller's environment instead.
+  # `slope_params` is a free symbol in the call built below, so from the
+  # caller's environment it is found only when the package happens to be
+  # attached: `slopepower::slopepower(...)` on its own failed with "could not
+  # find function \"slope_params\"", and a user object of that name in the
+  # global environment would have been picked up in preference to ours.
+  # Nothing here needs the caller's environment: `...` has already been forced
+  # by list(), so the only free symbols left are `slope_params`,
+  # `.slopepower_data` and the group column name, which slope_params() resolves
+  # against `data`.
+  env <- new.env(parent = environment())
   assign(".slopepower_data", work, envir = env)
   call_args <- list(quote(slope_params), formula = fml, data = quote(.slopepower_data))
   if (!is.null(group_arg)) call_args[[group_arg]] <- as.name(group_col)

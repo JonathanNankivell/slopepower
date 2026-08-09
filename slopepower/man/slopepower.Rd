@@ -44,10 +44,15 @@ with \code{obs}.}
 \item{treat}{Column name identifying the treated arm (1) and control arm (0).
 Used with \code{rct}.}
 
-\item{dropouts}{Numeric vector of incremental dropout proportions aligned with
-\code{schedule}: element \code{j} is the proportion whose last attended visit is
-\code{schedule[j]}. They are handled by the Dawson and Lagakos (1991, 1993)
-pattern mixture, as in the Stata original; see \code{\link[=trial_design]{trial_design()}}.}
+\item{dropouts}{Numeric vector of incremental dropout proportions, one per
+entry of \code{schedule}: element \code{j} is the proportion whose \strong{first missed
+visit is \code{schedule[j]}}, so their last attended visit is the one before it
+--- \code{schedule[j - 1]}, or the implicit baseline at time 0 when \code{j} is 1.
+\code{dropouts[1]} therefore describes participants seen at baseline only, who
+contribute nothing to a slope; that alignment is the Stata original's, and
+\code{\link[=trial_design]{trial_design()}} prints both readings side by side. They are handled by the
+Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata original;
+see \code{\link[=trial_design]{trial_design()}}.}
 
 \item{scale}{Number of \code{time} units in one \code{schedule} unit. Defaults to 1.}
 

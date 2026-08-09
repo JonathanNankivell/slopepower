@@ -1,0 +1,419 @@
+---
+title: "An introduction to the slopepower package"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{An introduction to the slopepower package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 4)
+library(slopepower)
+```
+
+## The idea in one sentence
+
+You have a trial to plan whose outcome is not a single measurement but a
+*rate of change* -- cognitive decline over years, say, rather than a score at
+one follow-up visit. `slopepower` sizes that trial in two stages: first fit a
+linear mixed model to some longitudinal data you already have, to learn how
+fast people change and how much they vary in doing so; then combine that fit
+with the visit schedule and dropout pattern of the trial you are planning to
+get a sample size or a power. The two stages are two function calls,
+`slope_params()` and then `slope_sample_size()` or `slope_power()`.
+
+This vignette is a tour of the three situations that `slope_params()`
+supports, following the structure of the worked examples in section 4 of
+Nash et al. (2021), who wrote the Stata command this package ports. Each
+situation is illustrated with one of the three datasets the package ships:
+`slpower1`, `slpower2` and `slpower3`. All three are simulated, and all three
+share an outcome: the Symbol Digit Modalities Test (SDMT), a measure of
+cognitive processing speed in which lower scores are worse. The simulated
+disease is a stand-in for a progressive condition such as Huntington's
+disease, in which SDMT tends to fall over time.
+
+## Three shapes of previous data
+
+The previous data you have access to determines which arguments you pass to
+`slope_params()`, and what a "100% effective" treatment is taken to mean:
+
+* **Only untreated participants with the disease** (`slpower1`). There is no
+  reference group at all, so the only sensible target for a fully effective
+  treatment is to stop decline altogether -- a slope of zero.
+* **Untreated participants plus a disease-free comparison group**
+  (`slpower2`). Now a fully effective treatment is one that brings decline
+  down to the rate seen in people who do not have the disease, so the target
+  is the healthy group's slope rather than zero.
+* **Both arms of a previous randomised trial** (`slpower3`). Here you already
+  have an observed treatment effect, and can either aim to detect the same
+  effect again or fall back to a target expressed as a fraction of decline
+  removed, ignoring what the previous trial's treated arm did.
+
+Each is a different call to `slope_params()`, distinguished by which of the
+`healthy` and `treated` arguments (if either) you supply, and each returns an
+object that carries a `comparator` telling the rest of the package which of
+these three situations it came from.
+
+## Example 1: only untreated participants (`slpower1`)
+
+`slpower1` has 200 people with the simulated disease, each seen four times, a
+year apart:
+
+```{r slpower1-head}
+subset(slpower1, id == 1)
+```
+
+### Fitting the previous data
+
+```{r slpower1-fit}
+pars1 <- slope_params(sdmt ~ visit | id, data = slpower1)
+pars1
+```
+
+The estimated annual decline is -1.672 points. Alongside it are the four
+variance components of the random-intercept, random-slope model: how much
+people vary in where they start (`sigma2_intercept`), how much they vary in
+how fast they decline (`sigma2_slope`), the covariance between the two, and
+the residual measurement variance. `slope_sample_size()` and `slope_power()`
+need all five numbers, not just the slope, which is why stage one returns an
+object rather than a bare estimate.
+
+### Sizing a trial
+
+Suppose the planned trial runs two years with annual visits, and you want 80%
+power (the default) to detect a treatment that removes a third of the
+decline seen above:
+
+```{r slpower1-design}
+design1 <- trial_design(c(0, 1, 2))
+design1
+```
+
+`trial_design()` always takes the baseline visit explicitly, at time 0 --
+unlike Stata's `schedule()`, which lists follow-up visits only and assumes an
+implicit baseline. Now the sample size:
+
+```{r slpower1-ss}
+ss1 <- slope_sample_size(pars1, design1, effectiveness = 0.33)
+ss1
+```
+
+712 participants, 356 per arm -- the treatment difference `slopepower` is
+powering the trial to detect, 0.552 points/year, is a third of the estimated
+1.672-point decline.
+
+### Longer follow-up can *shrink* the sample size
+
+Extending the same trial to five years, with one extra visit at year five and
+an assumed 10% loss to follow-up between years two and five, actually
+*reduces* the sample size, even though some participants are now lost along
+the way:
+
+```{r slpower1-longer}
+design1b <- trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
+design1b
+ss1b <- slope_sample_size(pars1, design1b, effectiveness = 0.33)
+ss1b$n
+```
+
+A longer follow-up gives each participant's own trajectory more time to
+diverge from the population average, which makes the individual slope easier
+to estimate. That gain in precision outweighs the participants dropout
+removes, at least for this much dropout and this much extra time -- it will
+not always. `dropout` here has one entry fewer than `visits`; the print
+method above shows how each entry maps onto "last attended visit" and
+"first missed visit" so the pairing is never ambiguous.
+
+### A different visit spacing
+
+Stata's `schedule()` works on an integer grid and needs a `scale()` option to
+express, say, six-monthly visits: you would give the schedule in half-year
+units and set `scale(0.5)` to convert back to years. This port has no
+`scale()` argument -- `trial_design()` takes real-valued visit times
+directly, in whatever units the fitted slope is in:
+
+```{r slpower1-spacing}
+design1c <- trial_design(seq(0, 2, by = 0.5))
+ss1c <- slope_sample_size(pars1, design1c, effectiveness = 0.33)
+ss1c$n
+```
+
+620 participants: fewer than the annual-visit design, because the interim
+visits again add precision, and *the same total* Stata would report for its
+rescaled six-monthly version of this design. That equality is not a
+coincidence -- it is a useful sanity check. The sample-size formula is a
+ratio of a variance to a squared target difference, and rescaling time
+multiplies both the numerator and the denominator by the same factor, so it
+cancels. As long as the time units in `slope_params()` and `trial_design()`
+agree with each other, it makes no difference what they are: years, months
+or anything else all give the same `n`.
+
+### How much should you trust that number?
+
+A sample size computed from an estimated slope and four estimated variance
+components is itself an estimate, with its own sampling uncertainty.
+`slope_bootstrap()` resamples participants (not individual measurements),
+refits stage one on each resample, and recomputes stage two, giving an
+interval rather than a single number:
+
+```{r slpower1-boot}
+set.seed(42)
+slope_bootstrap(ss1, R = 100, type = "bca", seed = 42)
+```
+
+`R = 100` is enough to illustrate the idea and keeps this vignette quick to
+build; a bootstrap you intend to report from should use hundreds of
+replicates, and this method's `type = "bca"` default over `"percentile"` is
+deliberate, because the sampling distribution of a sample size is typically
+right-skewed rather than symmetric.
+
+## Example 2: untreated participants plus healthy controls (`slpower2`)
+
+`slpower2` has 250 people with the disease and 250 disease-free controls,
+each seen four times, with visit *dates* recorded rather than a visit
+number:
+
+```{r slpower2-head}
+subset(slpower2, id %in% c(1, 251))
+```
+
+### Fitting the previous data
+
+The time variable has to be built before fitting -- here, elapsed years
+since a fixed reference date:
+
+```{r slpower2-fit}
+d2 <- slpower2
+d2$time <- as.numeric(d2$vdate) / 365
+pars2 <- slope_params(sdmt ~ time | id, data = d2, healthy = case)
+pars2
+```
+
+Two things changed from example 1. First, `slope_params()` reported -- via a
+`message()`, not a warning -- that time did not start at zero for everyone.
+That is expected here, since `vdate` is a calendar
+date, and by default (`origin = "subject"`) each participant's own first
+visit is shifted to time zero, exactly as the Stata command does, so that the
+random intercept is estimated at baseline rather than at an arbitrary shared
+date. Second, the output now carries *two* slopes: -1.715 points/year for
+the cases and 0.975 for the healthy controls, whose positive sign reflects a
+practice effect in this simulated cohort rather than genuine improvement.
+The variance components reported are always the cases', not the controls' --
+see `?slope_params` for why that asymmetry is deliberate.
+
+### Sizing a trial against the healthy-control slope
+
+```{r slpower2-ss}
+design2 <- trial_design(c(0, 1, 2))
+ss2 <- slope_sample_size(pars2, design2, effectiveness = 0.33)
+ss2
+```
+
+296 participants for the same 33% effectiveness and the same visit schedule
+as the very first calculation in this vignette, and noticeably fewer than
+the 712 there. The reference point moved: "33% effective" is now a third of
+the *gap* between the cases' decline and the healthy controls' slope, 2.690
+points/year, rather than a third of decline toward zero. Because the
+controls are improving rather than merely stable, that gap is larger than
+the cases' raw slope, so the same effectiveness fraction implies a bigger
+target difference (0.888 against 0.552 earlier) and a smaller trial.
+
+### Power for a fixed sample size, with dropout
+
+If recruitment caps the trial at 200 participants rather than 296, the
+question flips from "how many do I need" to "what power does 200 buy",
+answered by `slope_power()` in place of `slope_sample_size()`. Here we also
+assume 5% of those who start are lost each year:
+
+```{r slpower2-power}
+design2d <- trial_design(c(0, 1, 2), dropout = c(0.05, 0.05))
+pw2 <- slope_power(pars2, design2d, n = 200, effectiveness = 0.33)
+pw2
+```
+
+60% power -- noticeably short of the conventional 80% threshold, which is
+exactly the kind of trade-off `slope_power()` exists to expose before a
+trial is committed to a sample size it cannot reach.
+
+The warning above is worth reading rather than dismissing: with the
+`c(0, 1, 2)` schedule and a first dropout entry of 0.05, that entry describes
+participants whose *only* recorded visit is baseline. They contribute no
+information about a slope at all and are dropped from the calculation
+entirely -- this port tells you so; the original Stata command does the same
+thing silently. Nothing here is wrong, but it is worth knowing which
+participants a nonzero `dropout[1]` refers to.
+
+A bootstrap interval works the same way as in example 1 --
+`slope_bootstrap(ss2, R = ..., type = "bca")` -- but is markedly slower here.
+The two-group model is a single joint fit, but a larger one: 2,000
+measurements on 500 participants, with a block-diagonal random-effects
+structure and separate residual variances per group. On top of that, the
+leave-one-subject-out jackknife that a BCa interval requires costs one such
+fit per one of the 500 participants, so it is omitted from this
+vignette in the interest of build time; budget a few minutes for it in
+practice, or use `type = "percentile"` for a quicker, less accurate
+alternative.
+
+## Example 3: both arms of a completed trial (`slpower3`)
+
+`slpower3` is 150 people already randomised, 75 to each arm, seen at
+baseline, six months and two years:
+
+```{r slpower3-head}
+subset(slpower3, id %in% c(1, 76))
+```
+
+### Fitting the previous trial
+
+```{r slpower3-fit}
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+pars3
+```
+
+The control arm declined by 1.852 points/year and the treated arm by 1.104,
+an observed difference of 0.747. Because both arms come from an actual
+trial, there is a real treatment effect sitting in this fit -- unlike
+examples 1 and 2, where "effectiveness" was always a hypothetical fraction
+supplied by the user.
+
+### Targeting the effect already observed
+
+If the next trial should be powered to detect that same 0.747-point
+difference again, use `target = "observed"` in place of `effectiveness` --
+the equivalent of the Stata command's `usetrt` option. Here the trial runs to
+three years with an interim visit at year two, and dropout of 20% by year
+two and a further 10% by year three:
+
+```{r slpower3-observed}
+design3 <- trial_design(c(0, 2, 3), dropout = c(0.2, 0.1))
+ss3 <- slope_sample_size(pars3, design3, target = "observed")
+ss3
+```
+
+318 participants. Note that `effectiveness` must not be supplied alongside
+`target = "observed"`: the observed difference fixes it at 1 by definition.
+
+### Targeting a fraction of that effect
+
+A trial this size is often a pilot, and a common worry about a pilot's
+treatment effect is that it is optimistic. If the next, larger trial should
+only be powered to detect half of what was observed, there is no need to
+refit anything: the sample-size formula has the target difference squared in
+its denominator, so a target that is some proportion `p` of the observed
+effect needs the sample size multiplied by `p^-2`. Section 4.1.3 of the paper
+does exactly this for `p = 0.5`, multiplying the 318 above by 4:
+
+```{r slpower3-fraction}
+ss3$n * 4
+```
+
+1,272 participants, which is the figure the paper quotes. It is very slightly
+conservative, and worth knowing why. The scaling law is exact on the
+*unrounded* per-arm requirement, but `n` has already been rounded up to a
+whole participant per arm, and multiplying magnifies that rounding. Rounding
+at the end instead gives 1,266:
+
+```{r slpower3-fraction-exact}
+p <- 0.5
+2 * ceiling((qnorm(1 - ss3$alpha / 2) + qnorm(ss3$power))^2 /
+            (p * ss3$effect_size)^2)
+```
+
+That is also what you would get by passing `target = "observed"` into a fresh
+calculation whose reference slope had already been halved, which
+`slope_params_manual()` can build -- so 1,266 is the figure internally
+consistent with the rest of the package, and 1,272 the published one. The gap
+is bounded by `p^-2` participants per arm, so it is six people here and never
+more than a handful; recruiting the paper's 1,272 is not wrong, merely a
+rounding either way from the same calculation.
+
+### If the previous trial is not a precedent for this one
+
+`target = "observed"` only makes sense when the *next* trial is aimed at
+the *same* treatment as the one already tested. If `slpower3` had instead
+been a trial of some unrelated treatment, the honest use of it is to treat
+its control arm as a single group of untreated subjects and fall back to
+example 1's approach, fitted to `subset(slpower3, treat == 0)`. The package
+vignette `vignette("harmful-previous-trial", package = "slopepower")` works
+through this and related questions -- what can and cannot be salvaged from a
+previous trial, and in particular why `target = "observed"` is the wrong
+tool when that trial's treatment made things worse rather than better -- in
+more depth than belongs here.
+
+## Comparing many trial designs at once
+
+Section 4.2 of Nash et al. (2021) asks a broader question than any single
+call above: given a fixed recruitment target, how does power change across
+several candidate visit schedules and several assumed dropout rates? Their
+table 1 fixes a three-year trial recruiting 450 participants and compares
+three schedules -- baseline and final visit only, annual visits, and
+six-monthly visits -- against three dropout scenarios -- none, 5% a year and
+10% a year -- using the `slpower1` fit from example 1. `slope_power_grid()`
+does the whole comparison in one call:
+
+```{r grid-power}
+tbl <- slope_power_grid(
+  pars1, n = 450, effectiveness = 0.33,
+  visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+  dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
+)
+tbl[, c("design", "dropout", "n", "power")]
+```
+
+Two more-visits-is-better patterns are visible here. Adding follow-up visits
+raises power even with no dropout at all -- from about 80% with a single
+follow-up visit to nearly 87% with six-monthly visits -- for the precision
+reasons already seen in example 1. And the benefit of extra visits grows as
+dropout gets worse, because a participant who withdraws still contributes
+whatever interim measurements they did attend: with 10% annual dropout, the
+six-monthly design nearly recovers the no-dropout power of the sparsest
+schedule.
+
+`dropout_rate()` is what makes the three schedules comparable on "the same"
+dropout assumption despite having different numbers of visits: "10% per
+year" is a different vector of per-visit proportions for a two-visit
+schedule than for a five-visit one, and `dropout_rate()` expands a single
+stated rate correctly for each.
+
+`slope_sample_size_grid()` is the converse table: instead of fixing `n` and
+letting power vary, it fixes the target power and reports the `n` each
+combination needs.
+
+```{r grid-n}
+tbl_n <- slope_sample_size_grid(
+  pars1, power = 0.8, effectiveness = 0.33,
+  visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+  dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
+)
+tbl_n[, c("design", "dropout", "n", "power")]
+```
+
+Read together, the two tables are the same design space from opposite ends:
+fix a recruitment target and ask what power it buys, or fix a power target
+and ask what recruitment it costs.
+
+## Where to go next
+
+* `?slope_params` sets out the three models fitted in stage one in full,
+  including what they deliberately do not support -- covariate adjustment,
+  further clustering, non-linear trajectories -- and why.
+* `slope_params_manual()` builds a stage-one object by hand, for planning
+  from numbers reported in a paper when no participant-level dataset is
+  available to fit.
+* `vignette("harmful-previous-trial", package = "slopepower")` is a deeper
+  treatment of one case touched on above: what to reuse from a previous
+  trial, and what not to, when its treatment effect cannot simply be
+  targeted again.
+
+## Reference
+
+Nash, S., Morgan, K. E., Frost, C., & Mulick, A. (2021). Power and
+sample-size calculations for trials that compare slopes over time:
+Introducing the `slopepower` command. *The Stata Journal*, 21(3), 575–601.
+<https://doi.org/10.1177/1536867X211045512>
