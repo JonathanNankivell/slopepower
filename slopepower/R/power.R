@@ -62,65 +62,15 @@ check_visits <- function(visits, context) {
     stop(sprintf("%s: `visits` must be a numeric vector of at least two finite times.",
                  context), call. = FALSE)
   }
-  if (any(diff(visits) <= 0)) {
+  if (is.unsorted(visits, strictly = TRUE)) {
     stop(sprintf("%s: `visits` must be strictly increasing; got %s.",
-                 context, paste(fmt_num(visits), collapse = ", ")), call. = FALSE)
+                 context, label_numeric(visits)), call. = FALSE)
   }
   invisible(as.numeric(visits))
 }
 
-#' Coerce and validate the `design` argument
-#'
-#' Accepts a `trial_design` object, or a bare numeric vector of visit times which
-#' is passed to `trial_design()`.
-#' @noRd
-as_trial_design <- function(design, context) {
-  if (is.numeric(design)) design <- trial_design(visits = design)
-  if (!inherits(design, "trial_design")) {
-    stop(sprintf("%s: `design` must be a `trial_design` object or a numeric vector of visit times.",
-                 context), call. = FALSE)
-  }
-  # The rules for `visits` live in one place, `validate_visits()` in design.R, so
-  # that a hand-built `trial_design` is held to exactly the same standard as one
-  # from the constructor. The dropout checks below are invariant assertions only:
-  # normalisation and the baseline-only warning belong to `trial_design()` and
-  # must not be repeated here, or a constructed design would warn twice.
-  visits <- validate_visits(design$visits, context)
-  dropout <- design$dropout
-  if (!is.numeric(dropout) || length(dropout) != length(visits) - 1L) {
-    stop(sprintf("%s: `design$dropout` must have one entry per follow-up visit (%d), got %d.",
-                 context, length(visits) - 1L, length(dropout)), call. = FALSE)
-  }
-  if (any(!is.finite(dropout)) || any(dropout < 0)) {
-    stop(sprintf("%s: `design$dropout` entries must be finite and non-negative.",
-                 context), call. = FALSE)
-  }
-  if (sum(dropout) > 1 + DROPOUT_TOL) {
-    stop(sprintf("%s: dropout proportions sum to %g, which exceeds 1.",
-                 context, sum(dropout)), call. = FALSE)
-  }
-  # `has_dropout` is what the calculation branches on, so it is derived here
-  # rather than trusted. A hand-built design that omits it would otherwise fail
-  # with "argument is of length zero", and one that sets it FALSE alongside a
-  # non-zero `dropout` would silently report the unweighted s*^2.
-  if (!identical(design$dropout_type, "incremental") &&
-      !identical(design$dropout_type, "cumulative")) {
-    stop(sprintf("%s: `design$dropout_type` must be \"incremental\" or \"cumulative\".",
-                 context), call. = FALSE)
-  }
-  # `dropout_type` records only how the user supplied the vector; `dropout`
-  # itself is always incremental, converted once by the constructor. So a value
-  # of "cumulative" is provenance, not an instruction, and must not be acted on
-  # here -- doing so rejected every design built with dropout_type =
-  # "cumulative", including the one in trial_design()'s own examples, with an
-  # error telling the user to do what they had already done. A hand-built list
-  # that puts cumulative values in `dropout` cannot be detected anyway: the
-  # values are indistinguishable from valid incremental ones.
-  design$has_dropout <- any(dropout > 0)
-  design$dropout <- dropout
-  design$visits <- visits
-  invisible(design)
-}
+# `as_trial_design()`, which coerces and revalidates the `design` argument of
+# every stage-two call, lives in design.R beside the class it validates.
 
 # ---------------------------------------------------------------------------
 # covariance and treatment-effect variance
@@ -159,6 +109,28 @@ slope_sigma <- function(params, visits) {
   check_params(params, context)
   t <- check_visits(visits, context)
 
+  sigma <- sigma_at(params, t, context)
+  # Only here, not in sigma_at(): the labels are for a human reading the printed
+  # matrix, and formatting them costs more than the mathematics does (fmt_num()
+  # is one format() call per element, against an outer() and an eigendecom-
+  # position for the matrix itself). The internal callers index the matrix
+  # numerically and would pay that on every grid cell and bootstrap replicate
+  # for labels nothing reads.
+  nm <- fmt_num(t)
+  dimnames(sigma) <- list(nm, nm)
+  sigma
+}
+
+#' Build the covariance matrix, given already-validated arguments
+#'
+#' The construction half of [slope_sigma()], split from it for the same reason
+#' [treatment_effect_var()] is split from [slope_var()]: the callers on the hot
+#' path have validated `params` and `visits` already, and re-validating is not
+#' free -- `check_visits()` and `validate_visits()` would both run over the same
+#' vector in a single stage-two call, which is the "two standards" problem those
+#' validators exist to avoid.
+#' @noRd
+sigma_at <- function(params, t, context) {
   sigma <- params$sigma2_intercept +
     outer(t, t) * params$sigma2_slope +
     outer(t, t, "+") * params$sigma_cov +
@@ -168,7 +140,6 @@ slope_sigma <- function(params, visits) {
     stop(sprintf(paste0("%s: the implied covariance matrix is not positive definite. ",
                         "Check the variance components in `params`."), context), call. = FALSE)
   }
-  dimnames(sigma) <- list(fmt_num(t), fmt_num(t))
   sigma
 }
 
@@ -200,7 +171,7 @@ slope_var <- function(params, visits) {
   context <- "slope_var()"
   check_params(params, context)
   t <- check_visits(visits, context)
-  treatment_effect_var(slope_sigma(params, t), t, context)
+  treatment_effect_var(sigma_at(params, t, context), t, context)
 }
 
 #' The GLS half of `slope_var()`: everything after `slope_sigma()` has built
@@ -232,7 +203,7 @@ treatment_effect_var <- function(sigma, t, context) {
     stop(sprintf(paste0("%s: the information matrix is singular at visit times %s. ",
                         "At least two distinct follow-up times are needed to identify ",
                         "a slope difference."),
-                 context, paste(fmt_num(t), collapse = ", ")), call. = FALSE)
+                 context, label_numeric(t)), call. = FALSE)
   })
   f_star[3L, 3L]
 }
@@ -242,9 +213,14 @@ treatment_effect_var <- function(sigma, t, context) {
 # ---------------------------------------------------------------------------
 
 #' Resolve the reference slope, effectiveness and dropout-weighted effect size
+#'
+#' `effectiveness` and `target` arrive already reconciled: whether the caller
+#' typed an `effectiveness` is knowable only at the exported boundary, so
+#' [check_target_effectiveness()] is applied there -- by both stage-two entry
+#' points and both grid wrappers alike -- rather than being plumbed down here as
+#' a `missing()` flag on every intervening signature.
 #' @noRd
-effect_components <- function(params, design, target, effectiveness,
-                              effectiveness_supplied, context) {
+effect_components <- function(params, design, target, effectiveness, context) {
   check_params(params, context)
   design <- as_trial_design(design, context)
   target <- match.arg(target, c("effectiveness", "observed"))
@@ -257,7 +233,6 @@ effect_components <- function(params, design, target, effectiveness,
                           'trial and requires `params` with comparator = "treated"; got "%s".'),
                    context, comparator), call. = FALSE)
     }
-    check_target_effectiveness(target, effectiveness_supplied, context)
     reference_slope <- params$slope_comparator
     effectiveness <- 1
   } else {
@@ -282,7 +257,7 @@ effect_components <- function(params, design, target, effectiveness,
   dropout <- design$dropout
   n_follow_up <- length(visits) - 1L
 
-  sigma_full <- slope_sigma(params, visits)
+  sigma_full <- sigma_at(params, visits, context)
   var_full <- treatment_effect_var(sigma_full, visits, "slope_var()")
   es_full <- slope_difference / sqrt(var_full)
 
@@ -386,7 +361,6 @@ slope_effect_size <- function(params, design,
   # reconstructing N = 2 * ceiling((z + z)^2 / es^2) from this value would be
   # wrong by a factor of effectiveness^-2. See the note in @return.
   comp <- effect_components(params, design, target, effectiveness = 1,
-                            effectiveness_supplied = FALSE,
                             context = "slope_effect_size()")
   comp$effect_size
 }
@@ -407,7 +381,7 @@ slope_effect_size <- function(params, design,
 #' Returns the fields common to both results, in their canonical order.
 #' `n_requested` belongs only to the power branch and is added by its caller.
 #' @noRd
-solve_slope <- function(params, design, effectiveness, effectiveness_supplied,
+solve_slope <- function(params, design, effectiveness,
                         target, alpha, n, power, context) {
   check_probability(alpha, "alpha", context)
 
@@ -422,9 +396,7 @@ solve_slope <- function(params, design, effectiveness, effectiveness_supplied,
     }
   }
 
-  comp <- effect_components(params, design, target, effectiveness,
-                            effectiveness_supplied = effectiveness_supplied,
-                            context = context)
+  comp <- effect_components(params, design, target, effectiveness, context)
 
   z_a <- stats::qnorm(1 - alpha / 2)
   scaled_effect <- abs(comp$effect_size) * comp$effectiveness
@@ -605,15 +577,7 @@ NULL
 #' # Case/healthy-control comparator: measured toward the healthy controls'
 #' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 #' # are calendar dates and so are converted to years in the formula.
-#' df2 <- data.frame(
-#'   id    = rep(c(1, 2, 251, 252), each = 4),
-#'   case  = rep(c(0, 0, 1, 1), each = 4),
-#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-#' )
+#' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 #' slope_sample_size(pars2, c(0, 1, 2), effectiveness = 0.33)
 #'
@@ -632,11 +596,12 @@ slope_sample_size <- function(params, design,
                               effectiveness = 0.25,
                               target = c("effectiveness", "observed"),
                               power = 0.8, alpha = 0.05) {
+  context <- "slope_sample_size()"
+  target <- match.arg(target)
+  check_target_effectiveness(target, !missing(effectiveness), context)
   res <- solve_slope(params, design, effectiveness,
-                     effectiveness_supplied = !missing(effectiveness),
                      target = target, alpha = alpha,
-                     n = NULL, power = power,
-                     context = "slope_sample_size()")
+                     n = NULL, power = power, context = context)
   structure(res, class = c("slope_sample_size", "slope_result"))
 }
 
@@ -681,15 +646,7 @@ slope_sample_size <- function(params, design,
 #' # Case/healthy-control comparator: measured toward the healthy controls'
 #' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 #' # are calendar dates and so are converted to years in the formula.
-#' df2 <- data.frame(
-#'   id    = rep(c(1, 2, 251, 252), each = 4),
-#'   case  = rep(c(0, 0, 1, 1), each = 4),
-#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-#' )
+#' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 #' slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
 #'
@@ -721,12 +678,16 @@ slope_power <- function(params, design, n,
       "  use slope_sample_size(params, design, power = 0.8)."),
       context), call. = FALSE)
   }
+  target <- match.arg(target)
+  check_target_effectiveness(target, !missing(effectiveness), context)
   res <- solve_slope(params, design, effectiveness,
-                     effectiveness_supplied = !missing(effectiveness),
                      target = target, alpha = alpha,
                      n = n, power = NULL, context = context)
-  # Kept separately from `n`, which is the even number actually used.
-  res <- append(res, list(n_requested = as.numeric(n)), after = 2L)
+  # Kept separately from `n`, which is the even number actually used. Positioned
+  # by name rather than by index: CONTRACT.md section 4.2 fixes it "after
+  # n_per_arm", and solve_slope() assembles that list two hundred lines away.
+  res <- append(res, list(n_requested = as.numeric(n)),
+                after = match("n_per_arm", names(res)))
   structure(res, class = c("slope_power", "slope_result"))
 }
 
@@ -738,7 +699,7 @@ slope_power <- function(params, design, n,
 #' @noRd
 schedule_string <- function(design) {
   follow_up <- design$visits[-1L]
-  if (!design$has_dropout) return(paste(fmt_num(follow_up), collapse = ", "))
+  if (!design$has_dropout) return(label_numeric(follow_up))
   paste(sprintf("%s (%s)", fmt_num(follow_up), fmt_num(design$dropout)),
         collapse = ", ")
 }
@@ -756,21 +717,21 @@ print_data_block <- function(x) {
   cat(fmt_line("number of observations in model", params$n_obs %||% NA, digits = 0L), "\n", sep = "")
   cat(fmt_line("number of participants in model", params$n_subjects %||% NA, digits = 0L), "\n", sep = "")
 
-  show_difference <- comparator == "healthy" ||
+  # The comparator slope, and the difference from it, are shown exactly when the
+  # target is measured against it: for healthy controls always, for a previous
+  # trial's treated arm only under target = "observed" -- with
+  # target = "effectiveness" that arm is ignored and the reference slope is zero
+  # (CONTRACT.md section 5.3), so printing it would misdescribe the calculation.
+  labels <- slope_labels(comparator)
+  show_comparator <- comparator == "healthy" ||
     (comparator == "treated" && identical(x$target, "observed"))
-  if (show_difference) {
+
+  if (show_comparator) {
     cat(fmt_line("observed difference in slopes", x$slope_difference), "\n", sep = "")
   }
-  if (comparator == "treated") {
-    cat(fmt_line("slope of control arm", params$slope), "\n", sep = "")
-    if (identical(x$target, "observed")) {
-      cat(fmt_line("slope of experimental arm", params$slope_comparator), "\n", sep = "")
-    }
-  } else {
-    cat(fmt_line("slope of cases", params$slope), "\n", sep = "")
-    if (comparator == "healthy") {
-      cat(fmt_line("slope of healthy controls", params$slope_comparator), "\n", sep = "")
-    }
+  cat(fmt_line(labels$own, params$slope), "\n", sep = "")
+  if (show_comparator) {
+    cat(fmt_line(labels$comparator, params$slope_comparator), "\n", sep = "")
   }
   invisible(x)
 }

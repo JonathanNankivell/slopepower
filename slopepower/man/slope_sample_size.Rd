@@ -124,15 +124,7 @@ slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33, power = 0.9)
 # Case/healthy-control comparator: measured toward the healthy controls'
 # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 # are calendar dates and so are converted to years in the formula.
-df2 <- data.frame(
-  id    = rep(c(1, 2, 251, 252), each = 4),
-  case  = rep(c(0, 0, 1, 1), each = 4),
-  vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-                    "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-                    "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-                    "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-  sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-)
+df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
 pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 slope_sample_size(pars2, c(0, 1, 2), effectiveness = 0.33)
 

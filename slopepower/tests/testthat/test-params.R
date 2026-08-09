@@ -1,9 +1,10 @@
 # Layer 1 --- slope_params() and slope_params_manual(). See CONTRACT.md sec 2.
 
-# Mixed-model fits are the slow part of this suite. Cache them in the global
-# environment so that test-params.R and test-paper-parity.R together fit each
-# dataset once. (Defined in both files rather than a shared helper because this
-# agent owns only test-*.R.)
+# Mixed-model fits are the slow part of this suite, so the fitted objects are
+# cached and shared: `paper_fit()` in helper-fits.R. The tests below that need a
+# valid parameter object without caring what is in it use `ref_params()` from
+# helper-params.R; the ones that assert what the constructor *stores* keep their
+# literals, because there the numbers are what is under test.
 # --- slope_params_manual() --------------------------------------------------
 
 test_that("slope_params_manual() returns exactly the contract fields", {
@@ -591,8 +592,6 @@ test_that("print.slope_params() flags a reduced random-effects structure", {
 })
 
 test_that("print.slope_params() marks manually supplied parameters", {
-  p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                           sigma2_slope = 2, sigma_cov = 5,
-                           sigma2_residual = 10)
+  p <- ref_params()
   expect_output(print(p), "supplied directly")
 })

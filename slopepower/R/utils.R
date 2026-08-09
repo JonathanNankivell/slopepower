@@ -83,18 +83,8 @@ parse_slope_formula <- function(formula, context) {
   # friends are ordinary calls, not combining operators.
   combining <- c("+", "-", "*", "/", ":", "^", "%in%", "offset")
   if (is.call(rhs) && as.character(rhs[[1L]])[1L] %in% combining) {
-    stop(sprintf(paste0(
-      "%s: the right-hand side must be a single time term, but `%s` combines\n",
-      "  terms with `%s`. This port models the outcome as a linear function of\n",
-      "  time only, as in Nash et al. (2021); there is no covariate adjustment,\n",
-      "  and the Stata original refuses such a formula at parse time.\n",
-      "  To transform time, wrap the arithmetic in I(), e.g.\n",
-      "  `outcome ~ I(vdate / 365) | subject`.\n",
-      "  Baseline in particular needs no adjustment: it is modelled as a\n",
-      "  correlated outcome with a single intercept for both arms (paper\n",
-      "  section 2.1), rather than entered as a covariate."),
-      context, paste(deparse(rhs), collapse = " "),
-      as.character(rhs[[1L]])[1L]), call. = FALSE)
+    single_term_error(context, rhs,
+                      sprintf("combines terms with `%s`", as.character(rhs[[1L]])[1L]))
   }
 
   labels <- tryCatch(
@@ -103,20 +93,32 @@ parse_slope_formula <- function(formula, context) {
          "term.labels"),
     error = function(e) NULL)
   if (!is.null(labels) && length(labels) != 1L) {
-    stop(sprintf(paste0(
-      "%s: the right-hand side must be a single time term, but `%s` has %d: %s.\n",
-      "  This port models the outcome as a linear function of time only, as in\n",
-      "  Nash et al. (2021); there is no covariate adjustment, and the Stata\n",
-      "  original refuses such a formula at parse time. A transformation of\n",
-      "  time is fine, e.g. `outcome ~ I(vdate / 365) | subject`.\n",
-      "  Baseline in particular needs no adjustment: it is modelled as a\n",
-      "  correlated outcome with a single intercept for both arms (paper\n",
-      "  section 2.1), rather than entered as a covariate."),
-      context, paste(deparse(rhs), collapse = " "), length(labels),
-      paste(sQuote(labels), collapse = ", ")), call. = FALSE)
+    single_term_error(context, rhs,
+                      sprintf("has %d: %s", length(labels),
+                              paste(sQuote(labels), collapse = ", ")))
   }
 
   list(outcome = lhs, time = rhs, subject = subject)
+}
+
+#' Reject a right-hand side that is not a single time term
+#'
+#' Two checks in [parse_slope_formula()] reach the same conclusion by different
+#' routes -- an operator that combines model terms, and a `terms()` expansion
+#' with more than one label -- and owe the user the same explanation of why the
+#' formula is narrow. `complaint` supplies only the clause that differs.
+#' @noRd
+single_term_error <- function(context, rhs, complaint) {
+  stop(sprintf(paste0(
+    "%s: the right-hand side must be a single time term, but `%s` %s.\n",
+    "  This port models the outcome as a linear function of time only, as in\n",
+    "  Nash et al. (2021); there is no covariate adjustment, and the Stata\n",
+    "  original refuses such a formula at parse time. To transform time, wrap\n",
+    "  the arithmetic in I(), e.g. `outcome ~ I(vdate / 365) | subject`.\n",
+    "  Baseline in particular needs no adjustment: it is modelled as a\n",
+    "  correlated outcome with a single intercept for both arms (paper\n",
+    "  section 2.1), rather than entered as a covariate."),
+    context, paste(deparse(rhs), collapse = " "), complaint), call. = FALSE)
 }
 
 #' Format a numeric vector compactly for messages and printing
@@ -124,6 +126,16 @@ parse_slope_formula <- function(formula, context) {
 fmt_num <- function(x) {
   vapply(x, function(v) format(v, trim = TRUE, drop0trailing = TRUE), character(1L))
 }
+
+#' Render a numeric vector as a comma-separated list
+#'
+#' One rule for every place a vector of times or proportions is shown to the
+#' user -- error messages, grid labels and the print methods alike -- so that
+#' the same vector cannot render two ways. `fmt_call_vec()` is the deliberately
+#' different rule that wraps the result in `c(...)` to make a copy-pasteable
+#' call.
+#' @noRd
+label_numeric <- function(x) paste(fmt_num(x), collapse = ", ")
 
 #' Find a fixed-effect name accounting for `lme`'s two possible interaction
 #' spellings
@@ -149,8 +161,8 @@ resolve_fixef_name <- function(b, parts) {
 #' [check_target_effectiveness()] rejects the two supplied together. Anything
 #' that rebuilds a stage-two call must therefore omit `effectiveness` under
 #' that target rather than supply it -- the rule belongs here once, rather than
-#' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`
-#' and both grid functions use this directly.
+#' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`,
+#' [slopepower()] and both grid functions use this directly.
 #' @noRd
 maybe_add_effectiveness <- function(args, effectiveness, target) {
   if (!identical(target, "observed")) args$effectiveness <- effectiveness
@@ -159,10 +171,12 @@ maybe_add_effectiveness <- function(args, effectiveness, target) {
 
 #' Reject `effectiveness` alongside target = "observed"
 #'
-#' The one place this rule is enforced: called directly by `effect_components()`
-#' and, separately, by the grid wrappers before their loop -- the grid loop
-#' omits `effectiveness` from the call it builds when target = "observed",
-#' which would otherwise bypass the check inside `effect_components()` itself.
+#' The one place this rule is enforced, called by each of the four entry points
+#' that can be handed both -- [slope_sample_size()], [slope_power()] and the two
+#' grid wrappers -- immediately after `match.arg()`ing `target`. It has to sit at
+#' that boundary rather than deeper in the calculation: "did the caller type an
+#' `effectiveness`?" is a `missing()` question, and `missing()` can only be asked
+#' of the function whose argument it is.
 #' @noRd
 check_target_effectiveness <- function(target, supplied, context) {
   if (identical(target, "observed") && isTRUE(supplied)) {
@@ -198,7 +212,7 @@ fmt_line <- function(label, value, width = 39L, digits = 3L) {
     value
   } else if (is.na(value)) {
     "."
-  } else if (value == round(value) && abs(value) < 1e9 && digits == 0L) {
+  } else if (digits == 0L && value == round(value) && abs(value) < 1e9) {
     format(value)
   } else {
     formatC(value, format = "f", digits = digits)

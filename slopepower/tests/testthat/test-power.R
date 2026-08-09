@@ -1,19 +1,7 @@
 # Layer 3 --- the mathematical core. See CONTRACT.md section 5.
 
-# A reference parameter set: the simulation truth used to generate slpower1
-# (paper appendix), with the slope the paper reports for it.
-ref_params <- function(comparator = "none", slope = -1.672,
-                       slope_comparator = NA_real_) {
-  slope_params_manual(
-    slope            = slope,
-    sigma2_intercept = 100,
-    sigma2_slope     = 2,
-    sigma_cov        = 5,
-    sigma2_residual  = 10,
-    slope_comparator = slope_comparator,
-    comparator       = comparator
-  )
-}
+# `ref_params()`, the reference parameter set used throughout, is in
+# helper-params.R so that every test file can reach it.
 
 # --- slope_sigma() ----------------------------------------------------------
 

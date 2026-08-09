@@ -12,16 +12,14 @@ test_that("dropout_rate() expands to per-interval proportions", {
   # paper's appendix code does by hand for each row of Table 1.
   expect_s3_class(dropout_rate(0.05), "dropout_rate")
   d_final  <- suppressWarnings(slope_power_grid(
-    slope_params_manual(slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-                        sigma_cov = 5, sigma2_residual = 10),
+    ref_params(),
     visits = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
     dropout = list(`5pc` = dropout_rate(0.05)), n = 450, effectiveness = 0.33))
   expect_equal(d_final$dropout_total, c(0.15, 0.15, 0.15))
 })
 
 test_that("dropout_rate() errors when the implied total exceeds 1", {
-  p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-                           sigma_cov = 5, sigma2_residual = 10)
+  p <- ref_params()
   expect_error(
     slope_power_grid(p, visits = list(long = c(0, 10)),
                      dropout = list(fast = dropout_rate(0.5)),
@@ -318,9 +316,7 @@ test_that("a cell that fails is reported by its labels, with the cause attached"
   # two labels naming the offending cell and the original message kept beneath.
   # Here the labels are generated ones, which is the case that matters: the
   # caller has nothing else to identify the row by.
-  p <- slope_params_manual(slope = 1, sigma2_intercept = 100, sigma2_slope = 2,
-                           sigma_cov = 5, sigma2_residual = 10,
-                           slope_comparator = 1, comparator = "healthy")
+  p <- ref_params(comparator = "healthy", slope = 1, slope_comparator = 1)
   err <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450,
                                        effectiveness = 0.33))
   expect_match(conditionMessage(err),

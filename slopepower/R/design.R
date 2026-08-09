@@ -171,7 +171,7 @@ validate_visits <- function(visits, ctx) {
   if (length(dups) > 0L) {
     stop(sprintf(paste0("%s: `visits` must not contain repeated times; %s appear%s more than ",
                         "once. Repeated visit times make the covariance matrix singular."),
-                 ctx, paste(fmt_num(dups), collapse = ", "),
+                 ctx, label_numeric(dups),
                  if (length(dups) == 1L) "s" else ""), call. = FALSE)
   }
   if (is.unsorted(visits)) {
@@ -210,10 +210,6 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
     stop(sprintf("%s: `dropout` must be numeric or NULL; got %s.",
                  ctx, class(dropout)[1L]), call. = FALSE)
   }
-  if (any(!is.finite(dropout))) {
-    stop(sprintf("%s: `dropout` must be finite; element(s) %s are not.",
-                 ctx, paste(which(!is.finite(dropout)), collapse = ", ")), call. = FALSE)
-  }
   dropout <- as.numeric(dropout)
 
   if (length(dropout) != n_intervals) {
@@ -225,10 +221,7 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
                  if (n_intervals == 1L) "" else "s"), call. = FALSE)
   }
 
-  if (any(dropout < 0)) {
-    stop(sprintf("%s: `dropout` proportions must be non-negative; element(s) %s are not.",
-                 ctx, paste(which(dropout < 0), collapse = ", ")), call. = FALSE)
-  }
+  check_dropout_values(dropout, "dropout", ctx)
 
   if (identical(dropout_type, "cumulative")) {
     steps <- diff(dropout)
@@ -248,18 +241,101 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
     }
     dropout <- pmax(diff(c(0, dropout)), 0)
   } else {
-    total <- sum(dropout)
-    if (total > 1 + DROPOUT_TOL) {
-      stop(sprintf(paste0("%s: incremental `dropout` proportions sum to %s, which exceeds 1. ",
-                          "Each element is the proportion whose last attended visit is that ",
-                          "visit, so they partition the randomised sample and cannot total ",
-                          "more than 1.\n  If you meant cumulative proportions, pass ",
-                          "dropout_type = \"cumulative\"."),
-                   ctx, fmt_num(total)), call. = FALSE)
-    }
+    check_dropout_total(dropout, "dropout", ctx)
   }
 
   dropout
+}
+
+#' The value rules an incremental dropout vector obeys, whatever built it
+#'
+#' Split out so that a hand-assembled `trial_design` reaching stage two through
+#' [as_trial_design()] is held to the same rules, *and told about a breach in
+#' the same words*, as one that came from the constructor. Wording that differs
+#' by route means the same mistake gets a better diagnosis on one path than the
+#' other, which is precisely backwards: the hand-built object is the one whose
+#' author had no constructor to guide them.
+#'
+#' Split in two because `validate_dropout()` applies the total only to a vector
+#' the user supplied as incremental -- a cumulative one is bounded by its own
+#' final element instead, before conversion.
+#' @noRd
+check_dropout_values <- function(dropout, name, ctx) {
+  if (any(!is.finite(dropout))) {
+    stop(sprintf("%s: `%s` must be finite; element(s) %s are not.",
+                 ctx, name, paste(which(!is.finite(dropout)), collapse = ", ")),
+         call. = FALSE)
+  }
+  if (any(dropout < 0)) {
+    stop(sprintf("%s: `%s` proportions must be non-negative; element(s) %s are not.",
+                 ctx, name, paste(which(dropout < 0), collapse = ", ")), call. = FALSE)
+  }
+  invisible(dropout)
+}
+
+#' @rdname check_dropout_values
+#' @noRd
+check_dropout_total <- function(dropout, name, ctx) {
+  total <- sum(dropout)
+  if (total > 1 + DROPOUT_TOL) {
+    stop(sprintf(paste0("%s: incremental `%s` proportions sum to %s, which exceeds 1. ",
+                        "Each element is the proportion whose last attended visit is that ",
+                        "visit, so they partition the randomised sample and cannot total ",
+                        "more than 1.\n  If you meant cumulative proportions, pass ",
+                        "dropout_type = \"cumulative\"."),
+                 ctx, name, fmt_num(total)), call. = FALSE)
+  }
+  invisible(dropout)
+}
+
+#' Coerce and validate the `design` argument of a stage-two call
+#'
+#' Accepts a `trial_design` object, or a bare numeric vector of visit times
+#' which is passed to [trial_design()]. Lives here, beside the class it
+#' validates, rather than with the calculations that call it.
+#'
+#' The rules for `visits` and `dropout` come from the constructor's own
+#' validators, so that a hand-built `trial_design` is held to exactly the same
+#' standard as one from [trial_design()]. What is *not* repeated here is
+#' normalisation and the baseline-only warning: those belong to the constructor
+#' alone, or a constructed design would warn twice.
+#' @noRd
+as_trial_design <- function(design, context) {
+  if (is.numeric(design)) design <- trial_design(visits = design)
+  if (!inherits(design, "trial_design")) {
+    stop(sprintf("%s: `design` must be a `trial_design` object or a numeric vector of visit times.",
+                 context), call. = FALSE)
+  }
+  visits <- validate_visits(design$visits, context)
+  dropout <- design$dropout
+  if (!is.numeric(dropout) || length(dropout) != length(visits) - 1L) {
+    stop(sprintf("%s: `design$dropout` must have one entry per follow-up visit (%d), got %d.",
+                 context, length(visits) - 1L, length(dropout)), call. = FALSE)
+  }
+  check_dropout_values(dropout, "design$dropout", context)
+  check_dropout_total(dropout, "design$dropout", context)
+
+  if (!identical(design$dropout_type, "incremental") &&
+      !identical(design$dropout_type, "cumulative")) {
+    stop(sprintf("%s: `design$dropout_type` must be \"incremental\" or \"cumulative\".",
+                 context), call. = FALSE)
+  }
+  # `dropout_type` records only how the user supplied the vector; `dropout`
+  # itself is always incremental, converted once by the constructor. So a value
+  # of "cumulative" is provenance, not an instruction, and must not be acted on
+  # here -- doing so rejected every design built with dropout_type =
+  # "cumulative", including the one in trial_design()'s own examples, with an
+  # error telling the user to do what they had already done. A hand-built list
+  # that puts cumulative values in `dropout` cannot be detected anyway: the
+  # values are indistinguishable from valid incremental ones.
+  #
+  # `has_dropout` is what the calculation branches on, so it is derived here
+  # rather than trusted. A hand-built design that omits it would otherwise fail
+  # with "argument is of length zero", and one that sets it FALSE alongside a
+  # non-zero `dropout` would silently report the unweighted s*^2.
+  design$has_dropout <- any(dropout > 0)
+  design$visits <- visits
+  invisible(design)
 }
 
 #' @describeIn trial_design Print a trial design.
@@ -271,7 +347,7 @@ print.trial_design <- function(x, ...) {
   k <- n_visits - 1L
 
   cat("<trial_design>\n")
-  cat(sprintf("  Visits (%d):  %s\n", n_visits, paste(fmt_num(x$visits), collapse = ", ")))
+  cat(sprintf("  Visits (%d):  %s\n", n_visits, label_numeric(x$visits)))
   cat(sprintf("  Follow-up:   %d visit%s, last at t = %s\n",
               k, if (k == 1L) "" else "s", fmt_num(x$visits[n_visits])))
 

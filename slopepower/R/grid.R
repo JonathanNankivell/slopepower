@@ -67,9 +67,11 @@ print.dropout_rate <- function(x, ...) {
 #' @param spec `NULL`, a numeric vector of incremental proportions, or a
 #'   `dropout_rate` object.
 #' @param visits The visit times of the design being evaluated.
+#' @param label The grid label of the dropout specification, named in every
+#'   error message so the failing cell can be identified.
 #' @noRd
-expand_dropout <- function(spec, visits, context, label = NULL) {
-  where <- if (is.null(label)) "" else sprintf(" (dropout = \"%s\")", label)
+expand_dropout <- function(spec, visits, context, label) {
+  where <- sprintf(" (dropout = \"%s\")", label)
 
   if (is.null(spec)) return(NULL)
 
@@ -104,18 +106,13 @@ expand_dropout <- function(spec, visits, context, label = NULL) {
 # argument normalisation
 # ---------------------------------------------------------------------------
 
-#' Render a numeric vector as a short label
-#' @noRd
-label_numeric <- function(x) paste(fmt_num(x), collapse = ", ")
-
 #' Fill in any blank names of a list via `label`, then dedupe
 #'
 #' The common tail of `as_visits_list()` and `as_dropout_list()`, once each has
 #' normalised its argument to a (possibly partly-named) list.
 #' @noRd
 fill_list_names <- function(x, label) {
-  nms <- names(x)
-  if (is.null(nms)) nms <- rep("", length(x))
+  nms <- names(x) %||% rep("", length(x))
   blank <- !nzchar(nms)
   nms[blank] <- vapply(x[blank], label, character(1L))
   names(x) <- make.unique(nms, sep = "_")
@@ -130,7 +127,7 @@ as_visits_list <- function(visits, context) {
     stop(sprintf(paste0("%s: `visits` must be a numeric vector of visit times, or a named list ",
                         "of such vectors."), context), call. = FALSE)
   }
-  fill_list_names(visits, function(v) if (is.numeric(v)) label_numeric(v) else "design")
+  fill_list_names(visits, label_visits)
 }
 
 #' Normalise `dropout` to a named list of specifications
@@ -147,6 +144,16 @@ as_dropout_list <- function(dropout, context) {
   fill_list_names(dropout, label_dropout)
 }
 
+#' Name an unnamed grid element after its own contents
+#'
+#' One labeller per axis, so that `as_visits_list()` and `as_dropout_list()`
+#' read the same way. Both tolerate an element they cannot describe: a
+#' non-numeric `visits` entry is rejected by `grid_impl()` with a message that
+#' names the element, which needs the element to have a name first.
+#' @noRd
+label_visits <- function(x) if (is.numeric(x)) label_numeric(x) else "design"
+
+#' @rdname label_visits
 #' @noRd
 label_dropout <- function(x) {
   if (is.null(x)) return("none")
@@ -294,15 +301,7 @@ grid_impl <- function(visits, dropout, evaluate, context) {
 #'
 #' # Case/healthy-control comparator: two cases and two healthy controls, a
 #' # subset of `slpower2` whose visits are calendar dates converted to years.
-#' df2 <- data.frame(
-#'   id    = rep(c(1, 2, 251, 252), each = 4),
-#'   case  = rep(c(0, 0, 1, 1), each = 4),
-#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-#' )
+#' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 #' slope_power_grid(
 #'   pars2, n = 40, effectiveness = 0.33,
@@ -380,15 +379,7 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #'
 #' # Case/healthy-control comparator: two cases and two healthy controls, a
 #' # subset of `slpower2` whose visits are calendar dates converted to years.
-#' df2 <- data.frame(
-#'   id    = rep(c(1, 2, 251, 252), each = 4),
-#'   case  = rep(c(0, 0, 1, 1), each = 4),
-#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-#' )
+#' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 #' slope_sample_size_grid(
 #'   pars2, power = 0.8, effectiveness = 0.33,

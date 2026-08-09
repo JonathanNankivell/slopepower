@@ -194,8 +194,7 @@ test_that("an explicit n = NULL is caught by the guard, not by the solver", {
   # with an unset element -- slipped through into the solve-for-n branch and
   # failed with "`power` must be a single finite number", naming an argument
   # slope_power() does not have.
-  p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                           sigma2_slope = 2, sigma_cov = 5, sigma2_residual = 10)
+  p <- ref_params()
 
   for (call_it in list(
     function() slope_power(p, c(0, 1, 2), n = NULL),

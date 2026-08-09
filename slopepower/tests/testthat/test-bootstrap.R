@@ -103,9 +103,7 @@ test_that("resample_frame() keeps each replicate's stratum sizes fixed", {
 })
 
 test_that("slope_bootstrap() refuses parameters that carry no data", {
-  manual <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                                sigma2_slope = 2, sigma_cov = 5,
-                                sigma2_residual = 10)
+  manual <- ref_params()
   expect_error(slope_bootstrap(manual, R = 5), "no fitted model")
   expect_error(
     slope_bootstrap(slope_sample_size(manual, c(0, 1, 2), effectiveness = 0.33), R = 5),
@@ -346,9 +344,7 @@ test_that("slope_se() returns NA for parameters that carry no fitted model", {
   # read a standard error off. NA rather than an error, because the section 2.6
   # check has to be skippable: manual parameters are a legitimate input to the
   # rest of the package.
-  manual <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                                sigma2_slope = 2, sigma_cov = 5,
-                                sigma2_residual = 10)
+  manual <- ref_params()
   expect_identical(slope_se(manual), NA_real_)
   expect_error(slope_se(42), "must be a")
 })

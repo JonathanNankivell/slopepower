@@ -125,8 +125,8 @@ slope_se <- function(params) {
   check_params(params, context)
   fit <- params$fit
   if (is.null(fit)) return(NA_real_)
-  b <- tryCatch(nlme::fixef(fit), error = function(e) return(NULL))
-  V <- tryCatch(stats::vcov(fit), error = function(e) return(NULL))
+  b <- tryCatch(nlme::fixef(fit), error = function(e) NULL)
+  V <- tryCatch(stats::vcov(fit), error = function(e) NULL)
   if (is.null(b) || is.null(V)) return(NA_real_)
   # The interaction label depends on the order its components appear in the
   # internal formula, so resolve it via resolve_fixef_name() rather than
@@ -161,8 +161,7 @@ slope_se <- function(params) {
 #' @noRd
 reject_dots <- function(dots, advice) {
   if (length(dots) == 0L) return(invisible(NULL))
-  nms <- names(dots)
-  nms <- if (is.null(nms)) rep("", length(dots)) else nms
+  nms <- names(dots) %||% rep("", length(dots))
   shown <- ifelse(nzchar(nms), nms, "<unnamed>")
   stop(sprintf("slope_bootstrap(): unused argument%s (%s).\n  %s",
                if (length(dots) > 1L) "s" else "",
@@ -529,9 +528,8 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
   if (prop <= 0 || prop >= 1) return(NULL)
   z0 <- stats::qnorm(prop)
 
-  ids <- names(subject_index)
-  jack <- rep(NA_real_, length(ids))
-  suppressWarnings(for (i in seq_along(ids)) {
+  jack <- rep(NA_real_, length(subject_index))
+  suppressWarnings(for (i in seq_along(subject_index)) {
     drop_rows <- subject_index[[i]]
     jack[i] <- tryCatch(compute(refitter(frame[-drop_rows, , drop = FALSE])),
                         error = function(e) NA_real_)

@@ -214,6 +214,33 @@ fit_quietly <- function(expr) {
   )
 }
 
+#' Fit the single-group and trial models
+#'
+#' These are one-line wrappers for a reason that is not style. A formula written
+#' in a function body captures that function's evaluation frame as its
+#' environment, and the fitted object keeps it for life. Called directly from
+#' [slope_params()], `lme()` would therefore pin `slope_params()`'s frame --
+#' including the user's entire `data` argument, every column of it, used or not
+#' -- inside `params$fit`, which is a contract field retained in every
+#' `slope_sample_size` and `slope_power` result. Fitting from a small helper
+#' frame instead drops that reference: on a 379 kB input frame it took a
+#' serialized `slope_params` object from 523 kB to under 200 kB, and the saving
+#' grows with the caller's data. `fit_healthy_model()` below has always had this
+#' property by accident of being a helper; these two now have it on purpose.
+#' @noRd
+fit_none_model <- function(dat, ctrl) {
+  nlme::lme(sp_y ~ sp_time, random = ~ sp_time | sp_subject,
+            data = dat, method = "REML", control = ctrl)
+}
+
+#' @rdname fit_none_model
+#' @noRd
+fit_treated_model <- function(dat, ctrl) {
+  nlme::lme(sp_y ~ sp_time + sp_placebo_time,
+            random = ~ sp_time | sp_subject,
+            data = dat, method = "REML", control = ctrl)
+}
+
 #' @noRd
 fit_healthy_model <- function(dat, reduced, ctrl) {
   comparator_block <- if (reduced) {
@@ -395,37 +422,19 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' # Neither `healthy` nor `treated`: a single group of untreated subjects.
 #' # Four of the two hundred participants of `slpower1`, kept small so the
 #' # example runs quickly -- see `slpower1` for the paper's fit on the full data.
-#' df <- data.frame(
-#'   id    = c(1,1,1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4),
-#'   visit = c(0,1,2,3, 0,1,2,3, 0,1,2,3, 0,1,2,3),
-#'   sdmt  = c(41,33,25,30, 16,14,13,6, 35,27,31,23, 38,33,33,20)
-#' )
+#' df <- slpower1[slpower1$id %in% 1:4, ]
 #' slope_params(sdmt ~ visit | id, data = df)
 #'
 #' # `healthy`: two cases and two healthy controls, a subset of `slpower2`.
 #' # Visits are recorded as calendar dates there, so the time term converts
 #' # them to years.
-#' df2 <- data.frame(
-#'   id    = rep(c(1, 2, 251, 252), each = 4),
-#'   case  = rep(c(0, 0, 1, 1), each = 4),
-#'   vdate = as.Date(c("2009-07-11", "2010-06-21", "2011-07-06", "2012-05-06",
-#'                     "2009-07-24", "2010-03-22", "2011-04-14", "2012-06-17",
-#'                     "2009-06-06", "2010-08-13", "2011-08-31", "2012-09-05",
-#'                     "2009-06-27", "2010-04-11", "2011-06-22", "2012-10-13")),
-#'   sdmt  = c(40,46,41,45, 43,42,43,39, 35,34,36,39, 25,16,18,12)
-#' )
+#' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 #'
 #' # `treated`: data from a completed trial, a subset of `slpower3`. Fitting the
 #' # random-effects structure shared by both arms needs more than a couple of
 #' # subjects per arm to converge, so this excerpt keeps six per arm.
-#' df3 <- data.frame(
-#'   id    = rep(c(1:6, 76:81), each = 3),
-#'   treat = rep(c(0,0,0,0,0,0, 1,1,1,1,1,1), each = 3),
-#'   visit = rep(c(0, 0.5, 2), times = 12),
-#'   sdmt  = c(35,36,34, 32,34,29, 27,29,22, 15,22,13, 16,17,14, 29,27,28,
-#'             29,33,35, 19,19,17, 19,14,7, 37,38,32, 19,18,23, 43,44,43)
-#' )
+#' df3 <- slpower3[slpower3$id %in% c(1:6, 76:81), ]
 #' slope_params(sdmt ~ visit | id, data = df3, treated = treat)
 #'
 #' @references
@@ -575,8 +584,7 @@ slope_params <- function(formula, data,
   reduced_used <- FALSE
 
   if (comparator == "none") {
-    fit <- nlme::lme(sp_y ~ sp_time, random = ~ sp_time | sp_subject,
-                     data = dat, method = "REML", control = ctrl)
+    fit <- fit_none_model(dat, ctrl)
     b <- nlme::fixef(fit)
     slope <- fixef_term(b, "sp_time", context)
     slope_comparator <- NA_real_
@@ -588,9 +596,7 @@ slope_params <- function(formula, data,
     # One common intercept (randomisation implies equal baselines), separate
     # slopes. A numeric placebo indicator keeps the coefficient mapping explicit.
     dat$sp_placebo_time <- (1 - dat$sp_case) * dat$sp_time
-    fit <- nlme::lme(sp_y ~ sp_time + sp_placebo_time,
-                     random = ~ sp_time | sp_subject,
-                     data = dat, method = "REML", control = ctrl)
+    fit <- fit_treated_model(dat, ctrl)
     b <- nlme::fixef(fit)
     time_term        <- fixef_term(b, "sp_time", context)
     slope            <- time_term + fixef_term(b, "sp_placebo_time", context)  # control arm
@@ -706,12 +712,8 @@ slope_params_manual <- function(slope,
   cl <- match.call()
   comparator <- match.arg(comparator)
 
-  check_scalar(slope, "slope", context)
-  check_variance(sigma2_intercept, "sigma2_intercept", context)
-  check_variance(sigma2_slope, "sigma2_slope", context)
-  check_scalar(sigma_cov, "sigma_cov", context)
-  check_variance(sigma2_residual, "sigma2_residual", context)
-
+  # The five components are validated and coerced by new_slope_params() below,
+  # which is the single validation point for both routes into the class.
   if (comparator == "none") {
     slope_comparator <- NA_real_
   } else {
@@ -723,13 +725,13 @@ slope_params_manual <- function(slope,
   }
 
   new_slope_params(
-    slope            = as.numeric(slope),
+    slope            = slope,
     slope_comparator = as.numeric(slope_comparator),
     comparator       = comparator,
-    sigma2_intercept = as.numeric(sigma2_intercept),
-    sigma2_slope     = as.numeric(sigma2_slope),
-    sigma_cov        = as.numeric(sigma_cov),
-    sigma2_residual  = as.numeric(sigma2_residual),
+    sigma2_intercept = sigma2_intercept,
+    sigma2_slope     = sigma2_slope,
+    sigma_cov        = sigma_cov,
+    sigma2_residual  = sigma2_residual,
     n_obs            = NA_integer_,
     n_subjects       = NA_integer_,
     common_variance  = FALSE,
@@ -741,17 +743,24 @@ slope_params_manual <- function(slope,
 }
 
 #' Validate and build the object
+#'
+#' The single validation point for both routes into the class: the fitted one
+#' through [slope_params()] and the direct one through [slope_params_manual()].
+#' The checks also coerce -- `check_scalar()` returns its argument as a double --
+#' so components reach the object in the type CONTRACT.md section 2 specifies
+#' without a separate `as.numeric()` pass that would turn a non-numeric argument
+#' into `NA` and a coercion warning before it could be reported properly.
 #' @noRd
 new_slope_params <- function(slope, slope_comparator, comparator,
                              sigma2_intercept, sigma2_slope, sigma_cov,
                              sigma2_residual, n_obs, n_subjects,
                              common_variance, time_shifted, fit, call,
                              context) {
-  check_scalar(slope, "slope", context)
-  check_variance(sigma2_intercept, "sigma2_intercept", context)
-  check_variance(sigma2_slope, "sigma2_slope", context)
-  check_variance(sigma2_residual, "sigma2_residual", context)
-  check_scalar(sigma_cov, "sigma_cov", context)
+  slope            <- check_scalar(slope, "slope", context)
+  sigma2_intercept <- check_variance(sigma2_intercept, "sigma2_intercept", context)
+  sigma2_slope     <- check_variance(sigma2_slope, "sigma2_slope", context)
+  sigma2_residual  <- check_variance(sigma2_residual, "sigma2_residual", context)
+  sigma_cov        <- check_scalar(sigma_cov, "sigma_cov", context)
 
   G <- matrix(c(sigma2_intercept, sigma_cov, sigma_cov, sigma2_slope), 2L, 2L)
   if (!is_positive_definite(G)) {
@@ -779,6 +788,26 @@ new_slope_params <- function(slope, slope_comparator, comparator,
 
 # ---- printing ---------------------------------------------------------------
 
+#' What the two slopes of a `slope_params` object are called in printed output
+#'
+#' Naming the parts of the object belongs with the class, not with each thing
+#' that renders it: [print.slope_params()] and `print_data_block()` in power.R
+#' show the same two quantities and must not disagree about what they are, and
+#' the paper-parity tests pin these strings exactly. Whether a comparator slope
+#' is shown at all is a separate, per-caller decision -- `print_data_block()`
+#' hides it unless `target = "observed"` -- and stays where it is made.
+#'
+#' @return A list with `own` (the untreated / case / control-arm slope) and
+#'   `comparator`.
+#' @noRd
+slope_labels <- function(comparator) {
+  if (identical(comparator, "treated")) {
+    list(own = "slope of control arm", comparator = "slope of experimental arm")
+  } else {
+    list(own = "slope of cases", comparator = "slope of healthy controls")
+  }
+}
+
 #' Print stage-one slope parameters
 #'
 #' @param x A `"slope_params"` object.
@@ -803,15 +832,10 @@ print.slope_params <- function(x, ...) {
     cat(fmt_line("source", "supplied directly"), "\n")
   }
 
-  slope_label <- switch(x$comparator,
-                        none    = "slope of cases",
-                        healthy = "slope of cases",
-                        treated = "slope of control arm")
-  cat(fmt_line(slope_label, x$slope), "\n")
+  labels <- slope_labels(x$comparator)
+  cat(fmt_line(labels$own, x$slope), "\n")
   if (!is.na(x$slope_comparator)) {
-    comp_label <- if (x$comparator == "healthy")
-      "slope of healthy controls" else "slope of experimental arm"
-    cat(fmt_line(comp_label, x$slope_comparator), "\n")
+    cat(fmt_line(labels$comparator, x$slope_comparator), "\n")
     cat(fmt_line("observed difference in slopes",
                  x$slope - x$slope_comparator), "\n")
   }
