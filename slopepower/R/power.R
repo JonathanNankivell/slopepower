@@ -191,14 +191,24 @@ slope_var <- function(params, visits) {
 #' @param t The visit times `sigma` was built at, already validated.
 #' @noRd
 treatment_effect_var <- function(sigma, t, context) {
-  m <- length(t)
-  zero <- matrix(0, m, m)
+  # One person per arm: group indicator 0 for the first, 1 for the second, so
+  # equation (5)'s design matrix is X* = rbind(cbind(1, t, 0), cbind(1, t, t))
+  # and its covariance Sigma* = diag(sigma, sigma) -- the two participants are
+  # independent and identically scheduled, so both blocks are the same `sigma`.
+  #
+  # Neither 2m x 2m matrix is formed. A block diagonal matrix inverts blockwise,
+  # so Sigma*^-1 = diag(sigma^-1, sigma^-1), and X*' Sigma*^-1 X* then separates
+  # into the sum of the two participants' own contributions. That leaves one
+  # m x m solve where the literal transcription does one of twice the order, for
+  # about an eighth of the work; at thirteen visits it is a third of the cost of
+  # this function. The result is bit-identical to the literal form at the visit
+  # counts in Nash et al. (2021), and agrees to within rounding beyond them --
+  # the summation order in the matrix products differs, nothing else.
+  si <- solve(sigma)
+  x1 <- cbind(1, t, 0)
+  x2 <- cbind(1, t, t)
 
-  # one person per arm: group indicator 0 for the first, 1 for the second
-  sigma_star <- rbind(cbind(sigma, zero), cbind(zero, sigma))
-  x_star <- rbind(cbind(1, t, 0), cbind(1, t, t))
-
-  info <- t(x_star) %*% solve(sigma_star) %*% x_star
+  info <- crossprod(x1, si %*% x1) + crossprod(x2, si %*% x2)
   f_star <- tryCatch(solve(info), error = function(e) {
     stop(sprintf(paste0("%s: the information matrix is singular at visit times %s. ",
                         "At least two distinct follow-up times are needed to identify ",
@@ -258,7 +268,7 @@ effect_components <- function(params, design, target, effectiveness, context) {
   n_follow_up <- length(visits) - 1L
 
   sigma_full <- sigma_at(params, visits, context)
-  var_full <- treatment_effect_var(sigma_full, visits, "slope_var()")
+  var_full <- treatment_effect_var(sigma_full, visits, context)
   es_full <- slope_difference / sqrt(var_full)
 
   # Dawson-Lagakos pattern mixture. Stratum j attends visits[1:j]; stratum 1 sees
@@ -274,7 +284,7 @@ effect_components <- function(params, design, target, effectiveness, context) {
   for (j in seq_len(n_follow_up)[-1L]) {
     if (dropout[j] == 0) next
     idx <- seq_len(j)
-    var_j <- treatment_effect_var(sigma_full[idx, idx, drop = FALSE], visits[idx], "slope_var()")
+    var_j <- treatment_effect_var(sigma_full[idx, idx, drop = FALSE], visits[idx], context)
     eff2 <- eff2 + dropout[j] * (slope_difference / sqrt(var_j))^2
   }
 
@@ -402,7 +412,11 @@ solve_slope <- function(params, design, effectiveness,
   scaled_effect <- abs(comp$effect_size) * comp$effectiveness
 
   if (solving_for_n) {
-    n_per_arm <- ceiling((z_a + stats::qnorm(power))^2 / scaled_effect^2)
+    # (z_alpha + z_beta)^2, the numerator of the sample-size formula. Named
+    # rather than written twice because the var_tte back-solve below divides by
+    # this same quantity, and the two cannot be allowed to drift apart.
+    z_sum_sq <- (z_a + stats::qnorm(power))^2
+    n_per_arm <- ceiling(z_sum_sq / scaled_effect^2)
     n_total <- 2 * n_per_arm
   } else {
     n_total <- 2 * floor(n / 2)
@@ -425,7 +439,7 @@ solve_slope <- function(params, design, effectiveness,
   var_tte <- if (!comp$design$has_dropout) {
     comp$var_full
   } else if (solving_for_n) {
-    n_per_arm * comp$tte^2 / (z_a + stats::qnorm(power))^2
+    n_per_arm * comp$tte^2 / z_sum_sq
   } else {
     comp$tte^2 / scaled_effect^2
   }

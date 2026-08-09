@@ -54,9 +54,14 @@ make_refitter <- function(comparator) {
                   if (identical(comparator, "healthy")) list(healthy = quote(group))
                   else if (identical(comparator, "treated")) list(treated = quote(group))
                   else NULL))
-  enclos <- parent.frame()
+  # Evaluated with the closure's own frame as the enclosure, so the free symbol
+  # `slope_params` resolves through this function's environment into the package
+  # namespace. Rooting it in `parent.frame()` instead looked the name up in
+  # whichever frame happened to call `make_refitter()` -- found only when the
+  # package is attached, and shadowed by a user object of the same name. See the
+  # same reasoning, at length, beside the call `slopepower()` builds in compat.R.
   function(frame) {
-    suppressMessages(suppressWarnings(eval(cl, list(frame = frame), enclos)))
+    suppressMessages(suppressWarnings(eval(cl, list(frame = frame))))
   }
 }
 

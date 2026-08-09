@@ -70,15 +70,12 @@ coerce_binary <- function(x, name, context, meaning) {
   as.numeric(x)
 }
 
-#' Look up a fixed effect by name, resolving interactions whichever way round
-#' R happened to spell them
+#' Look up a fixed effect by name, or stop
 #'
-#' `lme` names an interaction after the order its components appear in the model
-#' formula, so `sp_case * sp_time` yields `sp_case:sp_time` while
-#' `sp_time * sp_case` yields `sp_time:sp_case`. The two fits are identical --
-#' only the label differs -- so extraction must not depend on which spelling
-#' arose. Indexing a fixed spelling would break on an innocuous reordering of
-#' the internal formula, loudly rather than silently, but break nonetheless.
+#' The lookup itself -- including why an interaction has to be resolved rather
+#' than spelled -- is [resolve_fixef_name()] in utils.R, shared with
+#' [slope_se()]. This adds only the error for a name that is not there at all,
+#' which the other caller answers with `NA` instead.
 #' @noRd
 fixef_term <- function(b, parts, context) {
   hit <- resolve_fixef_name(b, parts)
