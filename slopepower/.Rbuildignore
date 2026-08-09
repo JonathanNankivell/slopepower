@@ -1,3 +1,4 @@
 ^CONTRACT\.md$
 ^data-raw$
 ^\.claude$
+^slopepower_.*\.tar\.gz$
