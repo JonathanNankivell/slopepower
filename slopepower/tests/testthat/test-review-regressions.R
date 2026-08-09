@@ -261,3 +261,114 @@ test_that("both grids enforce the effectiveness/observed guard", {
                            dropout = list(d = c(0.2, 0.1)), target = "observed"))
   expect_equal(g$n[1], 318)
 })
+
+# --- regressions from the full-package review of 9540a0f --------------------
+# Each of these silently returned a wrong number, crashed, or stayed silent
+# where CONTRACT.md requires an error or a warning.
+
+test_that("check_params() rejects a non-PD random-effects matrix even when the marginal covariance stays PD", {
+  # new_slope_params() checks this at construction for both public routes into
+  # the class, so it is unreachable through slope_params() or
+  # slope_params_manual(); a hand-built object bypasses it entirely. A large
+  # sigma2_residual keeps the *marginal* Sigma built by sigma_at() positive
+  # definite even though the random-effects matrix G = [[1, 100], [100, 1]]
+  # is not (eigenvalues 101, -99), so that check alone used to let this
+  # through, and slope_sample_size() returned N = 57,694,340 instead of
+  # erroring.
+  bad <- structure(
+    list(slope = -1, slope_comparator = NA_real_, comparator = "none",
+        sigma2_intercept = 1, sigma2_slope = 1, sigma_cov = 100,
+        sigma2_residual = 1e6, n_obs = NA_integer_, n_subjects = NA_integer_,
+        common_variance = FALSE, time_shifted = FALSE, fit = NULL, call = NULL),
+    class = "slope_params")
+  expect_true(is_positive_definite(matrix(c(bad$sigma2_intercept, bad$sigma_cov,
+                                            bad$sigma_cov, bad$sigma2_slope), 2L)) == FALSE)
+  expect_error(slope_sample_size(bad, c(0, 1, 2), effectiveness = 0.33),
+              "positive definite")
+})
+
+test_that("slope_bootstrap() rejects a non-integer R instead of crashing sprintf() on a failed replicate", {
+  p <- paper_fit("slpower1")
+  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
+  # R = 10.7 used to reach sprintf('%d of %d replicates failed...', n_failed, R)
+  # as soon as one replicate failed to converge, and fail there instead with
+  # "invalid format '%d'; use format %f, %e, %g or %a for numeric objects" --
+  # an unrelated crash rather than a clean validation error.
+  expect_error(slope_bootstrap(ss, R = 10.7, seed = 1), "whole number")
+})
+
+test_that("as_trial_design() warns on dropout[1] > 0 for a design that was never validated by trial_design()", {
+  p <- paper_fit("slpower1")
+
+  # A `trial_design` object built by the constructor, then edited directly:
+  # the object is genuine, but this exact dropout vector never went through
+  # trial_design()'s own warning check.
+  mutated <- trial_design(c(0, 1, 2))
+  mutated$dropout <- c(0.4, 0)
+  mutated$has_dropout <- TRUE
+  expect_warning(slope_sample_size(p, mutated, effectiveness = 0.33),
+                "contribute nothing")
+
+  # A hand-built object never carries the constructor's
+  # `slopepower_checked_dropout` attribute at all.
+  bare <- structure(list(visits = c(0, 2, 3), dropout = c(0.2, 0.1),
+                        has_dropout = TRUE, dropout_type = "incremental"),
+                    class = "trial_design")
+  expect_warning(slope_sample_size(p, bare, effectiveness = 0.33),
+                "contribute nothing")
+
+  # The ordinary path -- build, then use immediately, unmodified -- still
+  # warns exactly once (at construction), not twice.
+  n_warn <- 0
+  withCallingHandlers(
+    {
+      d <- trial_design(c(0, 2, 3), dropout = c(0.2, 0.1))
+      slope_sample_size(p, d, effectiveness = 0.33)
+    },
+    warning = function(w) { n_warn <<- n_warn + 1; invokeRestart("muffleWarning") }
+  )
+  expect_equal(n_warn, 1L)
+})
+
+test_that("an invalid design in one grid cell is named, like an evaluate() failure is", {
+  p <- paper_fit("slpower1")
+  # "b" doesn't start at 0; this used to raise trial_design()'s own message
+  # verbatim, with no mention of slope_sample_size_grid() or which named
+  # design failed -- the wrapping every other grid-cell failure gets.
+  err <- expect_error(
+    slope_sample_size_grid(p, visits = list(a = c(0, 1, 2), b = c(1, 2, 3)),
+                           power = 0.8, effectiveness = 0.33),
+    "design \"b\""
+  )
+  expect_match(conditionMessage(err), "slope_sample_size_grid\\(\\)")
+})
+
+test_that("the tte-direction warning is deduplicated once per grid, like the baseline-dropout warning", {
+  # comparator = "treated" with a comparator slope more extreme than the
+  # treated one: effect_components() warns on every cell under
+  # target = "observed". Used to fire once per cell instead of once per grid.
+  p3 <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
+                            sigma_cov = 5, sigma2_residual = 10,
+                            slope_comparator = -3, comparator = "treated")
+  n_warn <- 0
+  withCallingHandlers(
+    slope_sample_size_grid(p3, visits = list(a = c(0, 1, 2), b = c(0, 1, 3), c = c(0, 2, 3)),
+                           target = "observed", power = 0.8),
+    warning = function(w) { n_warn <<- n_warn + 1; invokeRestart("muffleWarning") }
+  )
+  expect_equal(n_warn, 1L)
+})
+
+test_that("slopepower() validates dropouts before fitting stage one, not after", {
+  d <- load_paper_data("slpower1")
+  # 3 dropouts for a 2-visit schedule. If this error came from inside
+  # trial_design(), it can only have been raised before the REML fit that
+  # slope_params() performs -- there is no other way to observe the ordering
+  # from outside, since the failure message is identical either way.
+  expect_error(
+    slopepower(d, "sdmt", "id", "visit", schedule = c(1, 2),
+              dropouts = c(0.1, 0.1, 0.1), obs = TRUE, nocontrols = TRUE,
+              effectiveness = 0.33),
+    "one element per follow-up visit"
+  )
+})

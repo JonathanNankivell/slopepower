@@ -168,6 +168,20 @@ label_dropout <- function(x) {
 # the grid
 # ---------------------------------------------------------------------------
 
+#' Wrap an error from one grid cell with the cell that produced it
+#'
+#' Shared by the `trial_design()` call and the `evaluate()` call in
+#' `grid_impl()`'s loop below, so a design/dropout combination that fails
+#' either step is reported the same way: named, rather than surfacing whatever
+#' unqualified message the failing call happens to raise.
+#' @noRd
+grid_cell_error <- function(context, vname, dname) {
+  function(e) {
+    stop(sprintf("%s: design \"%s\" with dropout \"%s\" failed.\n  %s",
+                 context, vname, dname, conditionMessage(e)), call. = FALSE)
+  }
+}
+
 #' Walk the visits x dropout cross product, evaluating one design per cell
 #'
 #' `evaluate` takes a `trial_design` and returns a `slope_sample_size` or
@@ -181,6 +195,7 @@ grid_impl <- function(visits, dropout, evaluate, context) {
 
   rows <- vector("list", length(visit_list) * length(drop_list))
   baseline_only <- character(0L)
+  tte_direction <- character(0L)
   k <- 0L
 
   for (di in seq_along(visit_list)) {
@@ -200,19 +215,33 @@ grid_impl <- function(visits, dropout, evaluate, context) {
       # correct and expected here -- it fires for most non-zero rates -- so it is
       # collected and reported once rather than once per cell. Matched by
       # condition class, not message text, so a copy-edit of the warning's
-      # wording in design.R cannot silently break this.
-      des <- withCallingHandlers(
-        trial_design(v, inc),
-        slopepower_baseline_dropout = function(w) {
-          baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
-          invokeRestart("muffleWarning")
-        }
+      # wording in design.R cannot silently break this. An invalid combination
+      # (e.g. a `visits` element not starting at 0) is caught here too, and
+      # named the same way a failure from `evaluate()` below is.
+      des <- tryCatch(
+        withCallingHandlers(
+          trial_design(v, inc),
+          slopepower_baseline_dropout = function(w) {
+            baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
+            invokeRestart("muffleWarning")
+          }
+        ),
+        error = grid_cell_error(context, vname, dname)
       )
 
-      res <- tryCatch(evaluate(des), error = function(e) {
-        stop(sprintf("%s: design \"%s\" with dropout \"%s\" failed.\n  %s",
-                     context, vname, dname, conditionMessage(e)), call. = FALSE)
-      })
+      # effect_components() warns, by the same class mechanism, when the
+      # target treatment effect makes the slope more extreme rather than less.
+      # Collected and reported once here too, rather than once per cell.
+      res <- tryCatch(
+        withCallingHandlers(
+          evaluate(des),
+          slopepower_tte_direction = function(w) {
+            tte_direction <<- c(tte_direction, sprintf("%s / %s", vname, dname))
+            invokeRestart("muffleWarning")
+          }
+        ),
+        error = grid_cell_error(context, vname, dname)
+      )
 
       # The six result columns are pulled from as.data.frame.slope_result()
       # rather than off `res` directly, so this row can never drift from what
@@ -241,6 +270,14 @@ grid_impl <- function(visits, dropout, evaluate, context) {
                            "slopes."),
                     context, length(baseline_only), k,
                     paste(baseline_only, collapse = "; ")), call. = FALSE)
+  }
+  if (length(tte_direction) > 0L) {
+    warning(sprintf(paste0("%s: in %d of %d combinations the target treatment effect makes the ",
+                           "slope more extreme (%s). The comparator slope is further from zero ",
+                           "than the group being treated; check that `slope_comparator` is the ",
+                           "intended target."),
+                    context, length(tte_direction), k,
+                    paste(tte_direction, collapse = "; ")), call. = FALSE)
   }
 
   out <- do.call(rbind, rows)

@@ -127,7 +127,33 @@ trial_design <- function(visits,
   n_intervals <- n_visits - 1L
 
   dropout <- validate_dropout(dropout, n_intervals, dropout_type, visits, ctx)
+  warn_baseline_dropout(dropout, visits, ctx)
 
+  out <- structure(
+    list(
+      visits       = visits,
+      dropout      = dropout,
+      has_dropout  = any(dropout > 0),
+      dropout_type = dropout_type
+    ),
+    class = "trial_design"
+  )
+  # Records exactly what was checked, so as_trial_design() can tell a design
+  # that reaches it unchanged from the constructor -- already warned about,
+  # right here -- from one that was hand-built or had `$dropout` edited
+  # afterwards, which was never checked at all. See as_trial_design().
+  attr(out, "slopepower_checked_dropout") <- dropout
+  out
+}
+
+#' Warn when the first dropout stratum attends only the baseline visit
+#'
+#' Split out of [trial_design()] so [as_trial_design()] can apply exactly the
+#' same check, in the same words, to a hand-built or subsequently edited
+#' `trial_design` object -- one that never went through this constructor and
+#' so was never warned about at all.
+#' @noRd
+warn_baseline_dropout <- function(dropout, visits, ctx) {
   if (dropout[1L] > 0) {
     # Classed rather than left as a plain warning: slope_power_grid() and
     # slope_sample_size_grid() collect this one specifically, by class, to
@@ -141,16 +167,7 @@ trial_design <- function(visits,
         ctx, fmt_num(dropout[1L]), fmt_num(visits[1L])),
       class = "slopepower_baseline_dropout"))
   }
-
-  structure(
-    list(
-      visits       = visits,
-      dropout      = dropout,
-      has_dropout  = any(dropout > 0),
-      dropout_type = dropout_type
-    ),
-    class = "trial_design"
-  )
+  invisible(dropout)
 }
 
 #' Validate the visit schedule
@@ -296,9 +313,16 @@ check_dropout_total <- function(dropout, name, ctx) {
 #'
 #' The rules for `visits` and `dropout` come from the constructor's own
 #' validators, so that a hand-built `trial_design` is held to exactly the same
-#' standard as one from [trial_design()]. What is *not* repeated here is
-#' normalisation and the baseline-only warning: those belong to the constructor
-#' alone, or a constructed design would warn twice.
+#' standard as one from [trial_design()]. Normalisation is not repeated here:
+#' `dropout` is already incremental by the time a `trial_design` object exists.
+#'
+#' The baseline-only warning *is* repeated, but only when needed: a design
+#' just returned by [trial_design()], unmodified, was already warned about
+#' there, and repeating it here would warn twice for that, the ordinary,
+#' path. A hand-built object, or one whose `$dropout` was edited after
+#' construction, carries no record of ever having been warned about, and gets
+#' checked now instead -- see the `slopepower_checked_dropout` attribute set
+#' by [trial_design()].
 #' @noRd
 as_trial_design <- function(design, context) {
   if (is.numeric(design)) design <- trial_design(visits = design)
@@ -314,6 +338,10 @@ as_trial_design <- function(design, context) {
   }
   check_dropout_values(dropout, "design$dropout", context)
   check_dropout_total(dropout, "design$dropout", context)
+
+  if (!identical(attr(design, "slopepower_checked_dropout"), dropout)) {
+    warn_baseline_dropout(dropout, visits, context)
+  }
 
   if (!identical(design$dropout_type, "incremental") &&
       !identical(design$dropout_type, "cumulative")) {

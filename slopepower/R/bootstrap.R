@@ -230,6 +230,10 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   context <- "slope_bootstrap()"
   type <- match.arg(type, c("bca", "percentile"))
   check_scalar(R, "R", context, lower = 1, upper = Inf, lower_open = FALSE)
+  if (R != floor(R)) {
+    stop(sprintf("%s: `R` must be a whole number of replicates; got %g.", context, R),
+         call. = FALSE)
+  }
   check_probability(level, "level", context)
   if (!is.null(seed)) set.seed(seed)
 

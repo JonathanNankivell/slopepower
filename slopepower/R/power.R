@@ -34,6 +34,21 @@ check_params <- function(params, context) {
   check_variance(params$sigma2_residual, "params$sigma2_residual", context)
   check_scalar(params$sigma_cov, "params$sigma_cov", context)
 
+  # new_slope_params() checks this at construction time for both routes into
+  # the class, but a hand-built `slope_params` object bypasses it entirely --
+  # and the marginal covariance built in sigma_at() can stay positive definite
+  # even when the random-effects covariance itself is not, because a large
+  # enough sigma2_residual masks it. So it is re-checked here, the one gate
+  # every stage-two calculation funnels through, in the same words.
+  G <- matrix(c(params$sigma2_intercept, params$sigma_cov,
+                params$sigma_cov, params$sigma2_slope), 2L, 2L)
+  if (!is_positive_definite(G)) {
+    stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
+                        "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
+                 context, params$sigma2_intercept, params$sigma2_slope, params$sigma_cov),
+         call. = FALSE)
+  }
+
   if (!is.character(params$comparator) || length(params$comparator) != 1L ||
       !params$comparator %in% c("none", "healthy", "treated")) {
     stop(sprintf('%s: `params$comparator` must be one of "none", "healthy", "treated".',
@@ -299,10 +314,15 @@ effect_components <- function(params, design, target, effectiveness, context) {
   # further from zero. It moves further out only when the reference is itself
   # more extreme than the group being treated.
   if (abs(params$slope + tte) > abs(params$slope)) {
-    warning(sprintf(paste0("%s: the target treatment effect (%.4g) makes the slope more extreme ",
-                           "(%.4g -> %.4g). The comparator slope is further from zero than the ",
-                           "group being treated; check that `slope_comparator` is the intended target."),
-                    context, tte, params$slope, params$slope + tte), call. = FALSE)
+    # Classed like the baseline-dropout warning in design.R, and for the same
+    # reason: grid_impl() collects this one specifically, by class, to report
+    # it once per grid rather than once per cell.
+    warning(warningCondition(
+      sprintf(paste0("%s: the target treatment effect (%.4g) makes the slope more extreme ",
+                     "(%.4g -> %.4g). The comparator slope is further from zero than the ",
+                     "group being treated; check that `slope_comparator` is the intended target."),
+              context, tte, params$slope, params$slope + tte),
+      class = "slopepower_tte_direction"))
   }
 
   list(

@@ -174,6 +174,11 @@ slopepower <- function(data, depvar, subject, time, schedule,
                     context, format(scale)))
   }
 
+  # Built now, before the (potentially slow) stage-one fit below, so that a
+  # purely syntactic problem with `dropouts` -- the wrong length, or a total
+  # over 1 -- is reported without paying for a REML fit first.
+  design <- trial_design(c(0, schedule), dropout = dropouts)
+
   # ---- fit stage one -------------------------------------------------------
   work <- data
   work[[".slopepower_time"]] <- coerce_time(data[[time]], context) / scale
@@ -198,8 +203,6 @@ slopepower <- function(data, depvar, subject, time, schedule,
   params <- eval(as.call(c(call_args, list(...))), env)
 
   # ---- stage two -----------------------------------------------------------
-  design <- trial_design(c(0, schedule), dropout = dropouts)
-
   args <- list(params = params, design = design, alpha = alpha,
                target = if (usetrt) "observed" else "effectiveness")
   # Whether `effectiveness` may be passed alongside the chosen target is
