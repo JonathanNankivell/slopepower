@@ -387,13 +387,12 @@ print.trial_design <- function(x, ...) {
   cat(sprintf("  Dropout:     supplied as %s\n\n", x$dropout_type))
   cat("    last visit   first missed   proportion   cumulative\n")
   cum <- cumsum(x$dropout)
-  for (j in seq_len(k)) {
-    cat(sprintf("    %10s   %12s   %10s   %10s\n",
-                fmt_num(x$visits[j]),
-                fmt_num(x$visits[j + 1L]),
-                formatC(x$dropout[j], format = "f", digits = 3),
-                formatC(cum[j], format = "f", digits = 3)))
-  }
+  j <- seq_len(k)
+  cat(sprintf("    %10s   %12s   %10s   %10s\n",
+              fmt_num(x$visits[j]), fmt_num(x$visits[j + 1L]),
+              formatC(x$dropout[j], format = "f", digits = 3),
+              formatC(cum[j], format = "f", digits = 3)),
+      sep = "")
   cat(sprintf("\n  Completers:  %s attend all %d visits\n",
               formatC(1 - sum(x$dropout), format = "f", digits = 3), n_visits))
 

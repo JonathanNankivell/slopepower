@@ -133,16 +133,17 @@ slope_se <- function(params) {
   b <- tryCatch(nlme::fixef(fit), error = function(e) NULL)
   V <- tryCatch(stats::vcov(fit), error = function(e) NULL)
   if (is.null(b) || is.null(V)) return(NA_real_)
-  # The interaction label depends on the order its components appear in the
-  # internal formula, so resolve it via resolve_fixef_name() rather than
-  # assuming a spelling -- the same reason params.R extracts through
-  # fixef_term(). Getting this wrong used to return NA silently, which switched
-  # off the section 2.6 warning below that is the entire reason for computing
-  # the standard error.
-  terms <- switch(params$comparator,
-                  none    = "sp_time",
-                  healthy = c("sp_time", resolve_fixef_name(b, c("sp_case", "sp_time"))),
-                  treated = c("sp_time", "sp_placebo_time"))
+  # Which terms sum to the slope, by comparator, is params.R's
+  # slope_fixef_parts() -- the same mapping slope_params() itself sums the
+  # *values* of, so the two can never name a different set of coefficients.
+  # An interaction part is resolved via resolve_fixef_name() rather than
+  # assuming a spelling, because its label depends on the order its components
+  # appear in the internal formula. Getting this wrong used to return NA
+  # silently, which switched off the section 2.6 warning below that is the
+  # entire reason for computing the standard error.
+  terms <- vapply(slope_fixef_parts(params$comparator),
+                  function(p) if (length(p) == 1L) p else resolve_fixef_name(b, p),
+                  character(1L))
   if (anyNA(terms) || !all(terms %in% names(b))) {
     warning(sprintf(paste0(
       "%s: could not identify the slope terms in the fitted model (have %s); ",
@@ -229,11 +230,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
                           seed, progress) {
   context <- "slope_bootstrap()"
   type <- match.arg(type, c("bca", "percentile"))
-  check_scalar(R, "R", context, lower = 1, upper = Inf, lower_open = FALSE)
-  if (R != floor(R)) {
-    stop(sprintf("%s: `R` must be a whole number of replicates; got %g.", context, R),
-         call. = FALSE)
-  }
+  check_whole_number(R, "R", "replicates", context, lower = 1)
   check_probability(level, "level", context)
   if (!is.null(seed)) set.seed(seed)
 

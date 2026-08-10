@@ -39,15 +39,9 @@ check_params <- function(params, context) {
   # and the marginal covariance built in sigma_at() can stay positive definite
   # even when the random-effects covariance itself is not, because a large
   # enough sigma2_residual masks it. So it is re-checked here, the one gate
-  # every stage-two calculation funnels through, in the same words.
-  G <- matrix(c(params$sigma2_intercept, params$sigma_cov,
-                params$sigma_cov, params$sigma2_slope), 2L, 2L)
-  if (!is_positive_definite(G)) {
-    stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
-                        "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
-                 context, params$sigma2_intercept, params$sigma2_slope, params$sigma_cov),
-         call. = FALSE)
-  }
+  # every stage-two calculation funnels through, via the same helper
+  # new_slope_params() uses -- see check_re_covariance() in utils.R.
+  check_re_covariance(params$sigma2_intercept, params$sigma2_slope, params$sigma_cov, context)
 
   if (!is.character(params$comparator) || length(params$comparator) != 1L ||
       !params$comparator %in% c("none", "healthy", "treated")) {
@@ -419,11 +413,7 @@ solve_slope <- function(params, design, effectiveness,
   if (solving_for_n) {
     check_probability(power, "power", context)
   } else {
-    check_scalar(n, "n", context, lower = 2, upper = Inf, lower_open = FALSE)
-    if (n != floor(n)) {
-      stop(sprintf("%s: `n` must be a whole number of participants; got %g.",
-                   context, n), call. = FALSE)
-    }
+    check_whole_number(n, "n", "participants", context, lower = 2)
   }
 
   comp <- effect_components(params, design, target, effectiveness, context)

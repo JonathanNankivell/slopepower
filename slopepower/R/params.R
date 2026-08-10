@@ -87,6 +87,24 @@ fixef_term <- function(b, parts, context) {
   unname(b[[hit]])
 }
 
+#' The fixed-effect terms that sum to the slope, by comparator
+#'
+#' One list per comparator, each element a term spec as [resolve_fixef_name()]
+#' expects: a single name, or the two parts of an interaction in model-formula
+#' order. [slope_params()] sums each term's *value* -- via [fixef_term()] -- to
+#' build the point estimate for `slope`; [slope_se()] sums the same terms'
+#' variances and covariance to build its standard error. One mapping means the
+#' two can never name a different set of coefficients for the same comparator,
+#' which used to happen silently -- see the note in [slope_se()].
+#' @noRd
+slope_fixef_parts <- function(comparator) {
+  switch(comparator,
+    none    = list("sp_time"),
+    treated = list("sp_time", "sp_placebo_time"),
+    healthy = list("sp_time", c("sp_case", "sp_time"))
+  )
+}
+
 #' Evaluate a bare column name (or expression) against `data`, then the caller
 #' @noRd
 eval_column <- function(expr, data, env, context, name) {
@@ -583,10 +601,8 @@ slope_params <- function(formula, data,
   if (comparator == "none") {
     fit <- fit_none_model(dat, ctrl)
     b <- nlme::fixef(fit)
-    slope <- fixef_term(b, "sp_time", context)
+    slope <- fixef_term(b, slope_fixef_parts("none")[[1L]], context)
     slope_comparator <- NA_real_
-    re <- extract_re(fit, "(Intercept)", "sp_time", context)
-    s2r <- extract_residual(fit, NULL, context)
 
   } else if (comparator == "treated") {
     # Stata: mixed y time placebo#c.time || subject: time, cov(uns)
@@ -595,11 +611,10 @@ slope_params <- function(formula, data,
     dat$sp_placebo_time <- (1 - dat$sp_case) * dat$sp_time
     fit <- fit_treated_model(dat, ctrl)
     b <- nlme::fixef(fit)
-    time_term        <- fixef_term(b, "sp_time", context)
-    slope            <- time_term + fixef_term(b, "sp_placebo_time", context)  # control arm
-    slope_comparator <- time_term                                              # treated arm
-    re <- extract_re(fit, "(Intercept)", "sp_time", context)
-    s2r <- extract_residual(fit, NULL, context)
+    parts            <- slope_fixef_parts("treated")
+    time_term        <- fixef_term(b, parts[[1L]], context)
+    slope            <- time_term + fixef_term(b, parts[[2L]], context)  # control arm
+    slope_comparator <- time_term                                        # treated arm
 
   } else {
     dat$sp_control      <- 1 - dat$sp_case
@@ -637,11 +652,23 @@ slope_params <- function(formula, data,
     }
 
     b <- nlme::fixef(fit)
-    time_term        <- fixef_term(b, "sp_time", context)
-    slope            <- time_term + fixef_term(b, c("sp_case", "sp_time"), context)  # cases
-    slope_comparator <- time_term                                                    # controls
+    parts            <- slope_fixef_parts("healthy")
+    time_term        <- fixef_term(b, parts[[1L]], context)
+    slope            <- time_term + fixef_term(b, parts[[2L]], context)  # cases
+    slope_comparator <- time_term                                        # controls
+  }
+
+  # Random-effects covariance and residual variance are extracted by the same
+  # names either way: the case-specific random-slope block and residual level
+  # for `healthy`, the shared intercept/slope block and homoscedastic residual
+  # for the other two -- `treated`'s coefficient mapping differs from `none`'s,
+  # but its variance components come from the same random-effects structure.
+  if (comparator == "healthy") {
     re  <- extract_re(fit, "sp_case", "sp_case_time", context)
     s2r <- extract_residual(fit, "case", context)
+  } else {
+    re  <- extract_re(fit, "(Intercept)", "sp_time", context)
+    s2r <- extract_residual(fit, NULL, context)
   }
 
   new_slope_params(
@@ -759,12 +786,7 @@ new_slope_params <- function(slope, slope_comparator, comparator,
   sigma2_residual  <- check_variance(sigma2_residual, "sigma2_residual", context)
   sigma_cov        <- check_scalar(sigma_cov, "sigma_cov", context)
 
-  G <- matrix(c(sigma2_intercept, sigma_cov, sigma_cov, sigma2_slope), 2L, 2L)
-  if (!is_positive_definite(G)) {
-    stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
-                        "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
-                 context, sigma2_intercept, sigma2_slope, sigma_cov), call. = FALSE)
-  }
+  check_re_covariance(sigma2_intercept, sigma2_slope, sigma_cov, context)
 
   structure(
     list(slope            = slope,

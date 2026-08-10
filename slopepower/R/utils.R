@@ -49,6 +49,42 @@ is_positive_definite <- function(m, tol = 1e-10) {
   !is.null(ev) && all(ev > tol * max(1, abs(ev[1L])))
 }
 
+#' Check that a random-effects covariance triple is positive definite
+#'
+#' Shared by [new_slope_params()] -- the single validation point at
+#' construction, for both routes into the class -- and [check_params()] in
+#' power.R, which re-checks a hand-built object at the trust boundary every
+#' stage-two calculation funnels through (a hand-built object can bypass the
+#' constructor entirely, and the marginal covariance built in `sigma_at()` can
+#' stay positive definite even when this one is not, because a large enough
+#' `sigma2_residual` masks it). One helper means the matrix and the message can
+#' never drift between the two call sites.
+#' @noRd
+check_re_covariance <- function(sigma2_intercept, sigma2_slope, sigma_cov, context) {
+  G <- matrix(c(sigma2_intercept, sigma_cov, sigma_cov, sigma2_slope), 2L, 2L)
+  if (!is_positive_definite(G)) {
+    stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
+                        "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
+                 context, sigma2_intercept, sigma2_slope, sigma_cov), call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+#' Validate a scalar is bounded and a whole number
+#'
+#' `check_scalar()` handles the bound; this adds the integrality check shared
+#' by [run_bootstrap()]'s `R` and [solve_slope()]'s `n`, which differ only in
+#' the bound and the noun used to name what is being counted.
+#' @noRd
+check_whole_number <- function(x, name, noun, context, lower, upper = Inf, lower_open = FALSE) {
+  check_scalar(x, name, context, lower = lower, upper = upper, lower_open = lower_open)
+  if (x != floor(x)) {
+    stop(sprintf("%s: `%s` must be a whole number of %s; got %g.", context, name, noun, x),
+         call. = FALSE)
+  }
+  invisible(as.numeric(x))
+}
+
 #' Extract the subject grouping from a `outcome ~ time | subject` formula
 #'
 #' Returns a list with `outcome`, `time` and `subject` language objects. The bar
