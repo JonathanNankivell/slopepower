@@ -1,0 +1,57 @@
+Copyright holders and provenance for the 'slopepower' R package
+=================================================================
+
+This package has two distinct bodies of content, held under different
+copyrights.
+
+1. The R implementation
+------------------------
+
+The R source code in R/, and the documentation and vignettes derived from it,
+is:
+
+  Copyright (c) 2026 Jonathan Nankivell
+
+and is licensed under the MIT license (see the LICENSE file). This is a
+close, non-whiteroom translation of the Stata command described in item 2
+below: the R code was written by reading the Stata source and reproducing
+its behaviour directly, not by an independent implementation from a
+specification. The MIT license therefore covers Jonathan Nankivell's
+expression of that logic in R; it does not by itself clear the underlying
+Stata material, which is covered separately below.
+
+2. The original Stata 'slopepower' command and example datasets
+------------------------------------------------------------------
+
+This package is a translation of the Stata command 'slopepower', described
+in:
+
+  Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and
+  sample-size calculations for trials that compare slopes over time:
+  Introducing the slopepower command. Stata Journal 21(3): 575-601.
+  <doi:10.1177/1536867X211045512>
+
+The command's .ado and .sthlp files, and its bundled example datasets
+(the source of this package's slpower1, slpower2, and slpower3 data
+objects), were published as supporting files of that Stata Journal article
+(article st0647) and are copyrighted by StataCorp LLC. Neither the .ado
+file, the .sthlp file, nor the article state a license; the applicable
+terms are the Stata Journal's own Terms and Conditions of Use
+(https://www.stata-journal.com/terms-of-use/), which state:
+
+  "The contents of the supporting files (programs, datasets, and help
+  files) may be copied or reproduced by any means whatsoever, in whole or
+  in part, as long as any copy or reproduction includes attribution to
+  both (1) the author and (2) the Stata Journal."
+
+This package is reproduced and adapted under that permission. Attribution:
+
+  - Author: Stephen Nash, Katy E. Morgan, Chris Frost, and Amy Mulick,
+    "Power and sample-size calculations for trials that compare slopes
+    over time: Introducing the slopepower command"
+  - Journal: Stata Journal 21(3): 575-601 (2021)
+
+The example datasets (slpower1, slpower2, slpower3) are simulated data
+whose generating code is given in the appendix of the above article;
+they are reproduced here unchanged in value, with only storage types
+converted (see data-raw/make-data.R).

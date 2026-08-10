@@ -18,11 +18,20 @@ to reach the branch that calls it.
 }
 
 \author{
-\strong{Maintainer}: Jonathan Nankivell \email{nankivelljonathan@gmail.com}
+\strong{Maintainer}: Jonathan Nankivell \email{nankivelljonathan@gmail.com} (Author and copyright holder of the R implementation) [copyright holder]
 
 Authors:
 \itemize{
-  \item Jonathan Nankivell \email{nankivelljonathan@gmail.com}
+  \item Jonathan Nankivell \email{nankivelljonathan@gmail.com} (Author and copyright holder of the R implementation) [copyright holder]
+}
+
+Other contributors:
+\itemize{
+  \item Stephen Nash (Author of the original Stata slopepower command that this package translates) [contributor]
+  \item Chris Frost (Author of the original Stata slopepower command that this package translates) [contributor]
+  \item Katy E. Morgan (Author of the original Stata slopepower command that this package translates) [contributor]
+  \item Amy Mulick (Author of the original Stata slopepower command that this package translates) [contributor]
+  \item StataCorp (Copyright holder of the original Stata slopepower command (.ado/.sthlp) and its example datasets; see inst/COPYRIGHTS) [copyright holder]
 }
 
 }

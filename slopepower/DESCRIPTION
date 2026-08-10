@@ -1,9 +1,22 @@
 Package: slopepower
 Title: Power and Sample Size for Trials Comparing Slopes Over Time
 Version: 0.1.0
-Authors@R: person("Jonathan", "Nankivell",
-                  email = "nankivelljonathan@gmail.com",
-                  role = c("aut", "cre"))
+Authors@R: c(
+    person("Jonathan", "Nankivell",
+           email = "nankivelljonathan@gmail.com",
+           role = c("aut", "cre", "cph"),
+           comment = "Author and copyright holder of the R implementation"),
+    person("Stephen", "Nash", role = "ctb",
+           comment = "Author of the original Stata slopepower command that this package translates"),
+    person("Chris", "Frost", role = "ctb",
+           comment = "Author of the original Stata slopepower command that this package translates"),
+    person("Katy E.", "Morgan", role = "ctb",
+           comment = "Author of the original Stata slopepower command that this package translates"),
+    person("Amy", "Mulick", role = "ctb",
+           comment = "Author of the original Stata slopepower command that this package translates"),
+    person("StataCorp", role = "cph",
+           comment = "Copyright holder of the original Stata slopepower command (.ado/.sthlp) and its example datasets; see inst/COPYRIGHTS")
+  )
 Description: An R implementation of the Stata 'slopepower' command of Nash,
     Morgan, Frost and Mulick (2021) <doi:10.1177/1536867X211045512>. Performs
     sample size and power calculations for two-arm parallel trials in which the
@@ -17,6 +30,8 @@ Description: An R implementation of the Stata 'slopepower' command of Nash,
     covariates, no further level of clustering such as site, and no
     randomisation scheme other than two equal parallel arms.
 License: MIT + file LICENSE
+Copyright: For details of contributions and copyright holders, see the
+    'inst/COPYRIGHTS' file.
 Encoding: UTF-8
 Depends: R (>= 4.1)
 Imports: nlme, stats
