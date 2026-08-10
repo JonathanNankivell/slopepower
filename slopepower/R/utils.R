@@ -26,6 +26,21 @@ check_scalar <- function(x, name, context,
   invisible(as.numeric(x))
 }
 
+#' Check a numeric vector is all finite, naming the offending elements
+#'
+#' Shared by [validate_visits()] and `check_dropout_values()` in design.R,
+#' which both stop with the same "must be finite; element(s) ... are not"
+#' diagnosis over a vector rather than a scalar -- `check_scalar()` covers the
+#' single-value case, this the vector one.
+#' @noRd
+check_finite_vector <- function(x, name, ctx) {
+  if (any(!is.finite(x))) {
+    stop(sprintf("%s: `%s` must be finite; element(s) %s are not.",
+                 ctx, name, paste(which(!is.finite(x)), collapse = ", ")), call. = FALSE)
+  }
+  invisible(x)
+}
+
 #' Validate a probability in (0, 1)
 #' @noRd
 check_probability <- function(x, name, context) {

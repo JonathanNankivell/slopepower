@@ -78,6 +78,14 @@ expand_dropout <- function(spec, visits, context, label) {
   if (inherits(spec, "dropout_rate")) {
     increments <- (spec$rate / spec$per) * diff(visits)
     total <- sum(increments)
+    # The same bound `check_dropout_total()` (design.R) enforces on `dropout`
+    # generally -- reusing its shared DROPOUT_TOL so the threshold itself
+    # cannot drift between the two -- but diagnosed here in terms of `rate`
+    # and `per` rather than the expanded vector, because `trial_design(v,
+    # increments)` below would otherwise report a `dropout_rate()` mistake by
+    # naming a vector the caller never wrote. `trial_design()` still checks
+    # `increments` itself once this returns, so a bug in this early check
+    # could not let an invalid total through uncaught.
     if (total > 1 + DROPOUT_TOL) {
       stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
                           "implies total dropout of %s, which exceeds 1."),

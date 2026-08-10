@@ -178,10 +178,7 @@ validate_visits <- function(visits, ctx) {
                         "(baseline plus at least one follow-up); got %s of length %d."),
                  ctx, class(visits)[1L], length(visits)), call. = FALSE)
   }
-  if (any(!is.finite(visits))) {
-    stop(sprintf("%s: `visits` must be finite; element(s) %s are not.",
-                 ctx, paste(which(!is.finite(visits)), collapse = ", ")), call. = FALSE)
-  }
+  check_finite_vector(visits, "visits", ctx)
   visits <- as.numeric(visits)
 
   dups <- unique(visits[duplicated(visits)])
@@ -278,11 +275,7 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
 #' final element instead, before conversion.
 #' @noRd
 check_dropout_values <- function(dropout, name, ctx) {
-  if (any(!is.finite(dropout))) {
-    stop(sprintf("%s: `%s` must be finite; element(s) %s are not.",
-                 ctx, name, paste(which(!is.finite(dropout)), collapse = ", ")),
-         call. = FALSE)
-  }
+  check_finite_vector(dropout, name, ctx)
   if (any(dropout < 0)) {
     stop(sprintf("%s: `%s` proportions must be non-negative; element(s) %s are not.",
                  ctx, name, paste(which(dropout < 0), collapse = ", ")), call. = FALSE)

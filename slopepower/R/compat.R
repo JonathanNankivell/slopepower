@@ -5,6 +5,21 @@
 # check. New code should prefer slope_params() + trial_design() +
 # slope_sample_size() or slope_power().
 
+#' Warn and reset an argument that does not apply to the chosen model
+#'
+#' Shared shape of `slopepower()`'s three "you supplied this, but the model
+#' you selected doesn't use it" checks: if `condition` holds, warn in
+#' `message` (one `%s` for `context`) and answer `off_value`; otherwise leave
+#' `value` untouched. `condition` already encodes both "was this supplied"
+#' and "does the chosen model use it", since the two differ by argument
+#' (`!is.null(x)` for `casecon`/`treat`, the bare flag for `usetrt`).
+#' @noRd
+warn_unused_arg <- function(value, condition, off_value, message, context) {
+  if (!condition) return(value)
+  warning(sprintf(message, context), call. = FALSE)
+  off_value
+}
+
 #' Sample size or power using the Stata command's interface
 #'
 #' A direct translation of the Stata `slopepower` command of Nash et al. (2021)
@@ -122,21 +137,13 @@ slopepower <- function(data, depvar, subject, time, schedule,
   if (model == 3L && is.null(treat)) {
     stop(sprintf("%s: `rct = TRUE` requires `treat`.", context), call. = FALSE)
   }
-  if (!is.null(casecon) && model != 1L) {
-    warning(sprintf(paste0("%s: `casecon` applies only to observational data with both cases ",
-                           "and healthy controls. It will be ignored."), context), call. = FALSE)
-    casecon <- NULL
-  }
-  if (!is.null(treat) && model != 3L) {
-    warning(sprintf("%s: `treat` applies only to trial data (`rct = TRUE`). It will be ignored.",
-                    context), call. = FALSE)
-    treat <- NULL
-  }
-  if (usetrt && model != 3L) {
-    warning(sprintf("%s: `usetrt` applies only to trial data (`rct = TRUE`). It will be ignored.",
-                    context), call. = FALSE)
-    usetrt <- FALSE
-  }
+  casecon <- warn_unused_arg(casecon, !is.null(casecon) && model != 1L, NULL,
+    paste0("%s: `casecon` applies only to observational data with both cases ",
+          "and healthy controls. It will be ignored."), context)
+  treat <- warn_unused_arg(treat, !is.null(treat) && model != 3L, NULL,
+    "%s: `treat` applies only to trial data (`rct = TRUE`). It will be ignored.", context)
+  usetrt <- warn_unused_arg(usetrt, usetrt && model != 3L, FALSE,
+    "%s: `usetrt` applies only to trial data (`rct = TRUE`). It will be ignored.", context)
   if (usetrt && !is.null(effectiveness)) {
     stop(sprintf("%s: supply only one of `effectiveness` and `usetrt`, not both.", context),
          call. = FALSE)
@@ -183,7 +190,19 @@ slopepower <- function(data, depvar, subject, time, schedule,
   work <- data
   work[[".slopepower_time"]] <- coerce_time(data[[time]], context) / scale
 
-  fml <- stats::as.formula(sprintf("`%s` ~ `.slopepower_time` | `%s`", depvar, subject))
+  # env = baseenv(): every symbol this formula names (the backtick-quoted
+  # column names) is resolved against `data` inside slope_params(), never
+  # against the formula's own environment, so that environment need not be
+  # this frame. Left at the default, as.formula() would environment it in
+  # this call's own frame instead, and slope_params()'s match.call() stores
+  # this exact formula object in `params$call`, a field kept for the life of
+  # every slope_sample_size/slope_power result. That would pin slopepower()'s
+  # whole frame -- `data` and `work`, a full second copy, included -- in
+  # memory for as long as the result exists: the same leak
+  # fit_none_model()/fit_treated_model() in params.R were written to avoid
+  # for `params$fit`, one layer up.
+  fml <- stats::as.formula(sprintf("`%s` ~ `.slopepower_time` | `%s`", depvar, subject),
+                           env = baseenv())
 
   # Parented on this frame, which encloses the package namespace -- not on
   # parent.frame(), which roots the lookup in the caller's environment instead.

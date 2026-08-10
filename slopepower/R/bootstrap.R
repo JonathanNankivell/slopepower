@@ -135,14 +135,16 @@ slope_se <- function(params) {
   if (is.null(b) || is.null(V)) return(NA_real_)
   # Which terms sum to the slope, by comparator, is params.R's
   # slope_fixef_parts() -- the same mapping slope_params() itself sums the
-  # *values* of, so the two can never name a different set of coefficients.
-  # An interaction part is resolved via resolve_fixef_name() rather than
-  # assuming a spelling, because its label depends on the order its components
-  # appear in the internal formula. Getting this wrong used to return NA
+  # *values* of, via fixef_term(), so the two can never name a different set
+  # of coefficients. Every part -- not just an interaction -- is resolved via
+  # resolve_fixef_name() rather than assuming a spelling, exactly as
+  # fixef_term() does: for a single name it degenerates to a plain lookup, so
+  # one call handles both shapes and this can never trust an unresolved name
+  # the way indexing `p` directly would. Getting this wrong used to return NA
   # silently, which switched off the section 2.6 warning below that is the
   # entire reason for computing the standard error.
   terms <- vapply(slope_fixef_parts(params$comparator),
-                  function(p) if (length(p) == 1L) p else resolve_fixef_name(b, p),
+                  function(p) resolve_fixef_name(b, p),
                   character(1L))
   if (anyNA(terms) || !all(terms %in% names(b))) {
     warning(sprintf(paste0(
