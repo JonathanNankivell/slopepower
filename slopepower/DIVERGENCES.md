@@ -169,13 +169,24 @@ trip a bare `< 0` guard, though `c(0.3, 0.3, 0.4)` is a legal dropout vector
 summing to exactly 1 in decimal.
 
 Two caveats, both worth stating because this is the one entry in the document
-resting on unverified behaviour. R's `sum()` happens to return exactly 1 for
-that particular vector, so the tolerance is not what rescues *this* example —
-it is what stops the guard depending on the order the elements arrive in.
-And whether Stata's local-macro arithmetic really rejects
-`dropouts(.3 .3 .4)` was never put to the licence, unlike the two claims in
-the preamble; what is recorded here is the *form* of the check, which is
-plain in the source either way.
+resting on unverified behaviour.
+
+R's `sum()` returns exactly 1 for that vector, so the tolerance is not what
+rescues *this* example. Nor is it easy to find an example it does rescue: over
+every 2- and 3-element partition of 1 into hundredths, and 200,000 random
+partitions into 2–6 parts of hundredths or thousandths, `sum()` never once
+exceeded 1. The tolerance is therefore defensive — it stops the bound
+depending on summation order and on how the caller happened to spell the
+proportions — rather than load-bearing for any input a user is likely to
+type. It is the *subtractive* form that is fragile, and R does not use it.
+
+And whether Stata's local-macro arithmetic really rejects `dropouts(.3 .3 .4)`
+was never put to the licence, unlike the two claims in the preamble; what is
+recorded here is the *form* of the check, which is plain in the source either
+way. `stata-reference/07_open_questions_2.do` question 3 settles it — written,
+not yet run. If Stata round-trips its locals through a shorter string
+representation the residue is exactly 0, there is no defect here, and this
+section becomes a restatement rather than a divergence.
 
 ---
 
@@ -546,6 +557,13 @@ actually does with that has not been put to the licence; it is at best a
 mangled message and at worst an abort where the surrounding code plainly
 intends a warning. `slopepower()` warns and continues, which is what the
 author meant.
+
+`stata-reference/07_open_questions_2.do` question 4 settles it — written, not
+yet run. It runs the call in situ, runs the well-formed sibling at `.ado:132`
+for contrast, and runs the offending line alone in a throwaway do-file to
+bound how far the unmatched backtick reaches. If it turns out to abort, this
+stops being a note about the author's intent and becomes a behavioural
+divergence in its own right.
 
 ---
 

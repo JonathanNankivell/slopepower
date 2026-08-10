@@ -43,15 +43,16 @@ do 03_grid_fits.do
 do 04_edge_cases.do
 do 05_variance_components.do
 do 06_table1.do
+do 07_open_questions_2.do
 ```
 
-Only `00` opens a log, and it now starts with `capture log close _all`. On the
+`00` and `07` open logs, and both start with `capture log close _all`. On the
 first run it aborted on a stray backtick before reaching `log close`, so the
 other four files appended to its still-open log and question 2 never ran — if
 `00_open_questions.log` comes out at hundreds of KB, that is what happened
 again.
 
-`00` writes a log to read by eye. The other six write `<stem>.dta` and
+`00` and `07` write logs to read by eye. The other six write `<stem>.dta` and
 `<stem>.csv` beside themselves; the R suite reads the CSVs. Grid 5 must be
 regenerated alongside the others: the exact test joins its fits to the design
 grids on dataset, model, scale, subset and `nocontvar`, so a stale grid 5 either
@@ -157,6 +158,30 @@ where the two implementations define `var_tte` the same way (CONTRACT.md 5.6), s
 
 No new fits: every row uses `F1-sc1` or `F1-sc0.5`, both already in grid 5, so
 the tolerance-free test joins straight on and pins all nine powers to 1e-12.
+
+**`07_open_questions_2.do`** — not a grid, and the sequel to `00`: two more
+claims in `slopepower/DIVERGENCES.md` that rest on reading the `.ado` rather
+than running it. **Not yet run.**
+
+3. `slopepower.ado:259-271` checks the dropout total by repeated subtraction,
+   and `1 - .3 - .3 - .4` is `-5.551e-17` in double precision, so
+   `dropouts(.3 .3 .4)` — legal, and exactly 1 in decimal — may be rejected as
+   "Dropouts cannot exceed 100%". Whether it actually is depends on how much
+   precision a Stata local carries through each step, which the file probes
+   directly as well as through the command. `dropouts(.1 .2 .7)` lands on
+   exactly 0 and is the control; `dropouts(.5 .3 .3)` genuinely exceeds 1 and
+   must still error. This is the claim behind DIVERGENCES.md §5.
+4. `slopepower.ado:196` has a lone backtick in the middle of the warning string
+   for `treat()` supplied with observational data, opening a macro reference
+   that never closes. Its three siblings are well formed. The file runs the
+   call in situ, runs the well-formed sibling at `:132` for contrast, and runs
+   the offending line by itself in a throwaway one-line do-file — isolated
+   precisely so that if the unmatched backtick swallows what follows, it
+   swallows nothing that matters. This is the claim behind DIVERGENCES.md §19.
+
+Both questions are cheap: four model-2 fits on `slpower1` plus some arithmetic.
+Whichever way they come out, update the affected section of `DIVERGENCES.md`
+and delete its "not put to the licence" hedge.
 
 ## CSV layout
 
