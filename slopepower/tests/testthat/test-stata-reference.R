@@ -107,6 +107,12 @@ STATA_ONLY <- c(
 #   SUM1-exact             dropouts(0.3 0.3 0.4) returns rc = 0, N = 1418.
 #                          Stata's accumulation does not go negative, so both
 #                          implementations accept a dropout list summing to 1.
+#                          Why it does not: a Stata local round-trips through a
+#                          decimal string, so `.7 - 0.3' stores as ".4" and the
+#                          residue is exactly 0, where the same arithmetic in
+#                          doubles gives -5.551e-17. This row is the evidence,
+#                          and predates the question being asked again in
+#                          07_open_questions_2.do --- check here first.
 
 # ---------------------------------------------------------------------------
 # The comparison, shared by every grid
@@ -297,15 +303,25 @@ for (stem in names(DESIGN_GRIDS)) {
 # grids above only miss by 1e-5, the port is right and the optimisers differ.
 # If this fails, the port is wrong, whatever the grids above say.
 
-# How far apart the two REML implementations land on each fitted quantity, at
-# nlme's stock settings. Measured over all 37 fits in grid 5; the maxima are
-# the worst single fit with a little headroom, the medians are the typical row.
+# How far apart the two REML implementations land on each fitted quantity, with
+# the port fitting exactly as it ships: through slope_lme_control(), which is
+# what slope_params() passes to every lme() call. Measured over all 37 fits in
+# grid 5; the maxima are the worst single fit with a little headroom, the
+# medians are the typical row.
 #
-# Deliberately calibrated to nlme's DEFAULTS rather than to a tightened
-# lmeControl. Tightening closes most of the gap (var_tte on slpower1 moves from
-# 8.36388645 to 8.36394022 against Stata's 8.36394172) but it changes what the
-# package does for every user to make a test look better, which is backwards.
-# These numbers describe the port as shipped.
+# Deliberately NOT calibrated against a control tightened beyond the one the
+# package actually uses. Tightening further does close most of the gap ---
+# var_tte on slpower1 at visits 0:3 moves from 8.36388645 to 8.36394022 against
+# Stata's 8.36394172 --- but it changes what the package does for every user to
+# make a test look better, which is backwards. These numbers describe the port
+# as shipped.
+#
+# This comment used to say the tolerances were calibrated to nlme's DEFAULTS,
+# and cited 8.36388645 as the stock figure. Both were wrong: 8.36388645 is what
+# slope_lme_control() gives, and nlme's untouched defaults give 8.36399564 on
+# that fit --- about as far from Stata as the shipped settings are, on the other
+# side. Nothing here is calibrated to stock nlme, and it should not be: the
+# package never fits that way.
 #
 # The maxima are dominated by fits that barely identify a random slope:
 # F3-id<=40|id>110 is 80 subjects at three visits, and F3-visit<2 and

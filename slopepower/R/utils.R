@@ -2,7 +2,29 @@
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-#' Tolerance used when comparing dropout proportions against 1
+#' Slack allowed when comparing dropout proportions against their bounds
+#'
+#' Three uses, all in design.R and grid.R: an incremental vector's total
+#' against 1, a cumulative vector's final element against 1, and a cumulative
+#' vector's step-to-step differences against 0 (monotonicity). One constant so
+#' the three cannot drift apart.
+#'
+#' Why any slack at all: a dropout vector that partitions the sample exactly
+#' --- `c(0.3, 0.3, 0.4)` --- is legal and must be accepted, and floating-point
+#' arithmetic on decimal proportions need not land on 1 exactly. In practice
+#' `sum()` is well behaved here: across every 2- and 3-element partition of 1
+#' into hundredths, and 200,000 random partitions into 2-6 parts of hundredths
+#' or thousandths, it never once exceeded 1. So this is defensive rather than
+#' load-bearing, and it is deliberately far larger than the error it guards
+#' against --- proportions are a user-facing quantity, and nobody means a
+#' dropout total of 1 + 1e-9.
+#'
+#' It is *not* a repair of the Stata original, though it reads like one.
+#' `slopepower.ado:265` accumulates by repeated subtraction, which in doubles
+#' would take `1 - 0.3 - 0.3 - 0.4` to -5.551e-17 and reject the list; but a
+#' Stata local round-trips through a decimal string, so its residue is exactly
+#' 0 and it accepts the list too. Verified, not assumed --- see DIVERGENCES.md
+#' "Claims checked and rejected".
 #' @noRd
 DROPOUT_TOL <- 1e-8
 
