@@ -1,0 +1,531 @@
+---
+title: "Coming from the Stata command"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{Coming from the Stata command}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 4)
+library(slopepower)
+```
+
+## Who this is for
+
+You have used `slopepower` in Stata -- the command of Nash et al. (2021) -- and
+want to know what changes in R. This vignette is the map. It answers three
+questions: which of your numbers will move (almost none, and the exceptions are
+named), which of your keystrokes will move (rather more), and why each of those
+changes was made rather than transcribing the original option for option.
+
+If you have never used the Stata command, read
+`vignette("introduction", package = "slopepower")` instead; nothing here is
+needed to use the package.
+
+The rule the port followed throughout was: reproduce Nash et al.'s
+*mathematics* line for line, and rewrite the *architecture* the way the authors
+would have with more time -- fixing Stata-idiom artifacts and validation gaps,
+never the statistical method. Every difference below falls on the architecture
+side of that line, with two exceptions flagged as such in "Where the numbers
+differ, on purpose".
+
+## The numbers agree
+
+Before the differences: given the same inputs, the two implementations produce
+the same answers, and this has been checked rather than assumed. A Stata licence
+was used to generate 584 grid rows and 37 model fits across all three models,
+every comparator rule, both `var_tte` branches, the Dawson--Lagakos dropout
+weighting and the `effectiveness` rescaling. Feeding Stata's own fitted variance
+components into `slope_params_manual()`, all 542 comparable rows match exactly:
+maximum absolute difference in *N* of 0, power agreeing to 3.4e-15.
+
+Running the fits in each language rather than sharing them, 534 of those 542
+still match *N* exactly, and every remaining difference traces to REML
+convergence -- the optimiser, not the algebra. That is the one place the port's
+numbers can differ from Stata's at all, and it is a consequence of the next
+point.
+
+### Convergence settings are fixed, not an option
+
+Stata exposes `iterate(16000)` and otherwise leaves `mixed` at its defaults.
+There is no equivalent argument here. The settings behind every fit live in one
+exported function:
+
+```{r control}
+str(slope_lme_control()[c("maxIter", "msMaxIter", "opt", "tolerance")])
+```
+
+More iterations than `nlme`'s defaults, `opt = "optim"`, and tighter tolerances,
+chosen because the stock settings converged less precisely on the two-block
+random-effects structure fitted for `healthy`. It is exported so the settings
+behind a published number can be inspected and reproduced from outside the
+package -- **not** so they can be overridden from inside it. The model this
+package fits is fixed (see `?slope_params`), and a tunable optimiser would let
+two runs of the same call disagree with nothing on the returned object to say
+why.
+
+## The translation table
+
+| Stata | R |
+|---|---|
+| `obs` + `nocontrols` | `slope_params(y ~ t \| id, data)` |
+| `obs` + `casecon(v)` | `slope_params(y ~ t \| id, data, healthy = v)` |
+| `rct` + `treat(v)` | `slope_params(y ~ t \| id, data, treated = v)` |
+| `schedule(1 2 3)` | `trial_design(c(0, 1, 2, 3))` -- baseline explicit |
+| `schedule(1 2 3 4) scale(0.5)` | `trial_design(seq(0, 2, by = 0.5))` -- no `scale` |
+| `dropouts(.05 .05)` | `trial_design(..., dropout = c(0.05, 0.05))` |
+| *(no equivalent)* | `dropout_type = "cumulative"`, `dropout_rate()` |
+| `power(0.8)` | `slope_sample_size(params, design, power = 0.8)` |
+| `n(450)` | `slope_power(params, design, n = 450)` |
+| `effectiveness(0.33)` | `effectiveness = 0.33` |
+| `usetrt` | `target = "observed"` |
+| `nocontvar` | `common_variance = TRUE` |
+| `iterate(16000)` | *(none -- see `slope_lme_control()`)* |
+| *(no equivalent)* | `origin = "none"`, `slope_params_manual()`, the grid functions |
+
+Everything in that table is available in one call through the compatibility
+wrapper `slopepower()` as well; see "Keeping your old calls working" below.
+
+## One command becomes several functions
+
+Stata has a single command that decides at run time what you asked for, from
+which of `power()` and `n()` you gave, and which of `obs`/`rct`/`nocontrols`
+you declared alongside the matching variable. That flexibility costs it roughly
+a dozen hand-written consistency checks: both of `power` and `n`, neither of
+them, both of `obs` and `rct`, neither, `nocontrols` with `rct`, a declared
+model whose variable is missing, a supplied variable the declared model cannot
+use, and so on.
+
+The R port makes each of those states unwritable instead of checked.
+
+**Sample size and power are separate functions.** `slope_sample_size()` takes
+`power`; `slope_power()` takes `n`. Neither takes the other:
+
+```{r two-functions, error = TRUE}
+pars1 <- slope_params(sdmt ~ visit | id, data = slpower1)
+design <- trial_design(c(0, 1, 2))
+slope_power(pars1, design, n = 200, power = 0.8)
+```
+
+That is R's own argument matching, not a check the package wrote. The ambiguity
+Stata resolves with a run-time branch is a type error at the call site.
+
+**The model is inferred from the data, not declared alongside it.** There is no
+`obs`/`rct`/`nocontrols` argument. The scenario simply *is* which grouping
+argument you supplied:
+
+```r
+slope_params(y ~ t | id, data)                    # Stata's obs nocontrols
+slope_params(y ~ t | id, data, healthy = case)    # Stata's obs casecon()
+slope_params(y ~ t | id, data, treated = treat)   # Stata's rct treat()
+```
+
+Of Stata's six model-consistency checks, exactly one survives, because it is the
+only inconsistent state you can still express:
+
+```{r one-check, error = TRUE}
+slope_params(sdmt ~ visit | id, data = slpower3, healthy = treat, treated = treat)
+```
+
+**Fields are named for what they are.** Stata names its return scalars after the
+model-specific role -- `slope_controls`, `slope_cases`, `slope_untreated`,
+`slope_treated` -- so one concept, "reference slope versus index slope", has four
+names across three models, and you cross-reference the on-screen legend to know
+which you are holding. The R objects use one pair throughout: `slope` for the
+untreated/case/index group and `slope_comparator` for the healthy controls or
+treated arm (`NA_real_` where there is none), with a separate `comparator` field
+(`"none"`, `"healthy"`, `"treated"`) carrying the model identity instead of the
+names doing it.
+
+## Trial designs are objects, and richer ones
+
+### Baseline is explicit
+
+Stata's `schedule()` lists follow-up visits only; visit 0 is inserted silently.
+`trial_design()` requires you to write it:
+
+```{r baseline, error = TRUE}
+trial_design(c(1, 2))
+```
+
+`schedule(1 2)` becomes `trial_design(c(0, 1, 2))`. The implicit convention is a
+common source of off-by-one design errors, and Stata's users have to remember it
+rather than see it.
+
+### Real-valued visit times, so no `scale()`
+
+Stata restricts `schedule()` to ascending integers and builds the marginal
+covariance matrix by looping over integer positions, which is why `scale()`
+exists: six-monthly visits are expressed as an integer schedule on a rescaled
+axis. This port builds Σ directly at whatever real times you supply, so
+fractional spacing is written down directly and `scale()` has no equivalent:
+
+```{r spacing}
+slope_sample_size(pars1, trial_design(seq(0, 2, by = 0.5)),
+                  effectiveness = 0.33)$n
+```
+
+620, which is exactly what Stata returns for `schedule(1 2 3 4) scale(0.5)` on
+the same fit -- the equivalence is pinned against Stata's own output.
+
+### Cumulative dropout, and dropout as a rate
+
+Stata accepts only incremental dropout fractions (the proportion whose *last*
+attended visit is visit *i*). Converting an attrition curve to that form is left
+to you. `trial_design()` will do it:
+
+```{r cumulative}
+trial_design(c(0, 1, 2, 3), dropout = c(0, 0.10, 0.15),
+             dropout_type = "cumulative")
+```
+
+The stored `dropout` field is always incremental whichever form you supplied,
+and the cumulative vector is checked for being non-decreasing and bounded by 1.
+
+`dropout_rate()` goes further and has no Stata counterpart at all. "5% a year
+over three years" has to be hand-converted to `dropouts(0.15)`,
+`dropouts(.05 .05 .05)` or `dropouts(.025 ...)` depending on which schedule you
+are comparing, with the arithmetic redone for every row of a comparison table.
+`dropout_rate(0.05)` is expanded per schedule automatically, so one object drives
+every row:
+
+```{r rate}
+tbl <- slope_power_grid(
+  pars1, n = 450, effectiveness = 0.33,
+  visits  = list(annual = 0:3, six_month = seq(0, 3, 0.5)),
+  dropout = list(`5pc` = dropout_rate(0.05))
+)
+tbl[, c("design", "dropout", "n", "power")]
+```
+
+This is new surface area, but it computes exactly what a Stata user computes by
+hand for `dropouts()`; it is not a change to the method.
+
+## Fit once, evaluate many designs
+
+Stata re-runs the whole `mixed` model for every row of a comparison table. Table
+1 of the paper compares nine designs, and so performs nine REML fits of the same
+data.
+
+Here, stage one (`slope_params()`, one `nlme::lme` fit) and stage two (the
+closed-form algebra given those variance components) are separate functions, so
+the grid above fitted the model once and evaluated every design against the same
+estimates. Beyond speed, it means the designs are compared on identical
+parameters rather than on nine separately converged fits.
+
+The separation goes further than convenience. Stage two has no notion of "the
+data currently in memory" -- the whole Stata command is a `program` operating on
+the loaded dataset, with `preserve`/`restore` to undo its own mutations.
+`slope_var()`, `slope_sigma()`, `slope_effect_size()`, `slope_sample_size()`,
+`slope_power()` and the grid functions are pure functions of a `slope_params`
+object and a `trial_design` object. They can be called with no dataset loaded at
+all:
+
+```{r manual}
+pars_published <- slope_params_manual(
+  slope = -1.6, sigma2_intercept = 100, sigma2_slope = 2,
+  sigma_cov = 5, sigma2_residual = 10
+)
+slope_sample_size(pars_published, design, effectiveness = 0.33)$n
+```
+
+`slope_params_manual()` is how you plan from variance components reported in a
+paper -- or from Stata's own fitted numbers, which is how the exact-agreement
+check above was performed. Stata has no such entry point; the in-memory model
+fit is mandatory there.
+
+## Undefined results are errors, not missing values
+
+When the slope difference is zero, the sample size is undefined: Stata divides
+by zero, returns a missing value, and completes as though nothing happened. The
+R port says so:
+
+```{r zero-diff, error = TRUE}
+flat <- slope_params_manual(slope = -1.6, slope_comparator = -1.6,
+                            comparator = "treated",
+                            sigma2_intercept = 100, sigma2_slope = 2,
+                            sigma_cov = 5, sigma2_residual = 10)
+slope_sample_size(flat, design, target = "observed")
+```
+
+The same applies to a singular information matrix, a non-positive-definite
+implied covariance, a non-PD random-effects matrix on a hand-built
+`slope_params`, and to a missing `n` -- where Stata does not fail at all but
+silently switches to solving for sample size at 80% power:
+
+```{r missing-n, error = TRUE}
+slope_power(pars1, design, n = NULL)
+```
+
+Supplying `effectiveness` alongside `target = "observed"` is an error too, where
+`slopepower.ado` quietly overwrites it to 1:
+
+```{r target-eff, error = TRUE}
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+slope_sample_size(pars3, trial_design(c(0, 2, 3)),
+                  target = "observed", effectiveness = 0.5)
+```
+
+What the two *report* afterwards still agrees: under `target = "observed"` the
+result's `effectiveness` is `NA_real_`, which is Stata's missing value faithfully
+preserved rather than a divergence.
+
+**These are additions; most guards are not.** Stata already errors on `alpha`
+outside (0,1), `power` outside (0,1), `effectiveness` outside (0,1], `n < 2` and
+non-integer `n`. The R port restates those checks. It does not add them, and if
+you have been relying on them you lose nothing.
+
+## Advisories you can catch, and objects that stay valid
+
+### Warnings are conditions
+
+Stata prints every advisory with `display as error`, indistinguishable at the
+call site from a genuine failure except by reading the text -- and a warning
+fires again on every row of a hand-rolled grid loop. Two advisories here are
+classed R conditions, so you can handle them by class rather than by
+string-matching:
+
+```{r condition}
+withCallingHandlers(
+  design_d <- trial_design(c(0, 1, 2), dropout = c(0.05, 0.05)),
+  slopepower_baseline_dropout = function(w) {
+    cat("caught:", class(w)[1], "\n")
+    invokeRestart("muffleWarning")
+  }
+)
+```
+
+The other is `slopepower_tte_direction`. Only those two carry a class, and
+deliberately: they are the ones a legitimate grid sweep is expected to trip on
+most cells, so the grid functions collect them by class and report each once per
+grid rather than once per design. Everything else is an ordinary `stop()` or
+`warning()`.
+
+### The time shift is a message, is optional, and is recorded
+
+Stata always rebases each subject's time to start at zero and reports it as a
+`WARNING` line among the genuine errors. The port does the identical shift by
+default, but reports it with `message()` and records that it happened on the
+returned object, so you can detect it programmatically instead of grepping
+console output:
+
+```{r shift}
+d2 <- slpower2
+d2$time <- as.numeric(d2$vdate) / 365
+pars2 <- slope_params(sdmt ~ time | id, data = d2, healthy = case)
+pars2$time_shifted
+```
+
+`origin = "none"` declines the shift altogether, which Stata has no way to
+express. The default, `origin = "subject"`, is Stata's behaviour.
+
+### `common_variance` has three states, not two
+
+Stata's `nocontvar` is a bare flag: absent fits the full unstructured
+random-effects block for controls, present reduces it, and if the full structure
+fails to converge you read `"Model failure. Try using the nocontvar option"` and
+retype the command. `common_variance` takes `NULL`, `TRUE` or `FALSE`, of which
+the flag expresses the last two. The default, `NULL`, has no Stata equivalent:
+try the full structure, fall back to the reduced one with a `message()` if it
+fails, and record which was used:
+
+```{r common-var}
+pars2$common_variance
+```
+
+### Invariants are re-checked at every use
+
+Stata validates once, in the `syntax` block, coupled to that call's arguments;
+there is no persisted object to revalidate. Here `slope_params` and
+`trial_design` are real objects whose invariants -- positive-definite Σ and *G*,
+dropout length and total, finite visits -- are re-checked at the boundary of
+every stage-two call, not only where the constructors ran. That closes the gap
+for objects the constructors never saw: a hand-assembled `slope_params` with a
+non-PD random-effects matrix masked by a large residual variance would otherwise
+return a plausible, wrong, large *N*, and a `trial_design` whose `$dropout` was
+edited after construction would escape the baseline-dropout warning entirely.
+
+### Variance components are extracted by name
+
+This one is invisible unless it breaks. Stata pulls fixed and random effects out
+of `e(b)` by hard-coded column index, and the index shifts between the three
+models and the `nocontvar` variant --
+`exp(b[1,13] + b[1,14])^2` is the cases' residual variance in model 1, but
+`exp(b[1,11] + b[1,12])^2` in the `nocontvar` branch. That is correct (it was
+verified under a real licence, base log-SD plus log-ratio offset), but correct
+only because the numbering is memorised rather than derived.
+
+The port extracts every component from the fitted object by name -- the
+random-effects block from `nlme::getVarCov()`'s dimnames, the residual from the
+`varStruct` coefficients looked up by level name. Adding or reordering a term
+cannot silently mis-map a component. It also sidesteps a trap on the R side of
+the same convention: `nlme::varIdent` puts the *reference* level's SD in
+`sigma(fit)`, and since the reference here is `control`, a naive `sigma(fit)^2`
+returns the controls' residual variance instead of the cases' -- a 3.3% error in
+the fits used here.
+
+### The bootstrap has nothing to misconfigure
+
+The paper's bootstrap recipe (§2.6, §4.1.2) is not built into the Stata command:
+you assemble `cluster()`, `idcluster()`, `strata()` and `jack()` yourself, with a
+caveat that it assumes no observations were excluded. Four things to get wrong,
+with no structural guard. `slope_bootstrap()` has no equivalent options at all:
+subjects are always the resampling unit, replicate identifiers are always
+regenerated (so a subject drawn twice counts as two people rather than
+colliding), and stratification by group is automatic whenever
+`comparator != "none"`. It also applies the paper's own §2.6 recommendation --
+warning when the fitted slope is under 2.5 times its standard error -- which the
+Stata side leaves you to check by eye.
+
+## Keeping your old calls working
+
+`slopepower()` is the compatibility wrapper: one bimodal command with Stata's
+argument names, Stata's defaults (`power` defaults to 0.8), Stata's model
+declaration and every one of Stata's consistency checks, because accepting Stata
+calls verbatim is its whole job.
+
+```{r wrapper}
+res <- slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
+                  obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)
+res$n
+```
+
+Note `schedule = c(1, 2)` with the implicit baseline, exactly as in Stata. It
+accepts `scale` too, though it will suggest you drop it:
+
+```{r wrapper-scale}
+slopepower(slpower1, "sdmt", "id", "visit", schedule = 1:4, scale = 0.5,
+           obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)$n
+```
+
+The warn-and-reset behaviour is preserved as well -- an option that does not
+apply to the declared model warns and is ignored, rather than erroring:
+
+```{r wrapper-warn}
+res2 <- slopepower(slpower3, "sdmt", "id", "visit", schedule = c(2, 3),
+                   obs = TRUE, nocontrols = TRUE, treat = "treat",
+                   effectiveness = 0.33)
+```
+
+Internally that family of warnings is one shared helper rather than three
+copy-pasted blocks, so the "does this option apply to this model" logic and its
+wording live in one place. (One of the Stata originals contains an unbalanced
+macro quote mid-string. Stata prints the backtick literally and carries on --
+checked, `_rc = 0`, identical result -- so the wrapper's warn-and-continue is a
+faithful reading, not a repair. The only difference is the stray character.)
+
+The wrapper is for porting existing calls. New code should use the two-stage
+interface, which is why the migration table above points at it.
+
+## Where the numbers differ, on purpose
+
+Two places, both bounded and both documented.
+
+### `var_tte` under dropout at saturated power
+
+With dropout, no single *s*\*² applies across strata, so `var_tte` is back-solved
+by inverting the sample-size formula. Stata uses that one expression in both
+directions -- when `power` is your input and when `power` is the number it just
+computed. The port keeps Stata's form when solving for *N*, rounding included,
+and uses an algebraically identical but numerically stable form when solving for
+power.
+
+The two agree exactly, because `n_per_arm` cancels out of the ratio. Round-tripping
+through the power anyway costs precision, and past a few thousand per arm costs
+correctness: power saturates at exactly 1, and the inverse normal of 1 is not a
+number in either language, so Stata's expression returns a missing `var_tte` for
+a calculation that otherwise succeeded. (An earlier literal transcription here
+reported 0, `qnorm(1)` being `Inf`.) The stable form still reports:
+
+```{r saturated}
+pw <- slope_power(pars1, trial_design(c(0, 1, 2), dropout = c(0, 0.1)),
+                  n = 10000, effectiveness = 0.33)
+c(power = pw$power, var_tte = pw$var_tte)
+```
+
+When solving for *N* there is no such cancellation -- `n_per_arm` has been
+rounded up to a whole participant -- so that branch keeps Stata's literal form
+and reports the same very slightly inflated number Stata does.
+
+### The published 1,272
+
+Section 4.1.3 of the paper notes that powering for a fraction *p* of a
+previously observed effect scales *N* by *p*<sup>-2</sup>, and quotes 1,272 for
+*p* = 0.5 by multiplying 318 by 4. That multiplies an already-`ceiling()`-rounded
+*N*, which magnifies the rounding. Rounding last gives 1,266:
+
+```{r published}
+ss3 <- slope_sample_size(pars3, trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)),
+                         target = "observed")
+p <- 0.5
+c(paper   = ss3$n * 4,
+  rounded_last = 2 * ceiling((qnorm(1 - ss3$alpha / 2) + qnorm(ss3$power))^2 /
+                             (p * ss3$effect_size)^2))
+```
+
+The test suite pins *both* numbers and asserts the gap is always upward and
+bounded by *p*<sup>-2</sup> per arm. The paper's figure is not silently
+corrected, and not silently accepted as the right answer either. Recruiting 1,272
+is not wrong, merely a rounding either way from the same calculation.
+
+## Things that look like differences and are not
+
+Recorded because they are the ones a careful reader re-derives otherwise. Each
+was settled by *running* Stata, not by reading it harder.
+
+* **The dropout-total guard.** Stata accumulates by repeated subtraction, and
+  `1 - 0.3 - 0.3 - 0.4` is `-5.6e-17` in double precision, so
+  `dropouts(0.3 0.3 0.4)` looks certain to trip the "total exceeds 1" guard. It
+  does not: a Stata local round-trips through a decimal *string*, so `1 - 0.3`
+  stores as `.7` and the residue lands on exactly 0. Stata accepts it and returns
+  N = 1418, which is what this port returns. The port's `1e-8` tolerance
+  *restates* that behaviour rather than repairing it -- it is still the right way
+  to write the check in R, where `sum()` does carry the full double, but it fixes
+  nothing, and Stata's guard still fires correctly on a total genuinely over 1.
+* **`dropouts()` is validated before the fit in Stata too.** The length and total
+  guards sit in the syntax block, well before the `mixed` call. The port briefly
+  had this backwards and it was corrected -- restoring Stata's ordering, not
+  improving on it.
+* **The `sched_length` macro-name space is harmless.** Two lines of the `.ado`
+  write a trailing space inside a macro name. Stata trims it; both counters are
+  correct and the length guard fires in both directions.
+* **`exp(b13 + b14)^2` really is the cases' residual variance**, as described
+  above, not two free log-SDs.
+
+## Two things deliberately not added
+
+Not omissions by oversight -- checked against the paper and left out, because
+adding them would go beyond what Nash et al. specify.
+
+* **Unequal treatment allocation.** The two-person treatment-effect-variance
+  construction (one notional participant per arm) depends on 1:1 allocation;
+  generalising it is not implied by anything the paper computes.
+* **Intermittent (non-monotone) missingness.** Both implementations assume
+  dropout is monotone -- once a participant misses a visit they are gone. The
+  Dawson--Lagakos pattern-mixture approach the paper uses covers monotone dropout
+  only, and a participant who misses one visit and returns has no representation
+  in either language.
+
+## Where to go next
+
+* `vignette("introduction", package = "slopepower")` -- the package on its own
+  terms, with the three worked examples from section 4 of the paper.
+* `?slope_params` -- the three models in full, including what they deliberately
+  do not support.
+* `DIVERGENCES.md` in the package sources -- the same ground as this vignette,
+  written for someone auditing the port against the `.ado` file line by line,
+  with the Stata source of each item quoted.
+
+## Reference
+
+Nash, S., Morgan, K. E., Frost, C., & Mulick, A. (2021). Power and
+sample-size calculations for trials that compare slopes over time:
+Introducing the `slopepower` command. *The Stata Journal*, 21(3), 575–601.
+<https://doi.org/10.1177/1536867X211045512>
