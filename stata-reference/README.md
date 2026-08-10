@@ -160,28 +160,44 @@ No new fits: every row uses `F1-sc1` or `F1-sc0.5`, both already in grid 5, so
 the tolerance-free test joins straight on and pins all nine powers to 1e-12.
 
 **`07_open_questions_2.do`** — not a grid, and the sequel to `00`: two more
-claims in `slopepower/DIVERGENCES.md` that rest on reading the `.ado` rather
-than running it. **Not yet run.**
+claims about the `.ado` that rested on reading it rather than running it.
+**Both are now answered, and like questions 1 and 2, both came back in the
+`.ado`'s favour.**
 
 3. `slopepower.ado:259-271` checks the dropout total by repeated subtraction,
-   and `1 - .3 - .3 - .4` is `-5.551e-17` in double precision, so
-   `dropouts(.3 .3 .4)` — legal, and exactly 1 in decimal — may be rejected as
-   "Dropouts cannot exceed 100%". Whether it actually is depends on how much
-   precision a Stata local carries through each step, which the file probes
-   directly as well as through the command. `dropouts(.1 .2 .7)` lands on
-   exactly 0 and is the control; `dropouts(.5 .3 .3)` genuinely exceeds 1 and
-   must still error. This is the claim behind DIVERGENCES.md §5.
+   and `1 - 0.3 - 0.3 - 0.4` is `-5.551e-17` in double precision, so
+   `dropouts(0.3 0.3 0.4)` — legal, and exactly 1 in decimal — looked certain
+   to be rejected as "Dropouts cannot exceed 100%". **It is not.** A Stata
+   local round-trips through a decimal *string* rather than carrying the
+   double: `1 - 0.3` stores as `.7`, then `.7 - 0.3` stores as `.4`, and the
+   residue lands on exactly 0. Stata accepts the list and returns N = 1418.
+   Q3d prints the same arithmetic accumulated through locals and done in one
+   expression, and the two `%21x` values differ — that is the proof. The
+   guard still fires correctly on a total genuinely over 1
+   (`dropouts(0.5 0.3 0.3)` → 198).
+
+   This one was already answered in this directory and nobody noticed: grid 4
+   row `SUM1-exact` has run that exact call since 2026-08-04, with `rc = 0`
+   and `n = 1418`. Check the fixtures before opening a question.
 4. `slopepower.ado:196` has a lone backtick in the middle of the warning string
    for `treat()` supplied with observational data, opening a macro reference
-   that never closes. Its three siblings are well formed. The file runs the
-   call in situ, runs the well-formed sibling at `:132` for contrast, and runs
-   the offending line by itself in a throwaway one-line do-file — isolated
-   precisely so that if the unmatched backtick swallows what follows, it
-   swallows nothing that matters. This is the claim behind DIVERGENCES.md §19.
+   that never closes. Its three siblings are well formed. **Stata prints the
+   backtick as a literal character and carries on** — `_rc = 0`, N = 712,
+   identical to the well-formed sibling at `:132`. Cosmetic, and nothing
+   downstream is consumed.
 
-Both questions are cheap: four model-2 fits on `slpower1` plus some arithmetic.
-Whichever way they come out, update the affected section of `DIVERGENCES.md`
-and delete its "not put to the licence" hedge.
+   Unlike question 3 this one was genuinely open: no grid row had ever reached
+   `:196`. The `IGN-*` family in `04_edge_cases` covers `nocontvar`, `usetrt`
+   and `casecon` but not `treat()`, and `MISS-both-models`, the one row that
+   passes `treat()` to observational data, also passes `rct` and so errors at
+   `:48` first. Both findings are now pinned in
+   `slopepower/tests/testthat/test-stata-behaviour.R`.
+
+Q4c, the isolated probe, aborted on its own first run: `file write` with a
+macro-expanded backtick is rejected as "invalid syntax", which took the
+do-file down before `log close`. The expanded character is re-exposed to the
+parser, so it has to be written with `(char(96))` as a parenthesised
+expression instead. The note at Q4c says so; do not simplify it back.
 
 ## CSV layout
 

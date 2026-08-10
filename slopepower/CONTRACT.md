@@ -291,11 +291,14 @@ Warnings:
 - `abs(slope) / se(slope) < 2.5` in `slope_bootstrap()` (paper §2.6)
 
 **Floating point:** sum the dropout vector once and compare the total against 1 with a tolerance;
-never accumulate by repeated subtraction the way `slopepower.ado:265` does. `1 - 0.3 - 0.3 - 0.4`
-is `-5.551e-17`, so a bare `< 0` guard rejects `dropout = c(0.3, 0.3, 0.4)`, which is legal and
-sums to exactly 1 in decimal. `sum()` returns exactly 1 for that particular vector, so the
-tolerance is what keeps the check from depending on the order the elements arrive in, not what
-saves this example.
+do not accumulate by repeated subtraction. `1 - 0.3 - 0.3 - 0.4` is `-5.551e-17`, so a bare `< 0`
+guard would reject `dropout = c(0.3, 0.3, 0.4)`, which is legal and sums to exactly 1 in decimal.
+
+This restates Stata rather than repairing it. `slopepower.ado:265` *does* accumulate by
+subtraction, but a Stata local round-trips through a decimal string (`.7 - 0.3` stores as `.4`),
+so its residue is exactly 0 and it accepts the list too — verified, see DIVERGENCES.md "Claims
+checked and rejected". R has no such rounding, so the check has to be written this way here to
+reach the same answer.
 
 ---
 

@@ -99,11 +99,19 @@ test_that("a dropout list of the wrong length is refused, as in Stata", {
 })
 
 test_that("a dropout list summing to exactly 1 in decimal is accepted", {
-  # Stata accepts dropouts(0.3 0.3 0.4) and returns N = 1418: its running
-  # subtraction does not go negative. The R port compares with a 1e-8
-  # tolerance and reaches the same conclusion by a different route, so this is
-  # agreement rather than divergence -- worth pinning because naive
-  # accumulation makes 1 - 0.3 - 0.3 - 0.4 equal -5.6e-17.
+  # Stata accepts dropouts(0.3 0.3 0.4) and returns N = 1418 (grid 4, row
+  # SUM1-exact): its running subtraction does not go negative. The R port
+  # compares with a 1e-8 tolerance and reaches the same conclusion by a
+  # different route, so this is agreement rather than divergence -- worth
+  # pinning because naive accumulation makes 1 - 0.3 - 0.3 - 0.4 equal
+  # -5.6e-17.
+  #
+  # Why Stata's route works, since it is not obvious and was mis-stated once
+  # in DIVERGENCES.md before being probed: a Stata local round-trips through a
+  # decimal string rather than carrying the double, so `1 - 0.3' stores as
+  # ".7" and `.7 - 0.3' stores as ".4", not 0.39999999999999997. The residue
+  # lands on exactly 0. See stata-reference/07_open_questions_2.do Q3d, which
+  # prints the same arithmetic done both ways and gets different answers.
   des <- suppressWarnings(trial_design(c(0, 1, 2, 3), c(0.3, 0.3, 0.4)))
   expect_equal(sum(des$dropout), 1)
   expect_equal(des$dropout, c(0.3, 0.3, 0.4))
@@ -111,6 +119,34 @@ test_that("a dropout list summing to exactly 1 in decimal is accepted", {
                                                 c(0.25, 0.25, 0.5))))
   # Over one is refused by both: Stata's "Dropouts cannot exceed 100%", rc 198.
   expect_error(trial_design(c(0, 1, 2, 3), c(0.4, 0.4, 0.4)))
+})
+
+test_that("treat() with observational data warns and continues, as in Stata", {
+  # slopepower.ado:196 warns that treat() does not apply to observational data
+  # and carries on -- but its message string contains an unbalanced macro
+  # quote, which looked like it might abort the command instead. No grid row
+  # ever exercised it: the IGN-* family in 04_edge_cases covers nocontvar,
+  # usetrt and casecon, and the one row passing treat() to obs data also
+  # passes rct, so it errors at :48 first.
+  #
+  # Probed directly on 2026-08-10 (07_open_questions_2.do Q4a): Stata prints
+  # the backtick as a literal character and continues, _rc = 0, N = 712 --
+  # identical to the well-formed sibling at :132 and to the same call with no
+  # treat() at all. So the port's warn-and-continue is parity.
+  expect_warning(
+    res <- slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
+                      obs = TRUE, nocontrols = TRUE, treat = "id",
+                      effectiveness = 0.33),
+    "treat")
+  expect_equal(res$n, 712)
+
+  # And the well-formed sibling, :132, which Stata answers the same way.
+  expect_warning(
+    res2 <- slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
+                       obs = TRUE, nocontrols = TRUE, casecon = "id",
+                       effectiveness = 0.33),
+    "casecon")
+  expect_equal(res2$n, 712)
 })
 
 test_that("everyone dropping out at the first visit is an error, not a number", {

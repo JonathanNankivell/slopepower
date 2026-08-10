@@ -39,20 +39,16 @@ warn_unused_arg <- function(value, condition, off_value, message, context) {
 #'
 #' @section Differences from the Stata command:
 #'
-#' The interface is faithful, but two defects in the original are deliberately
-#' not reproduced. The check that dropout proportions do not exceed 100% is
-#' applied to their sum with a tolerance; the original accumulates by repeated
-#' subtraction, and `1 - .3 - .3 - .4` is `-5.551e-17`, so `dropouts(.3 .3 .4)`
-#' trips a bare `< 0` guard despite summing to exactly 1. And the original's
-#' warning for `treat()` given with observational data contains an unbalanced
-#' macro quote, so what it prints -- or whether it aborts where a warning was
-#' meant -- is anyone's guess; here it warns, as intended.
-#'
-#' The `dropouts` length check is *not* one of them: the counter driving it in
-#' the Stata code is built with a space inside a macro name, which looks like it
-#' would make the guard dead, but Stata trims the name and the guard fires
-#' correctly. This wrapper enforces the same rule, and enforces it before the
-#' mixed model is fitted, as the original does.
+#' The interface is faithful, and more faithful than it first appears. Three
+#' places in the original look like defects this wrapper ought to repair, and
+#' all three were probed under a Stata licence and came back clean: the
+#' `dropouts` length guard fires correctly despite the space inside a macro
+#' name that drives it; the dropout-total guard accepts a list summing to
+#' exactly 1, because a Stata local rounds through a decimal string where a
+#' double would not; and the unbalanced macro quote in the `treat()`-with-
+#' observational-data warning is cosmetic, printing a stray backtick and
+#' carrying on. This wrapper matches all three, and validates `dropouts`
+#' before the mixed model is fitted, as the original does.
 #'
 #' The `schedule` restriction to ascending integers of at least 1 is also lifted,
 #' since this port builds the covariance matrix at the requested times rather than

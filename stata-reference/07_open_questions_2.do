@@ -1,18 +1,25 @@
 *! Two more questions about slopepower.ado that only a Stata licence can settle.
 *!
-*! Both are recorded as unverified in slopepower/DIVERGENCES.md -- question 3
-*! in section 5 (dropout sum tolerance), question 4 in section 19 (the
-*! warn-and-reset family). Neither produces a grid; like 00, this file writes a
-*! log to read by eye.
+*! BOTH ARE NOW ANSWERED (2026-08-10), and like questions 1 and 2 in 00, both
+*! came back in the .ado's favour. See the per-question notes below. The file
+*! is kept because it is the evidence, and it re-checks in a few seconds.
+*!
+*!   3. The dropout-total guard does NOT reject a legal list. Stata's locals
+*!      round-trip through a decimal string, so the subtractive residue is
+*!      exactly 0, not -5.551e-17. dropouts(0.3 0.3 0.4) is accepted and gives
+*!      N = 1418, which is what the R port gives. No divergence.
+*!   4. The unbalanced macro quote at :196 prints the backtick literally and
+*!      carries on: _rc = 0, N = 712, same as the well-formed sibling at :132.
+*!      Answer (a) below. The R port's warn-and-continue is faithful.
 *!
 *! Run with:  do 07_open_questions_2.do
-*! Then paste the whole log into the R port's notes and update DIVERGENCES.md.
 *!
-*! Question 4 deliberately runs a malformed line. It is written to a temporary
+*! Question 4c deliberately runs a malformed line. It is written to a one-line
 *! do-file and executed from there precisely so that, if the unbalanced macro
-*! quote swallows what follows it, the damage is confined to that one-line file
-*! rather than to the rest of this one. See the note in README.md about the
-*! first run of 00 dying on a stray backtick.
+*! quote swallows what follows it, the damage is confined to that file rather
+*! than to the rest of this one. See the note in README.md about the first run
+*! of 00 dying on a stray backtick -- and the note at Q4c itself, which did
+*! exactly that on ITS first run, for a reason worth reading.
 
 clear all
 set more off
@@ -48,9 +55,27 @@ log using "07_open_questions_2.log", replace text
 * no defect here at all.
 *
 * This matters because the R port sums once and compares against 1 with a 1e-8
-* tolerance, and DIVERGENCES.md section 5 claims that as a divergence on the
-* strength of reading the source, not of running it. It is the only claim in
-* that document resting on unverified behaviour.
+* tolerance, and DIVERGENCES.md claimed that as a divergence on the strength of
+* reading the source, not of running it.
+*
+* ANSWERED, 2026-08-10: there is no defect. Stata ACCEPTS dropouts(0.3 0.3 0.4)
+* and returns N = 1418, the same as the R port.
+*
+* Q3d below is the mechanism, and it is the interesting part. A Stata local
+* does not carry the full double from step to step -- it round-trips through a
+* decimal string representation:
+*
+*     1   - 0.3  stored as ".7"
+*     0.7 - 0.3  stored as ".4"    <- the double here is 0.39999999999999997
+*     0.4 - 0.4  stored as "0"
+*
+* so the accumulated residue is exactly 0, while the same arithmetic in one
+* expression is -5.551e-17. The two %21x lines printed by Q3d differ for that
+* reason: +0.0000000000000X-3ff against -1.0000000000000X-036. The rounding
+* that looks like sloppiness is what makes the guard safe.
+*
+* So the R port's tolerance restates Stata rather than repairing it, and
+* DIVERGENCES.md now records this under "Claims checked and rejected".
 *
 * What the R port does with the same three calls, for comparison:
 *
@@ -151,6 +176,16 @@ display as text _n "  0.1 0.2 0.7 residue: " as result %21x `alt' ///
 * The R port warns and continues, returning the model-2 answer: for the call
 * below, N = 712 (the paper's p.588 result, which does not involve treat() at
 * all -- the point is that the ignored option leaves it unchanged).
+*
+* ANSWERED, 2026-08-10: answer (a). Stata prints the stray backtick as a
+* literal character --
+*
+*     Treatment can only be specified with RCT data<BT>. Treatment variable will be ignored.
+*
+* -- and carries straight on: _rc = 0, N = 712, identical to the well-formed
+* sibling in Q4b. So the malformed string is cosmetic, nothing downstream is
+* consumed, and the R port's warn-and-continue is a faithful reading rather
+* than a repair.
 * ---------------------------------------------------------------------------
 
 use "`data'/slpower1.dta", clear
@@ -178,10 +213,28 @@ display as text "(Expect 0 with N = 712 and a WARNING line. This is what :196"
 display as text " is trying to do; Q4a says whether it manages it.)"
 
 * The isolated probe: the offending line on its own, followed by a sentinel.
-* Written to a temp file at run time so that this file never itself contains
-* an unmatched backtick -- char(96) is built into the string by `file write',
-* so what lands on disk is byte-for-byte the ado's line and what sits in this
-* do-file is a balanced macro reference.
+* Written to a one-line do-file at run time so that THIS file never itself
+* contains an unmatched backtick.
+*
+* Q4a above has already settled the question -- the command completed and
+* returned N = 712, so nothing downstream was consumed and answer (c) is out.
+* This is kept as the direct demonstration, and as a warning.
+*
+* On its first run it was written as
+*
+*     local bt = char(96)
+*     file write `fh' `"... RCT data`bt'. Treatment ..."' _n
+*
+* on the theory that macro expansion is a single left-to-right pass, so a
+* backtick substituted INTO the line would land as inert text. It does not:
+* Stata rejected the line with "invalid syntax", r(198), which aborted the
+* do-file before `log close' and left a zero-byte probe behind. The expanded
+* backtick is re-exposed to the parser.
+*
+* The fix is to keep the character out of the command text altogether.
+* `file write' evaluates a parenthesised argument as an expression, so
+* (char(96)) writes a backtick without one ever appearing in the line Stata
+* has to parse. Do not "simplify" this back into the string.
 display as text _n "{hline 70}"
 display as text "Q4c: the offending line alone, in a throwaway do-file"
 display as text "{hline 70}"
@@ -189,12 +242,12 @@ display as text "{hline 70}"
 * Named, not a tempfile: `do' assumes a .do suffix when the name it is given
 * has none, so a tempfile -- which never has one -- would send it looking for a
 * file that does not exist. Erased at the end instead.
-local bt = char(96)
 local probe "_q4c_probe.do"
 tempname fh
 capture erase "`probe'"
 file open `fh' using "`probe'", write text replace
-file write `fh' `"display as error "Treatment can only be specified with RCT data`bt'. Treatment variable will be ignored.""' _n
+file write `fh' `"display as error "Treatment can only be specified with RCT data"' ///
+                (char(96)) `". Treatment variable will be ignored.""' _n
 file write `fh' `"display as text "SENTINEL: the line after the malformed one still ran.""' _n
 file close `fh'
 

@@ -11,9 +11,10 @@ bugs; those are noted where relevant but are not divergences.
 
 Claims that turn out **not** to be divergences are recorded here too rather
 than quietly dropped, because the reason they look like one is exactly what a
-future reader will re-derive otherwise: see §11 on the input guards Stata
-already has, and the preamble to §5 on the one unverified claim left in this
-document.
+future reader will re-derive otherwise: see §10 on the input guards Stata
+already has, and "Claims checked and rejected" at the end for the four that
+were probed under a licence and came back in the `.ado`'s favour. Nothing in
+this document now rests on unverified behaviour.
 
 Each entry gives the Stata original, what the R port does instead, and why.
 
@@ -148,49 +149,7 @@ calls verbatim.
 
 ---
 
-## 5. Dropout sum tolerance
-
-**Stata** checks only that dropouts don't exceed 100%, via subtraction with
-no tolerance:
-
-```stata
-local dfrac_complete = `dfrac_complete' - `fr'
-if `dfrac_complete' < 0 {
-    display as error _n "Dropouts cannot exceed 100%"
-    exit 198
-}
-```
-
-**R** sums first and compares the total against 1 with an explicit `1e-8`
-tolerance (`DROPOUT_TOL`, `utils.R`), rather than accumulating by repeated
-subtraction. Repeated subtraction is what makes the Stata form fragile:
-`1 - 0.3 - 0.3 - 0.4` evaluates to `-5.551e-17` in double precision and would
-trip a bare `< 0` guard, though `c(0.3, 0.3, 0.4)` is a legal dropout vector
-summing to exactly 1 in decimal.
-
-Two caveats, both worth stating because this is the one entry in the document
-resting on unverified behaviour.
-
-R's `sum()` returns exactly 1 for that vector, so the tolerance is not what
-rescues *this* example. Nor is it easy to find an example it does rescue: over
-every 2- and 3-element partition of 1 into hundredths, and 200,000 random
-partitions into 2–6 parts of hundredths or thousandths, `sum()` never once
-exceeded 1. The tolerance is therefore defensive — it stops the bound
-depending on summation order and on how the caller happened to spell the
-proportions — rather than load-bearing for any input a user is likely to
-type. It is the *subtractive* form that is fragile, and R does not use it.
-
-And whether Stata's local-macro arithmetic really rejects `dropouts(.3 .3 .4)`
-was never put to the licence, unlike the two claims in the preamble; what is
-recorded here is the *form* of the check, which is plain in the source either
-way. `stata-reference/07_open_questions_2.do` question 3 settles it — written,
-not yet run. If Stata round-trips its locals through a shorter string
-representation the residue is exactly 0, there is no defect here, and this
-section becomes a restatement rather than a divergence.
-
----
-
-## 6. Cumulative dropout is a first-class input option
+## 5. Cumulative dropout is a first-class input option
 
 **Stata** only accepts incremental dropout fractions (proportion whose last
 attended visit is visit `i`). Converting from a cumulative attrition curve
@@ -210,7 +169,7 @@ always incremental regardless of which form was supplied.
 
 ---
 
-## 7. `dropout_rate()` — a per-time-unit rate, expanded per schedule
+## 6. `dropout_rate()` — a per-time-unit rate, expanded per schedule
 
 **Stata** has no equivalent: a "5% per year over 3 years" dropout has to be
 manually converted to `dropouts(0.15)`, `dropouts(.05 .05 .05)`, or
@@ -226,7 +185,7 @@ hand for `dropouts()`, so it is not a change to the statistical method.
 
 ---
 
-## 8. Stage one (model fit) and stage two (power/N) are separated; grids fit once
+## 7. Stage one (model fit) and stage two (power/N) are separated; grids fit once
 
 **Stata** re-runs the whole `mixed` model from scratch for every row of a
 comparison table — Table 1 of the paper (nine designs) means nine REML fits
@@ -250,7 +209,7 @@ model fit is mandatory there.
 
 ---
 
-## 9. Variance components extracted by name, not by matrix position
+## 8. Variance components extracted by name, not by matrix position
 
 **Stata** pulls fixed and random effects out of `e(b)`, a 1×`k` matrix, by
 hard-coded column index, and the index shifts between the three models and
@@ -284,7 +243,7 @@ position.
 
 ---
 
-## 10. `slope_params`/`trial_design` invariants are re-checked at every use, not only at construction
+## 9. `slope_params`/`trial_design` invariants are re-checked at every use, not only at construction
 
 **Stata** validates once, in the `syntax`/quietly block at the top of the
 command, coupled to that specific call's arguments. There is no persisted
@@ -302,7 +261,7 @@ construction would escape the baseline-dropout warning entirely.
 
 ---
 
-## 11. Errors instead of Stata's `N = .` / silent missing result
+## 10. Errors instead of Stata's `N = .` / silent missing result
 
 **Stata** returns a missing value and prints nothing further when the slope
 difference is zero (undefined sample size) — the command completes as if
@@ -324,7 +283,7 @@ if (slope_difference == 0) {
 The same holds for a singular information matrix (`treatment_effect_var()`),
 a non-positive-definite implied covariance (`sigma_at()`), a non-PD
 random-effects G matrix on a hand-built `slope_params` (`check_params()`, see
-§10), and a missing `n` in `slope_power()`/`slope_power_grid()` — where Stata
+§9), and a missing `n` in `slope_power()`/`slope_power_grid()` — where Stata
 does not fail at all but silently switches to solving for sample size at 80%
 power.
 
@@ -336,7 +295,7 @@ restates those checks; it does not add them.
 
 ---
 
-## 12. `common_variance` is a first-class three-way argument, not a two-state flag
+## 11. `common_variance` is a first-class three-way argument, not a two-state flag
 
 **Stata**'s `nocontvar` is a bare flag: absent means "fit the full
 uns-covariance random-effects block for controls", present means "reduce
@@ -368,7 +327,7 @@ to read the error and retype the command with the flag.
 
 ---
 
-## 13. `target = "observed"` vs. Stata's `usetrt`, kept as a named enum
+## 12. `target = "observed"` vs. Stata's `usetrt`, kept as a named enum
 
 **Stata** encodes "which slope is the reference" as a bare flag (`usetrt`)
 whose meaning is documented only in a comment, and which silently sets
@@ -410,7 +369,7 @@ which is `.ado:648`'s missing value faithfully preserved, and
 
 ---
 
-## 14. Fields named for what they are, not their column position or Stata option name
+## 13. Fields named for what they are, not their column position or Stata option name
 
 **Stata** names its return scalars after the model-specific role
 (`slope_controls`, `slope_cases`, `slope_untreated`, `slope_treated`), so the
@@ -435,7 +394,7 @@ itself carrying the model identity.
 
 ---
 
-## 15. Warnings are `warning()`/`message()` conditions, classed and deduplicated, not `display as error`
+## 14. Warnings are `warning()`/`message()` conditions, classed and deduplicated, not `display as error`
 
 **Stata** prints every advisory the same way (`dis as error "WARNING: ..."`),
 indistinguishable at the call site from a genuine error except by reading the
@@ -457,7 +416,7 @@ rather than a warning — are ordinary `stop()`s and `warning()`s.
 
 ---
 
-## 16. Time-origin shift is a `message()`, is optional, and is recorded on the object
+## 15. Time-origin shift is a `message()`, is optional, and is recorded on the object
 
 **Stata** always shifts each subject's time to start at 0 and reports it as
 a same-severity `WARNING` line mixed in with genuine errors:
@@ -485,7 +444,7 @@ default, `origin = "subject"`, is Stata's behaviour.
 
 ---
 
-## 17. Bootstrap resampling scheme is fixed by construction, not four independent options
+## 16. Bootstrap resampling scheme is fixed by construction, not four independent options
 
 **Stata**'s bootstrap recipe (documented in the paper, §2.6 and §4.1.2, not
 built into the command) requires the user to correctly assemble `cluster()`,
@@ -505,7 +464,7 @@ side leaves to the user to remember to apply by eye.
 
 ---
 
-## 18. `slope_var()`/Σ helpers are pure functions of `(params, visits)`, not tied to data in memory
+## 17. `slope_var()`/Σ helpers are pure functions of `(params, visits)`, not tied to data in memory
 
 **Stata**'s whole calculation is a `program` operating on "the data
 currently in memory", per the file's own header comment (*"The data in
@@ -523,7 +482,7 @@ bookkeeping.
 
 ---
 
-## 19. `effectiveness` / `usetrt` mutual exclusivity is a hard error, not a warning that then proceeds
+## 18. `effectiveness` / `usetrt` mutual exclusivity is a hard error, not a warning that then proceeds
 
 **Stata** warns and continues when incompatible options are combined at the
 wrong model (e.g. `casecon` given for a non-Model-1 call), but for the
@@ -544,30 +503,27 @@ wrong model, `usetrt` requested for non-RCT data) into one shared helper
 "does this option apply to this model" logic and its wording live in one
 place rather than being copy-pasted per option as in the `.ado` file.
 
-One member of that family is not reproduced faithfully, on purpose.
-`.ado:196`, the warning for `treat()` supplied with observational data,
-reads
+One member of that family carries a typo of its own. `.ado:196`, the warning
+for `treat()` supplied with observational data, reads
 
 ```stata
 dis as error "Treatment can only be specified with RCT data`. Treatment variable will be ignored."
 ```
 
-— with an unbalanced macro quote in the middle of the string. What Stata
-actually does with that has not been put to the licence; it is at best a
-mangled message and at worst an abort where the surrounding code plainly
-intends a warning. `slopepower()` warns and continues, which is what the
+— with an unbalanced macro quote in the middle of the string, where its three
+siblings have none. `slopepower()` warns and continues, which is what the
 author meant.
 
-`stata-reference/07_open_questions_2.do` question 4 settles it — written, not
-yet run. It runs the call in situ, runs the well-formed sibling at `.ado:132`
-for contrast, and runs the offending line alone in a throwaway do-file to
-bound how far the unmatched backtick reaches. If it turns out to abort, this
-stops being a note about the author's intent and becomes a behavioural
-divergence in its own right.
+**Settled, 2026-08-10** (`stata-reference/07_open_questions_2.do`, question
+4): Stata prints the backtick as a literal character and carries straight on
+— `_rc = 0`, N = 712, identical to the well-formed sibling at `.ado:132`. So
+the blemish is cosmetic, nothing downstream is consumed, and `slopepower()`'s
+warn-and-continue is a faithful reading of the original rather than a repair
+of it. The only difference left is the stray character in the message text.
 
 ---
 
-## 20. `var_tte` under dropout is back-solved in a form that survives saturated power
+## 19. `var_tte` under dropout is back-solved in a form that survives saturated power
 
 **Stata** reports `var_tte` as `FSTAR[3,3]` when there is no dropout, and
 otherwise back-solves it by inverting the sample-size formula, because with
@@ -604,7 +560,7 @@ included, and reports the same very slightly inflated number Stata does.
 
 ---
 
-## 21. Convergence control is fixed and inspectable, not an option
+## 20. Convergence control is fixed and inspectable, not an option
 
 **Stata** exposes `ITERate(integer 16000)` and threads it into every `mixed`
 call, leaving the optimiser otherwise at its defaults.
@@ -628,7 +584,7 @@ comparable rows exactly.
 
 ---
 
-## 22. Two features Stata doesn't have were deliberately **not** added
+## 21. Two features Stata doesn't have were deliberately **not** added
 
 Not divergences by omission — checked against the paper and left out on
 purpose, because adding them would go beyond what Nash et al. specify:
@@ -647,7 +603,7 @@ purpose, because adding them would go beyond what Nash et al. specify:
 
 ---
 
-## 23. The published "×4 shortcut" figure (1,272) is reproduced *and* corrected, with both numbers kept
+## 22. The published "×4 shortcut" figure (1,272) is reproduced *and* corrected, with both numbers kept
 
 Not a code-level Stata-vs-R difference (this is about a number quoted in the
 paper's prose, not one of the paper's 15 pinned results), but worth
@@ -666,7 +622,25 @@ accept it as the "right" answer either.
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded
-so they are not "rediscovered" a third time:
+so they are not "rediscovered" a third time. Every one was settled by running
+Stata, not by reading it harder; the evidence is in `stata-reference/`.
+
+- **The dropout-total guard does not reject a legal list.** `.ado:265`
+  accumulates by repeated subtraction, and `1 - 0.3 - 0.3 - 0.4` is
+  `-5.551e-17` as a double, so `dropouts(0.3 0.3 0.4)` — legal, and exactly 1
+  in decimal — looked certain to trip the `< 0` guard at `:268`. It does not.
+  A Stata local round-trips through a decimal *string* rather than carrying
+  the double: `1 - 0.3` stores as `.7`, then `.7 - 0.3` stores as `.4`, not
+  `0.39999999999999997`, and the residue lands on exactly 0. Stata accepts
+  the list and returns N = 1418, which is what this port returns.
+  (`07_open_questions_2.do` Q3; the two `%21x` lines it prints differ, which
+  is the whole proof.) The port's `1e-8` tolerance therefore *restates*
+  Stata's behaviour rather than repairing it. It is still the right way to
+  write the check in R, where `sum()` does carry the full double — but it
+  fixes nothing, and the guard at `:268` still fires correctly on a total
+  genuinely over 1 (`dropouts(0.5 0.3 0.3)` → `_rc = 198`).
+- **The unbalanced macro quote at `.ado:196` is cosmetic.** It prints the
+  backtick literally and carries on; see §18.
 
 - **`dropouts()` validation happens before the fit in Stata too.** The
   length and total guards are at `.ado:268` and `:279`, inside the
@@ -679,4 +653,4 @@ so they are not "rediscovered" a third time:
   write `` `sched_length ' `` with a trailing space inside the macro name.
   Stata trims it, both counters are correct, and the guard at `:279` fires on
   a mismatched list in both directions (`stata-reference/00_open_questions.log`).
-- **`exp(b13+b14)^2` really is the cases' residual variance.** See §9.
+- **`exp(b13+b14)^2` really is the cases' residual variance.** See §8.

@@ -67,13 +67,15 @@ test_that("cumulative dropout cannot exceed 1", {
 # --- the Stata-form checks this layer restates or repairs --------------------
 
 test_that("dropout summing to exactly 1 is accepted", {
-  # slopepower.ado:265 accumulates by repeated subtraction, and 1 - .3 - .3 - .4
-  # is -5.551e-17, so a bare `< 0` guard rejects c(0.3, 0.3, 0.4) -- legal, and
-  # exactly 1 in decimal -- as "Dropouts cannot exceed 100%". Summing once and
-  # comparing against a tolerance is what this layer does instead. (Whether
-  # Stata's local-macro arithmetic really trips there was never put to the
-  # licence; the divergence pinned here is the form of the check. See
-  # DIVERGENCES.md section 5.)
+  # 1 - .3 - .3 - .4 is -5.551e-17, so a bare `< 0` guard would reject
+  # c(0.3, 0.3, 0.4) -- legal, and exactly 1 in decimal. Summing once and
+  # comparing against a tolerance is what this layer does instead.
+  #
+  # Stata reaches the same answer by a different route, which is why this is a
+  # restatement and not a repair: slopepower.ado:265 does accumulate by
+  # subtraction, but a Stata local round-trips through a decimal string (.7 -
+  # .3 stores as ".4"), so its residue is exactly 0. It accepts the list and
+  # returns N = 1418 -- see the end-to-end pin in test-stata-behaviour.R.
   d <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = c(0.3, 0.3, 0.4)))
   expect_equal(sum(d$dropout), 1)
   expect_equal(1 - sum(d$dropout), 0)
