@@ -413,10 +413,16 @@ Stata licence. See that directory's README for how to regenerate.
 | Fitted components vs Stata's | 1e-3 to 5e-2 relative | how closely `nlme::lme` and `mixed` converge |
 | End to end | dominated by the above | nothing extra; it cannot be tighter than the fits agree |
 
-The middle row is calibrated to `nlme`'s **default** control settings. Tightening `lmeControl`
-closes most of the gap — `var_tte` on slpower1 moves from 8.36388645 to 8.36394022 against Stata's
-8.36394172 — but that changes the package's behaviour for every user to make a test look better.
-If those defaults are ever tightened, retighten these tolerances with them.
+The middle row is calibrated to the port **as it ships** — through `slope_lme_control()`, the
+tightened control `slope_params()` passes to every `lme()` call — not to `nlme`'s stock defaults.
+Tightening *beyond* `slope_lme_control()` closes most of the remaining gap — `var_tte` on slpower1
+at visits `0:3` moves from 8.36388645 to 8.36394022 against Stata's 8.36394172 — but that changes
+the package's behaviour for every user to make a test look better, so it is deliberately not done.
+(This section used to say the tolerances were calibrated to `nlme`'s defaults and cited 8.36388645
+as the stock figure; both were wrong — 8.36388645 is what `slope_lme_control()` gives, and `nlme`'s
+untouched defaults give 8.36399564 on that fit, about as far from Stata on the other side. Nothing
+here is calibrated to stock `nlme`. Corrected 2026-08-10.) If `slope_lme_control()` is ever
+tightened further, retighten these tolerances with it.
 
 Each quantity is checked with a loose bound on the worst row and a tight bound on the median: the
 maxima are dominated by fits that barely identify a random slope (two timepoints per subject, or
