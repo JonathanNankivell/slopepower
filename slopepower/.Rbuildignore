@@ -1,4 +1,5 @@
 ^CONTRACT\.md$
+^DIVERGENCES\.md$
 ^data-raw$
 ^\.claude$
 ^slopepower_.*\.tar\.gz$

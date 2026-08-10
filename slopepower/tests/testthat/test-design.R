@@ -64,12 +64,16 @@ test_that("cumulative dropout cannot exceed 1", {
   )
 })
 
-# --- the three Stata defects this layer fixes -------------------------------
+# --- the Stata-form checks this layer restates or repairs --------------------
 
-test_that("dropout summing to exactly 1 is accepted (Stata rejects it)", {
-  # slopepower.ado:268 accumulates by repeated subtraction, so c(0.3, 0.3, 0.4)
-  # -- legal, and exactly 1 in decimal -- reaches -6.7e-17 and is rejected as
-  # "Dropouts cannot exceed 100%". Summing first against a tolerance fixes it.
+test_that("dropout summing to exactly 1 is accepted", {
+  # slopepower.ado:265 accumulates by repeated subtraction, and 1 - .3 - .3 - .4
+  # is -5.551e-17, so a bare `< 0` guard rejects c(0.3, 0.3, 0.4) -- legal, and
+  # exactly 1 in decimal -- as "Dropouts cannot exceed 100%". Summing once and
+  # comparing against a tolerance is what this layer does instead. (Whether
+  # Stata's local-macro arithmetic really trips there was never put to the
+  # licence; the divergence pinned here is the form of the check. See
+  # DIVERGENCES.md section 5.)
   d <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = c(0.3, 0.3, 0.4)))
   expect_equal(sum(d$dropout), 1)
   expect_equal(1 - sum(d$dropout), 0)
@@ -77,8 +81,12 @@ test_that("dropout summing to exactly 1 is accepted (Stata rejects it)", {
 
 test_that("a dropout vector of the wrong length errors", {
   # slopepower.ado:239,276 build the length counters with a space inside the
-  # macro name; the audit could not rule out that the guard at :279 is vacuous,
-  # in which case an over-long list silently inflates N with no warning.
+  # macro name, which looked like it would make the guard at :279 dead code.
+  # It does not: Stata trims the name and the guard fires on a list that is
+  # short or long (stata-reference/00_open_questions.log, and the pin in
+  # test-stata-behaviour.R). So this restates Stata's check rather than
+  # repairing it -- but it is the check every stage-two path depends on, so it
+  # is pinned here too.
   expect_error(
     trial_design(c(0, 1, 2), dropout = c(0.05, 0.05, 0.05)),
     "one element per follow-up visit"

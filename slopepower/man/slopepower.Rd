@@ -94,15 +94,20 @@ argument was left out.
 \section{Differences from the Stata command}{
 
 
-The interface is faithful, but three defects in the original are deliberately
-not reproduced. The \code{dropouts} length check is enforced here; in the Stata code
-the counter that drives it is built with a malformed macro reference, and an
-over-long list can silently reduce the completer weight and inflate the
-estimated sample size. The check that dropout proportions do not exceed 100\% is
-applied with a tolerance; the original accumulates by repeated subtraction, so
-\verb{dropouts(0.3 0.3 0.4)} fails despite summing to exactly 1. And a malformed
-string in the original aborts the command instead of warning when \code{treat()} is
-given with observational data; here it warns, as intended.
+The interface is faithful, but two defects in the original are deliberately
+not reproduced. The check that dropout proportions do not exceed 100\% is
+applied to their sum with a tolerance; the original accumulates by repeated
+subtraction, and \code{1 - .3 - .3 - .4} is \code{-5.551e-17}, so \verb{dropouts(.3 .3 .4)}
+trips a bare \verb{< 0} guard despite summing to exactly 1. And the original's
+warning for \code{treat()} given with observational data contains an unbalanced
+macro quote, so what it prints -- or whether it aborts where a warning was
+meant -- is anyone's guess; here it warns, as intended.
+
+The \code{dropouts} length check is \emph{not} one of them: the counter driving it in
+the Stata code is built with a space inside a macro name, which looks like it
+would make the guard dead, but Stata trims the name and the guard fires
+correctly. This wrapper enforces the same rule, and enforces it before the
+mixed model is fitted, as the original does.
 
 The \code{schedule} restriction to ascending integers of at least 1 is also lifted,
 since this port builds the covariance matrix at the requested times rather than

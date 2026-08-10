@@ -290,8 +290,12 @@ Warnings:
 - any subject's time origin had to be shifted (`slope_params()`)
 - `abs(slope) / se(slope) < 2.5` in `slope_bootstrap()` (paper §2.6)
 
-**Floating point:** compare dropout sums with a tolerance. `dropout = c(0.3, 0.3, 0.4)` sums to
-exactly 1 in decimal and must be accepted; naive accumulation makes it `-6.7e-17`.
+**Floating point:** sum the dropout vector once and compare the total against 1 with a tolerance;
+never accumulate by repeated subtraction the way `slopepower.ado:265` does. `1 - 0.3 - 0.3 - 0.4`
+is `-5.551e-17`, so a bare `< 0` guard rejects `dropout = c(0.3, 0.3, 0.4)`, which is legal and
+sums to exactly 1 in decimal. `sum()` returns exactly 1 for that particular vector, so the
+tolerance is what keeps the check from depending on the order the elements arrive in, not what
+saves this example.
 
 ---
 
