@@ -225,6 +225,33 @@ Both return one row per visits × dropout combination, with identical columns. U
 different numbers of visits, so the same withdrawal rate is expanded correctly for
 each.
 
+### The floor no design can beat
+
+Before searching, it is worth knowing what the search can possibly achieve. The
+treatment-effect variance has a greatest lower bound over *all* visit schedules,
+`2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)`, so the sample size does
+too:
+
+```r
+slope_sample_size_floor(pars, effectiveness = 0.33)   # the smallest N any design could need
+slope_var_floor(pars)                                 # the limiting s*^2 behind it
+
+# Or, for the settings of a result you already have:
+ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
+slope_sample_size_floor(ss)
+```
+
+Neither takes a visit schedule, because neither depends on one — and dropout can
+only push the requirement up, so the bound covers designs with withdrawal too. If
+the floor is already unaffordable, the visit schedule is not what needs to change.
+The result inherits from `slope_result`, so its `as.data.frame()` row binds in
+alongside the grid's, marked `solve_for = "n_floor"`.
+
+The bound is approached only as the schedule becomes both long *and* dense;
+lengthening a two-visit trial bottoms out higher, at
+`2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`. The
+`what-is-s-star` vignette derives all of this.
+
 ## Uncertainty in the stage-one estimates
 
 ```r
@@ -269,7 +296,7 @@ published slopes.
 
 ```r
 browseVignettes("slopepower")
-vignette("harmful-previous-trial", package = "slopepower")
+vignette("introduction", package = "slopepower")
 ```
 
 Both need the package to have been installed *with* its vignettes — see
@@ -277,7 +304,10 @@ Both need the package to have been installed *with* its vignettes — see
 
 | | topic |
 |---|---|
+| `introduction` | A tour of the three stage-one situations `slope_params()` handles, worked through the three example datasets, ending in a full sample-size and power calculation |
+| `from-stata` | A migration guide for existing Stata `slopepower` users: what maps directly, what changed, and what to watch for |
 | `harmful-previous-trial` | What to reuse from a trial in which the treatment made things worse, why `target = "observed"` is the wrong tool there, and how much of the resulting sample size is bias rather than signal |
+| `what-is-s-star` | What the "two-person trial" standard error actually is, why two is the minimum and not an approximation, the `s*/sqrt(N)` scaling derived rather than asserted, and a closed form that yields a floor on sample size no visit schedule can beat |
 
 Vignettes are `rmarkdown::html_vignette`, so building them needs **pandoc** on
 `PATH` — the flake's dev shell provides it. They set `math_method: mathml`, which
@@ -286,7 +316,8 @@ LaTeX as raw text and inject a loader that fetches MathJax from
 `mathjax.rstudio.com` when the page is opened, so the equations would only render
 online.
 `harmful-previous-trial` runs a small Monte Carlo study and a bootstrap, and
-takes around a minute to knit.
+takes around a minute to knit; `what-is-s-star` fits 200 mixed models to check
+the `s*/sqrt(N)` scaling empirically, and takes around 20 seconds.
 
 ## Porting existing Stata scripts
 

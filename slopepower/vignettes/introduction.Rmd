@@ -406,6 +406,9 @@ and ask what recruitment it costs.
 * `slope_params_manual()` builds a stage-one object by hand, for planning
   from numbers reported in a paper when no participant-level dataset is
   available to fit.
+* `vignette("from-stata", package = "slopepower")` is a migration guide for
+  existing Stata `slopepower` users, mapping arguments and results between
+  the two implementations.
 * `vignette("harmful-previous-trial", package = "slopepower")` is a deeper
   treatment of one case touched on above: what to reuse from a previous
   trial, and what not to, when its treatment effect cannot simply be

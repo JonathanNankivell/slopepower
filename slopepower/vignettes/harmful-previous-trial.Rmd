@@ -414,6 +414,18 @@ None of these is visible in a bootstrap interval.
    over `effectiveness` and over options A versus B. That is where the
    uncertainty actually lives.
 
+## Where to go next
+
+* `vignette("introduction", package = "slopepower")` -- the package on its own
+  terms, with the three worked examples from section 4 of the paper.
+* `vignette("from-stata", package = "slopepower")` -- a migration guide for
+  existing Stata `slopepower` users, mapping arguments and results between
+  the two implementations.
+* `?slope_params` -- the three models in full, including `target = "observed"`
+  and what it targets.
+* `slope_bootstrap()` -- the tool this vignette recommends spending the
+  sensitivity-analysis effort on instead of correcting for the bias.
+
 ## Reference
 
 Nash, S., Morgan, K. E., Frost, C., & Mulick, A. (2021). Power and sample-size

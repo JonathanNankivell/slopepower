@@ -519,6 +519,9 @@ adding them would go beyond what Nash et al. specify.
   terms, with the three worked examples from section 4 of the paper.
 * `?slope_params` -- the three models in full, including what they deliberately
   do not support.
+* `vignette("harmful-previous-trial", package = "slopepower")` -- what to reuse
+  from a trial in which the treatment made things worse, and why
+  `target = "observed"` is the wrong tool there.
 * `DIVERGENCES.md` in the package sources -- the same ground as this vignette,
   written for someone auditing the port against the `.ado` file line by line,
   with the Stata source of each item quoted.

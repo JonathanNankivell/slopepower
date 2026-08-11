@@ -1,0 +1,608 @@
+---
+title: "What s* is, and where it comes from"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{What s* is, and where it comes from}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 6)
+library(slopepower)
+```
+
+## The two sentences this vignette is about
+
+Everything `slope_sample_size()` and `slope_power()` do rests on a single
+number, \(s_*\). Section 2.2 of Nash et al. (2021) introduces it like this:
+
+> Because the matrices in (5) can get very large, we will use a simplifying
+> trick — we shall first calculate the treatment-effect standard error for a
+> two-person trial \(s_*\). Because the standard error for the treatment effect
+> from a trial with \(N\) independent subjects in each arm is \(s_*/\sqrt{N}\),
+> it follows from standard theory that the sample size required [...]
+
+That is the whole treatment. Two things are asserted and neither is shown:
+
+1. that "the treatment-effect standard error for a two-person trial" is a
+   well-defined quantity at all — a trial with one participant per arm cannot
+   estimate any of \(\sigma_a^2, \sigma_b^2, \sigma_{ab}, \sigma_\epsilon^2\),
+   so it is not obvious what standard error is meant; and
+2. that the scaling is \(s_*/\sqrt{N}\), which is attributed to "standard
+   theory" without saying which theory, whether the equality is exact or
+   asymptotic, or what it needs in order to hold.
+
+Section 2.4 then says only that the command "builds \(\Sigma\) for a two-person
+trial using (3) [...] It then calculates the standard error of the treatment
+effect for this two-person trial, \(s_*\), by using (5)."
+
+This vignette fills that in. It works entirely in the two-person case, because
+that turns out to be the whole story: everything else is one exact division.
+Along the way \(s_*\) acquires a closed form the paper never states, which makes
+several facts about trial design fall out immediately — including a floor on
+sample size that no visit schedule, however long or however dense, can get
+below.
+
+Throughout, one participant's marginal covariance matrix at visit times
+\(t = (t_0, t_1, \dots, t_m)^{\mathsf T}\) with \(t_0 = 0\) is
+
+$$\Sigma_{jk} \;=\; \sigma_a^2 \;+\; t_j t_k \sigma_b^2 \;+\; (t_j + t_k)\sigma_{ab} \;+\; [\,j = k\,]\,\sigma_\epsilon^2,$$
+
+which is `slope_sigma()`, and \(u = (1,1,\dots,1)^{\mathsf T}\).
+
+```{r params}
+pars <- slope_params_manual(
+  slope = -1.8,
+  sigma2_intercept = 100, sigma2_slope = 2,
+  sigma_cov = 5, sigma2_residual = 10
+)
+visits <- c(0, 1, 2)
+Sigma <- slope_sigma(pars, visits)
+Sigma
+slope_var(pars, visits)   # s*^2
+```
+
+## 1. What s* is not
+
+Take the phrase "the treatment-effect standard error for a two-person trial"
+literally: run a trial on two people, one per arm, fit the analysis model, read
+off the standard error. You can do this. The result is not \(s_*\).
+
+```{r literal, message = FALSE}
+library(nlme)
+set.seed(1)
+two <- data.frame(id = factor(rep(1:2, each = 3)),
+                  t  = rep(visits, 2),
+                  g  = rep(0:1, each = 3))
+two$y <- 34 - 1.8 * two$t + 0.6 * two$g * two$t + rnorm(6, 0, 3)
+
+fit2 <- lme(y ~ t + g:t, random = ~ t | id, data = two, method = "REML")
+summary(fit2)$tTable["t:g", c("Std.Error", "DF")]
+```
+
+Compare `sqrt(slope_var(pars, visits))` = `r round(sqrt(slope_var(pars, visits)), 4)`.
+The two numbers are in the same neighbourhood, but that is luck. Look at what
+the fit thinks the variance components are:
+
+```{r literal-vc}
+c(sigma2_intercept = as.numeric(VarCorr(fit2)[1, 1]),
+  sigma2_slope     = as.numeric(VarCorr(fit2)[2, 1]),
+  sigma2_residual  = as.numeric(VarCorr(fit2)[3, 1]))
+```
+
+against true values of 100, 2 and 10. With six observations and three fixed
+effects there are two residual degrees of freedom and nothing to estimate a
+covariance structure from; the reported standard error is an estimate with
+essentially no precision, and it is a different number for every seed.
+
+\(s_*\) is not that. Equation (5) of the paper is
+
+$$V(\hat\beta) = (X^{\mathsf T}\Sigma^{-1}X)^{-1},$$
+
+and the paper prefaces it with the condition that carries all the weight:
+"**provided that there is a postulated fixed value** for the variance–covariance
+matrix". \(\Sigma\) is not estimated from the two people. It is supplied — from
+stage one, by `slope_params()`, out of a previous dataset that may have had
+hundreds of participants. Given \(\Sigma\), equation (5) is not an estimate of a
+standard error; it is the exact sampling variance of a generalised-least-squares
+estimator, an algebraic function of the design and the assumed variance
+components. Nobody has to be able to fit anything.
+
+So \(s_*\) is better read as a **design constant**: the standard error that
+*would* attach to \(\hat\beta_2\) in a trial of one participant per arm, if the
+variance components were known. It is a unit of information, not a measurement.
+Its own uncertainty — the fact that stage one only estimated \(\Sigma\) — is a
+separate matter, and is what the bootstrap in section 2.6 of the paper is for.
+
+## 2. Why two people, and why one in each arm
+
+"Two-person trial" reads like an arbitrary choice of a small number. It is not
+arbitrary: two is the smallest trial in which \(\beta_2\) exists at all, and the
+allocation is forced.
+
+Information from independent participants adds. For participant \(i\) with
+design matrix \(X_i\), the contribution to \(X^{\mathsf T}\Sigma^{-1}X\) is
+\(X_i^{\mathsf T}\Sigma^{-1}X_i\), and the total is the sum over participants —
+this is just what the block-diagonal structure of the full covariance matrix
+does when you multiply it out. So ask what a *single* participant contributes.
+
+```{r ranks}
+Si <- solve(Sigma)
+X_ctrl <- cbind(1, visits, 0)        # g = 0: the interaction column is dead
+X_trt  <- cbind(1, visits, visits)   # g = 1: it duplicates the time column
+
+info <- function(X) crossprod(X, Si %*% X)
+c(control_only = qr(info(X_ctrl))$rank,
+  treated_only = qr(info(X_trt))$rank,
+  one_of_each  = qr(info(X_ctrl) + info(X_trt))$rank)
+```
+
+Each participant alone gives a rank-2 information matrix for three parameters,
+and for a different reason in each arm. A control participant has \(g_i = 0\),
+so the third column of their design matrix is identically zero: their data
+contain no information about \(\beta_2\) whatsoever. A treated participant has
+\(g_i = 1\), so their third column *equals* their second: they cannot separate
+\(\beta_1\) from \(\beta_2\), only the sum. Neither can be inverted, so neither
+alone has a treatment-effect variance.
+
+One of each is rank 3. That is the point. **Two is the minimum, and it must be
+one per arm** — not because two-person trials are interesting, but because the
+matched pair is the smallest self-contained replicate the design decomposes
+into. \(N = 2\) is where the calculation *starts*, not a small case of it.
+
+Note that a single follow-up visit is enough for this:
+
+```{r rank-one-followup}
+v1 <- c(0, 1)
+S1 <- slope_sigma(pars, v1); S1i <- solve(S1)
+qr(crossprod(cbind(1, v1, 0), S1i %*% cbind(1, v1, 0)) +
+   crossprod(cbind(1, v1, v1), S1i %*% cbind(1, v1, v1)))$rank
+```
+
+Four observations, three parameters, one residual degree of freedom — and it
+does not matter, because \(\Sigma\) is not being estimated. What *would* fail is
+a trial with a baseline visit only: then the time column is zero and there is no
+slope to compare. This is exactly why the Dawson–Lagakos stratum of
+baseline-only dropouts is discarded in `trial_design()` rather than given a
+weight.
+
+## 3. The \(\sqrt{N}\) scaling, derived
+
+Now the second assertion. Take \(N\) participants per arm, all independent, all
+on the same visit schedule. Stack them: \(X\) is the \(2N(m{+}1) \times 3\)
+matrix of their design matrices piled up, and the full covariance is
+block-diagonal with \(2N\) copies of \(\Sigma\) on the diagonal. A
+block-diagonal matrix inverts blockwise, so
+
+$$X^{\mathsf T}\Sigma_{\text{full}}^{-1}X \;=\; \sum_{i=1}^{2N} X_i^{\mathsf T}\Sigma^{-1}X_i \;=\; N\left(X_{\text{ctrl}}^{\mathsf T}\Sigma^{-1}X_{\text{ctrl}} + X_{\text{trt}}^{\mathsf T}\Sigma^{-1}X_{\text{trt}}\right) \;=\; N \, \mathcal{I}_2,$$
+
+where \(\mathcal{I}_2\) is the pair's information matrix. Every participant in
+an arm contributes the *same* matrix, because they share a schedule and a group
+indicator, so the sum is a count. Then
+
+$$V(\hat\beta) = (N\mathcal{I}_2)^{-1} = \tfrac{1}{N}\,\mathcal{I}_2^{-1}, \qquad\text{so}\qquad V(\hat\beta_2) = \frac{(\mathcal{I}_2^{-1})_{33}}{N} = \frac{s_*^2}{N}.$$
+
+That is the whole derivation. It is an **exact identity**, not an asymptotic
+approximation: scalar multiples pull straight through a matrix inverse, so no
+limit is taken and no normality is used beyond what already defines the GLS
+variance. The paper's "it follows from standard theory" is doing no work that
+these three lines do not do.
+
+There is one objection worth answering, because it is the reason the result
+looks less trivial than it is. The pairs are *not* separate analyses:
+\(\beta_0\) and \(\beta_1\) are common to everybody, so you cannot fit each pair
+on its own and average \(N\) independent estimates of \(\beta_2\). But nothing
+here does that. Information is summed across participants *before* the single
+inversion at the end, and the nuisance parameters are handled once, jointly, in
+that one inversion. It happens that the sum is \(N\mathcal I_2\), so the answer
+coincides with what naive averaging would have given. That coincidence is a
+consequence of every participant contributing an identical block; it is not a
+premise.
+
+Check it against the full \(2N(m{+}1)\)-row calculation:
+
+```{r scaling-check}
+N <- 7
+X_big <- rbind(X_ctrl[rep(1:3, N), ], X_trt[rep(1:3, N), ])
+S_big <- matrix(0, 6 * N, 6 * N)
+for (i in seq_len(2 * N)) {
+  k <- (i - 1) * 3 + 1:3
+  S_big[k, k] <- Sigma
+}
+V_full <- solve(crossprod(X_big, solve(S_big) %*% X_big))
+
+c(full_GLS = V_full[3, 3], s_star_sq_over_N = slope_var(pars, visits) / N)
+```
+
+Identical, to the last bit. The conditions this needs are worth naming, because
+each is a real restriction on what `slopepower` can be used for:
+
+* **Independence between participants.** Any further level of clustering — site,
+  therapist, family — breaks the block-diagonal structure and the sum is no
+  longer \(N\mathcal I_2\). The package has no facility for this and the
+  `DESCRIPTION` says so.
+* **A common schedule.** Every participant contributes the same \(X_i\) within
+  arm. Dropout violates this, which is why it is handled by a separate device;
+  see section 8.
+* **1:1 allocation.** \(s_*/\sqrt N\) counts \(N\) *pairs*. Under \(r{:}1\)
+  allocation the two arms contribute different counts and the pair is no longer
+  the replicate; `slope_power()` enforces an even \(n\) split evenly for exactly
+  this reason.
+* **\(\Sigma\) the same in both arms and known.** The first is the paper's model
+  assumption (variance components are constrained equal across arms in stage
+  one); the second is section 1 above.
+
+Finally, a notational trap, since it costs people a factor of two. In equation
+(6) of the paper, \(N\) is the number **per arm** — it is the \(N\) of
+\(s_*/\sqrt N\). The command's printed output labels the *total* as `N` and the
+per-arm figure as `N per arm`:
+
+```{r n-convention}
+p1 <- slope_params(sdmt ~ visit | id, data = slpower1)
+ss <- slope_sample_size(p1, c(0, 1, 2), effectiveness = 0.33)
+z  <- qnorm(0.975) + qnorm(0.8)
+c(eq6            = ceiling((z * sqrt(slope_var(p1, c(0, 1, 2))) / (0.33 * abs(p1$slope)))^2),
+  reported_n_arm = ss$n / 2,
+  reported_n     = ss$n)
+```
+
+## 4. A closed form the paper does not give
+
+The information matrix of a pair has enough structure to invert by hand. Write
+the three GLS inner products
+
+$$A = u^{\mathsf T}\Sigma^{-1}u, \qquad B = u^{\mathsf T}\Sigma^{-1}t, \qquad C = t^{\mathsf T}\Sigma^{-1}t.$$
+
+With \(X_{\text{ctrl}} = [\,u \; t \; 0\,]\) and \(X_{\text{trt}} = [\,u \; t \; t\,]\),
+
+$$\mathcal I_2 = \begin{pmatrix} A & B & 0 \\ B & C & 0 \\ 0 & 0 & 0\end{pmatrix} + \begin{pmatrix} A & B & B \\ B & C & C \\ B & C & C\end{pmatrix} = \begin{pmatrix} 2A & 2B & B \\ 2B & 2C & C \\ B & C & C\end{pmatrix}.$$
+
+The quantity we want is \((\mathcal I_2^{-1})_{33}\), which is the reciprocal of
+the Schur complement of the leading \(2\times 2\) block:
+
+$$s_*^{-2} \;=\; C - \begin{pmatrix} B & C\end{pmatrix}\begin{pmatrix} 2A & 2B \\ 2B & 2C\end{pmatrix}^{-1}\begin{pmatrix} B \\ C\end{pmatrix}.$$
+
+Now
+\(\bigl(\begin{smallmatrix} A & B \\ B & C\end{smallmatrix}\bigr)^{-1}\bigl(\begin{smallmatrix} B \\ C\end{smallmatrix}\bigr) = \frac{1}{AC-B^2}\bigl(\begin{smallmatrix} C & -B \\ -B & A\end{smallmatrix}\bigr)\bigl(\begin{smallmatrix} B \\ C\end{smallmatrix}\bigr) = \frac{1}{AC-B^2}\bigl(\begin{smallmatrix} 0 \\ AC-B^2\end{smallmatrix}\bigr) = \bigl(\begin{smallmatrix} 0 \\ 1\end{smallmatrix}\bigr)\),
+so the correction term is \(\tfrac12 (B, C)(0,1)^{\mathsf T} = C/2\), and
+
+$$\boxed{\;s_*^2 \;=\; \frac{2}{\,t^{\mathsf T}\Sigma^{-1}t\,}\;}$$
+
+\(A\) and \(B\) cancel completely. The intercept, and everything the baseline
+measurement's own variance contributes through \(A\), leave no trace in
+\(s_*\).
+
+```{r closed-form}
+closed <- function(pars, v) 2 / drop(t(v) %*% solve(slope_sigma(pars, v)) %*% v)
+
+designs <- list(c(0, 1), c(0, 1, 2), c(0, 1, 2, 3), seq(0, 2, by = 0.5), c(0, 2, 5, 7.3))
+t(vapply(designs, function(v) c(slope_var = slope_var(pars, v), closed_form = closed(pars, v)),
+         numeric(2)))
+```
+
+### What the formula says
+
+\(t^{\mathsf T}\Sigma^{-1}t\) has a variational characterisation. For any
+non-zero contrast vector \(c\) over the visits, Cauchy–Schwarz in the
+\(\Sigma\) inner product gives
+
+$$\max_{c \neq 0} \frac{(c^{\mathsf T}t)^2}{c^{\mathsf T}\Sigma c} \;=\; t^{\mathsf T}\Sigma^{-1}t, \qquad \text{attained at } c^* \propto \Sigma^{-1}t.$$
+
+Read that backwards and \(s_*^2 = 2/C\) becomes a statement about an estimator.
+Apply the *same* contrast \(c\) to each participant's measurements and take the
+difference between the two arms. The control participant's expectation is
+\((c^{\mathsf T}u)\beta_0 + (c^{\mathsf T}t)\beta_1\) and the treated
+participant's is \((c^{\mathsf T}u)\beta_0 + (c^{\mathsf T}t)(\beta_1 + \beta_2)\),
+so differencing cancels \(\beta_0\) and \(\beta_1\) exactly, whatever \(c\) is,
+and leaves \((c^{\mathsf T}t)\beta_2\). Hence
+
+$$\tilde\beta_2(c) = \frac{c^{\mathsf T}(y_{\text{trt}} - y_{\text{ctrl}})}{c^{\mathsf T}t}, \qquad \operatorname{Var}\tilde\beta_2(c) = \frac{2\,c^{\mathsf T}\Sigma c}{(c^{\mathsf T}t)^2},$$
+
+and minimising over \(c\) gives exactly \(2/C\). So the GLS estimator from a
+pair *is* a between-person difference of one optimally weighted within-person
+contrast — not an approximation to one:
+
+```{r contrast}
+cstar <- solve(Sigma) %*% visits
+
+set.seed(4)
+y_ctrl <- rnorm(3); y_trt <- rnorm(3)          # arbitrary data
+X_pair <- rbind(X_ctrl, X_trt)
+S_pair <- rbind(cbind(Sigma, 0 * Sigma), cbind(0 * Sigma, Sigma))
+beta_gls <- solve(crossprod(X_pair, solve(S_pair) %*% X_pair),
+                  crossprod(X_pair, solve(S_pair) %*% c(y_ctrl, y_trt)))
+
+c(gls = beta_gls[3],
+  contrast = drop(t(cstar) %*% (y_trt - y_ctrl)) / drop(t(cstar) %*% visits))
+```
+
+Two consequences follow immediately, neither stated in the paper.
+
+**Adding a visit can never hurt.** Enlarging the schedule enlarges the set of
+available contrasts — pad any old \(c\) with a zero in the new coordinate and it
+gives the same value — so the maximum cannot fall, \(C\) cannot fall, and
+\(s_*^2\) cannot rise. That is Table 1 of the paper, proved rather than
+observed. (It says nothing about *how much* a visit helps, which can be
+almost nothing — see the `m1` and `m2` columns in section 6.)
+
+```{r monotone}
+set.seed(2)
+worse <- 0
+for (k in 1:2000) {
+  base  <- sort(c(0, runif(sample(1:4, 1), 0.1, 6)))
+  extra <- runif(1, 0.1, 6)
+  if (slope_var(pars, sort(c(base, extra))) > slope_var(pars, base) + 1e-10) worse <- worse + 1
+}
+worse
+```
+
+**A common baseline mean is worth something specific.** Suppose you refused to
+assume the two arms share \(\beta_0\) and gave each participant their own
+intercept. Each person's own slope would then have variance \(A/(AC - B^2)\),
+and differencing two of them gives \(2A/(AC - B^2)\). Against \(s_*^2 = 2/C\)
+the ratio is \(1/(1 - B^2/AC)\): the randomisation assumption that lets the arms
+share an intercept is worth exactly that factor.
+
+```{r shared-intercept}
+gain <- function(pars, v) {
+  Si <- solve(slope_sigma(pars, v)); u <- rep(1, length(v))
+  A <- drop(t(u) %*% Si %*% u); B <- drop(t(u) %*% Si %*% v); C <- drop(t(v) %*% Si %*% v)
+  c(shared = 2 / C, separate = 2 * A / (A * C - B^2), ratio = 1 / (1 - B^2 / (A * C)))
+}
+t(vapply(list(c(0, 1), c(0, 1, 2), c(0, 1, 2, 3), c(0, 2, 5, 7.3)),
+         function(v) gain(pars, v), numeric(3)))
+```
+
+It is small here, and it happens to vanish at `c(0, 1, 2)` where \(B = 0\) —
+a coincidence of this particular parameter set and schedule, not a rule.
+
+## 5. Baseline is a covariate, and the formula says so
+
+Because \(t_0 = 0\), the index \(j = 0\) drops out of
+\(t^{\mathsf T}\Sigma^{-1}t = \sum_{j,k} t_j t_k (\Sigma^{-1})_{jk}\)
+entirely. What survives is the follow-up block of \(\Sigma^{-1}\) — and by the
+block-inverse formula, that block is
+
+$$\bigl[(\Sigma^{-1})_{ff}\bigr]^{-1} = \Sigma_{ff} - \Sigma_{f0}\Sigma_{00}^{-1}\Sigma_{0f} = \operatorname{Var}(y_f \mid y_0),$$
+
+the covariance of the follow-up measurements **conditional on baseline**. So
+
+$$s_*^2 \;=\; \frac{2}{\,t_f^{\mathsf T}\,\operatorname{Var}(y_f \mid y_0)^{-1}\,t_f\,}.$$
+
+```{r baseline-cov}
+via_conditional <- function(pars, v) {
+  S <- slope_sigma(pars, v)
+  Vc <- S[-1, -1, drop = FALSE] - S[-1, 1, drop = FALSE] %*%
+        solve(S[1, 1, drop = FALSE]) %*% S[1, -1, drop = FALSE]
+  2 / drop(t(v[-1]) %*% solve(Vc) %*% v[-1])
+}
+t(vapply(designs, function(v) c(slope_var = slope_var(pars, v),
+                                conditional = via_conditional(pars, v)), numeric(2)))
+```
+
+This is the ANCOVA connection the paper's introduction gestures at — "the
+baseline measure of the outcome \(y_{i0}\) is treated as a correlated outcome",
+and the model "will give the same estimated treatment effect as analysis of
+covariance" — made explicit and exact. Baseline enters \(s_*\) in precisely the
+way a covariate does: not by supplying a data point about the slope (its time is
+zero, so it carries none), but by shrinking the covariance of the points that
+do. Its whole contribution is the amount \(\Sigma_{f0}\Sigma_{00}^{-1}\Sigma_{0f}\)
+it removes, which is driven by \(\sigma_a^2\) and \(\sigma_{ab}\) and destroyed
+by measurement error \(\sigma_\epsilon^2\).
+
+## 6. One follow-up visit, in closed form — and a floor on sample size
+
+With \(m = 1\) and visits \((0, t)\) everything is \(2\times 2\) and
+\(s_*^2 = 2\det\Sigma / (t^2\Sigma_{00})\) unwinds to
+
+$$s_*^2 \;=\; \underbrace{\frac{2\sigma_\epsilon^2(2\sigma_a^2 + \sigma_\epsilon^2)}{t^2(\sigma_a^2 + \sigma_\epsilon^2)}}_{\text{shrinks like } t^{-2}} \;+\; \underbrace{\frac{4\sigma_\epsilon^2\sigma_{ab}}{t(\sigma_a^2+\sigma_\epsilon^2)}}_{\text{shrinks like } t^{-1}} \;+\; \underbrace{2\left(\sigma_b^2 - \frac{\sigma_{ab}^2}{\sigma_a^2+\sigma_\epsilon^2}\right)}_{\text{constant in } t}.$$
+
+```{r one-followup}
+one_fu <- function(p, t) {
+  P <- p$sigma2_intercept + p$sigma2_residual
+  2 * p$sigma2_residual * (2 * p$sigma2_intercept + p$sigma2_residual) / (t^2 * P) +
+    4 * p$sigma2_residual * p$sigma_cov / (t * P) +
+    2 * (p$sigma2_slope - p$sigma_cov^2 / P)
+}
+tt <- c(0.5, 1, 2, 5, 20, 1000)
+rbind(t = tt,
+      slope_var = vapply(tt, function(t) slope_var(pars, c(0, t)), 0),
+      closed    = one_fu(pars, tt))
+```
+
+The third term does not involve \(t\). **Lengthening a two-visit trial has a
+hard floor**, and it is not zero: however far apart you place the two visits,
+\(s_*^2\) cannot fall below \(2(\sigma_b^2 - \sigma_{ab}^2/(\sigma_a^2+\sigma_\epsilon^2))\).
+The reason is not subtle once seen — with two visits you learn each
+participant's own slope, but each participant's own slope *is* \(\beta_1 +
+\beta_2 g_i + b_i\), and the \(b_i\) never go away. You are estimating a
+difference of means of a quantity with irreducible between-person variance
+\(\sigma_b^2\), less whatever the baseline measurement told you about \(b_i\)
+through \(\sigma_{ab}\).
+
+Adding interim visits relaxes the floor, but only to a point. Densifying the
+schedule drives \(\sigma_\epsilon^2\) out of the problem entirely, and the limit
+is the same expression with \(\sigma_\epsilon^2\) set to zero:
+
+$$s_*^2 \;\longrightarrow\; 2\left(\sigma_b^2 - \frac{\sigma_{ab}^2}{\sigma_a^2}\right) \qquad\text{as the schedule becomes long and dense.}$$
+
+```{r floor}
+c(m1 = slope_var(pars, c(0, 3)),      m2 = slope_var(pars, seq(0, 3, length.out = 3)),
+  m6 = slope_var(pars, seq(0, 3, length.out = 7)),
+  dense_3yr  = slope_var(pars, seq(0, 3,  length.out = 401)),
+  dense_20yr = slope_var(pars, seq(0, 20, length.out = 2001)),
+  floor = 2 * (pars$sigma2_slope - pars$sigma_cov^2 / pars$sigma2_intercept))
+```
+
+Because \(N \propto s_*^2\), this is a floor on sample size that no design can
+beat. For the fitted `slpower1` parameters and the paper's 33% effectiveness
+target:
+
+```{r floor-n}
+b2 <- 0.33 * abs(p1$slope)
+floor_var <- 2 * (p1$sigma2_slope - p1$sigma_cov^2 / p1$sigma2_intercept)
+
+c(floor_n_total  = 2 * ceiling(z^2 * floor_var / b2^2),
+  achieved_50yr  = slope_sample_size(p1, seq(0, 50, length.out = 501),
+                                     effectiveness = 0.33)$n,
+  paper_2yr      = ss$n)
+```
+
+A fifty-year trial with a visit every five weeks would still need about
+`r 2 * ceiling(z^2 * floor_var / b2^2)` participants — and it reaches the floor
+exactly, to the participant. That number is a property of the *disease*, through
+\(\sigma_b^2\) and \(\sigma_{ab}/\sigma_a^2\), and no amount of trial design
+touches it. It is a useful sanity check to compute before exploring schedules:
+if the floor is already unaffordable, the design search is pointless and the
+target effect size, not the visit schedule, is what has to change.
+
+Because it is useful, the package computes it directly, and the two lines above
+are what it does. `slope_var_floor()` is the limiting \(s_*^2\) and
+`slope_sample_size_floor()` the sample size it implies:
+
+```{r floor-fn}
+c(hand = floor_var, slope_var_floor = slope_var_floor(p1))
+
+flr <- slope_sample_size_floor(p1, effectiveness = 0.33)
+c(floor = flr$n, paper_2yr = ss$n, ratio = ss$n / flr$n)
+```
+
+Given a result you already have, the floor for its own settings — same
+effectiveness, same power, same alpha — comes from the result itself:
+
+```{r floor-from-result}
+slope_sample_size_floor(ss)$n
+```
+
+Neither takes a visit schedule, because neither depends on one. That is the
+whole content of the bound.
+
+Two warnings about reading it, both visible in the algebra above.
+
+It is an infimum and not a minimum. Split the covariance as
+\(\Sigma = \Sigma_0 + \sigma_\epsilon^2 I\), where \(\Sigma_0\) is the
+noise-free part; then \(c^{\mathsf T}\Sigma c = c^{\mathsf T}\Sigma_0 c +
+\sigma_\epsilon^2\lVert c\rVert^2\) is *strictly* larger for every \(c \neq 0\),
+so the maximum in section 4's variational characterisation — and hence \(C\) —
+is strictly smaller than its limit, and \(s_*^2 = 2/C\) strictly larger than the
+floor. Every finite schedule is above it, however long and however dense; the
+fifty-year design ties only after `ceiling()` rounds it to a whole participant.
+
+And length alone will not get you there. The \(m = 1\) limit above is
+\(2(\sigma_b^2 - \sigma_{ab}^2/(\sigma_a^2 + \sigma_\epsilon^2))\), not
+\(2(\sigma_b^2 - \sigma_{ab}^2/\sigma_a^2)\):
+
+```{r floor-two-visit}
+c(two_visits_far_apart = slope_var(p1, c(0, 1e4)),
+  two_visit_limit      = 2 * (p1$sigma2_slope -
+                              p1$sigma_cov^2 / (p1$sigma2_intercept + p1$sigma2_residual)),
+  floor                = slope_var_floor(p1))
+```
+
+A single distant follow-up tells you each participant's slope, but it corrects
+for their intercept using one noisy baseline measurement. Only repeated
+measurement recovers the whole of what \(\sigma_{ab}\) has to offer.
+
+## 7. Does \(s_*/\sqrt N\) describe a real trial?
+
+Everything so far is exact given \(\Sigma\). A real trial estimates \(\Sigma\)
+too. The last check is empirical: simulate trials from the assumed model, fit
+them the way they would actually be fitted — REML, variance components
+estimated — and compare the spread of \(\hat\beta_2\) with \(s_*/\sqrt N\).
+
+```{r simulation}
+truth <- list(b0 = 34, b1 = -1.8, b2 = 0.6, sa = 100, sb = 2, sab = 5, se = 10)
+N_arm <- 60
+L <- chol(matrix(c(truth$sa, truth$sab, truth$sab, truth$sb), 2))
+
+sim_trial <- function() {
+  n <- 2 * N_arm
+  re <- matrix(rnorm(2 * n), n, 2) %*% L
+  id <- rep(seq_len(n), each = 3)
+  tt <- rep(visits, n)
+  gg <- rep(rep(0:1, each = N_arm), each = 3)
+  y  <- truth$b0 + truth$b1 * tt + truth$b2 * gg * tt +
+        re[id, 1] + re[id, 2] * tt + rnorm(n * 3, 0, sqrt(truth$se))
+  data.frame(id = factor(id), t = tt, g = gg, y = y)
+}
+
+set.seed(20260810)
+R <- 200
+res <- vapply(seq_len(R), function(r) {
+  f <- lme(y ~ t + g:t, random = ~ t | id, data = sim_trial(), method = "REML",
+           control = lmeControl(opt = "optim"))
+  summary(f)$tTable["t:g", c("Value", "Std.Error")]
+}, numeric(2))
+
+c(predicted_se  = sqrt(slope_var(pars, visits) / N_arm),
+  empirical_sd  = sd(res["Value", ]),
+  mean_model_se = mean(res["Std.Error", ]),
+  mean_estimate = mean(res["Value", ]), truth = truth$b2)
+```
+
+The average standard error the mixed model reports lands within a fraction of a
+percent of \(s_*/\sqrt{N}\), and the empirical standard deviation of the `r R`
+fitted treatment effects is a few percent below it — comfortably inside the
+Monte Carlo error of a standard deviation from `r R` replicates, which is about
+\(1/\sqrt{2(R-1)} \approx\) `r round(100 / sqrt(2 * (R - 1)), 1)`%. So \(s_*\)
+is not merely an internally consistent construction: it predicts what the
+analysis of the planned trial will actually produce, and it does so without
+being told the variance components the real analysis had to estimate for
+itself.
+
+## 8. Where the two-person device stops working
+
+The construction assumed every participant contributes an identical
+information block. Two things in the package break that assumption, and it is
+worth being clear that they are handled *outside* \(s_*\), not inside it.
+
+**Dropout.** Participants who withdraw have different schedules, so
+\(X^{\mathsf T}\Sigma^{-1}X \neq N\mathcal I_2\) and there is no single \(s_*\).
+The Dawson–Lagakos pattern-mixture device computes a separate \(s_*\) for each
+dropout stratum — each with its own leading submatrix of \(\Sigma\), the
+covariance being unaffected by which *other* visits exist — and combines them
+on the \(1/N\) scale rather than the \(s_*\) scale, since sample size is what
+is additive across strata:
+
+```{r dropout}
+design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
+strata <- c(completers = slope_var(pars, c(0, 1, 2)), withdrawers = slope_var(pars, c(0, 1)))
+strata
+
+# effective s*^2: reciprocal of the weighted mean of the reciprocals
+c(effective = 1 / (0.75 / strata[["completers"]] + 0.25 / strata[["withdrawers"]]),
+  reported  = slope_power(pars, design, effectiveness = 0.33, n = 400)$var_tte)
+```
+
+Note that the effective value is not between the strata in the way a naive
+average would be — the weighting is harmonic, so the informative stratum
+dominates. `slope_effect_size()` documents the same arithmetic on the effect
+scale.
+
+**Unequal allocation.** \(s_*/\sqrt N\) counts pairs, so there is no \(N\) to
+divide by under \(r{:}1\) randomisation. The package does not offer it;
+`slope_power()` rounds an odd `n` down to an even one and splits it evenly.
+
+Everything else in the package — the effect size, the target treatment effect,
+the two closed-form solutions for \(N\) and power — takes \(s_*\) as given. It
+really is the single number the whole calculation turns on, which is why it
+seemed worth thirty lines of algebra rather than two sentences.
+
+## References
+
+Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
+repeated measures data. *Biometrics* 49: 1022–1032.
+
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of clinical
+trials where the outcome is a rate. Can estimating a baseline rate in a run-in
+period increase efficiency? *Statistics in Medicine* 27: 3717–3731.
+
+Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
+calculations for trials that compare slopes over time: Introducing the
+slopepower command. *Stata Journal* 21(3): 575–601.
