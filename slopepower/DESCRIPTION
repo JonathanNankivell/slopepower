@@ -3,7 +3,7 @@ Title: Power and Sample Size for Trials Comparing Slopes Over Time
 Version: 0.1.0
 Authors@R: c(
     person("Jonathan", "Nankivell",
-           email = "nankivelljonathan@gmail.com",
+           email = "Jonathan.Nankivell1@lshtm.ac.uk",
            role = c("aut", "cre", "cph"),
            comment = "Author and copyright holder of the R implementation"),
     person("Stephen", "Nash", role = "ctb",
