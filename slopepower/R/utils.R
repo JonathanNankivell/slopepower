@@ -122,6 +122,37 @@ check_whole_number <- function(x, name, noun, context, lower, upper = Inf, lower
   invisible(as.numeric(x))
 }
 
+#' The two-sided critical value, computed exactly as the Stata original does
+#'
+#' `qnorm(1 - alpha / 2)` rather than the numerically preferable
+#' `qnorm(alpha / 2, lower.tail = FALSE)`, because `slopepower.ado:634` writes
+#' `invnormal(1 - 0.5 * alpha)` and the two differ in the last ulp for most
+#' alphas -- enough, with `ceiling()` downstream, to step a published N by one.
+#' Parity wins; this function exists so that the one place it is written is
+#' also the one place its failure mode is handled.
+#'
+#' That failure mode: `1 - alpha / 2` rounds to exactly 1 once alpha falls
+#' below about 2.2e-16, and `qnorm(1)` is `Inf`, so `size_per_arm()` returned
+#' `n = Inf` -- "no sample size is enough" -- where the true requirement is
+#' finite and unremarkable (7,584 at alpha = 1e-16 on the reference parameters,
+#' against 712 at alpha = 0.05). Stata degenerates the same way and reports
+#' N as missing; per CONTRACT.md section 6 the port says so instead.
+#' [slope_sample_size_floor.slope_result()] guards the identical `qnorm(1)`
+#' degeneracy on the power side.
+#' @noRd
+z_alpha <- function(alpha, context) {
+  z <- stats::qnorm(1 - alpha / 2)
+  if (!is.finite(z)) {
+    stop(sprintf(paste0(
+      "%s: `alpha` = %g is too small to compute a critical value with: 1 - alpha/2\n",
+      "  is not distinguishable from 1 in double precision, so the two-sided z value\n",
+      "  is infinite and no finite sample size can be reported. The Stata original\n",
+      "  returns a missing N here. Use an alpha above about 1e-15."),
+      context, alpha), call. = FALSE)
+  }
+  z
+}
+
 #' Extract the subject grouping from a `outcome ~ time | subject` formula
 #'
 #' Returns a list with `outcome`, `time` and `subject` language objects. The bar
@@ -140,6 +171,30 @@ parse_slope_formula <- function(formula, context) {
     rhs <- rhs[[2L]]
   }
 
+  # The subject side is held to the same rule as the time side below, and for
+  # the same reason: it is *evaluated*, not expanded as a model formula, so
+  # `id + site` becomes the arithmetic sum and `site/id` the quotient, and
+  # `factor(as.character(...))` of either is a set of fabricated participant
+  # identifiers that groups unrelated rows together. The fit then succeeds and
+  # returns a plausible-looking slope -- on `slpower1`, `sdmt ~ visit | site/id`
+  # gives -0.75 against the true -1.67. The hazard is not hypothetical: nested
+  # and crossed groupings are exactly how `nlme` and `lme4` users write a
+  # multi-level random-effects specification, and there is no such thing here
+  # (see "further levels of clustering" in `?slope_params`), so the only
+  # possible meanings of such an expression are a mistake.
+  combining <- c("+", "-", "*", "/", ":", "^", "%in%", "offset")
+  if (is.call(subject) && as.character(subject[[1L]])[1L] %in% combining) {
+    stop(sprintf(paste0(
+      "%s: the subject identifier must be a single grouping term, but `%s`\n",
+      "  combines terms with `%s`. There is exactly one level of clustering here --\n",
+      "  the participant -- so a nested or crossed grouping such as `site/id` or\n",
+      "  `id + site` cannot be expressed; it would be evaluated arithmetically and\n",
+      "  the result fitted as though it identified participants. Name the\n",
+      "  participant identifier alone, e.g. `outcome ~ time | id`."),
+      context, paste(deparse(subject), collapse = " "),
+      as.character(subject[[1L]])[1L]), call. = FALSE)
+  }
+
   # The time side must be exactly one model term. A transformation is fine --
   # `I(vdate / 365)` is one term -- but `time + age` is two, and without this
   # check it would be evaluated as the arithmetic sum and fitted as if it were
@@ -153,8 +208,8 @@ parse_slope_formula <- function(formula, context) {
   # as arithmetic and fitted as though the result were the time variable. So
   # reject any right-hand side whose head is an operator that combines or
   # removes model terms. A transformation stays legal because `I()`, `log()` and
-  # friends are ordinary calls, not combining operators.
-  combining <- c("+", "-", "*", "/", ":", "^", "%in%", "offset")
+  # friends are ordinary calls, not combining operators. `combining` is the list
+  # shared with the subject-side check above.
   if (is.call(rhs) && as.character(rhs[[1L]])[1L] %in% combining) {
     single_term_error(context, rhs,
                       sprintf("combines terms with `%s`", as.character(rhs[[1L]])[1L]))
@@ -286,7 +341,13 @@ fmt_line <- function(label, value, width = 39L, digits = 3L) {
   } else if (is.na(value)) {
     "."
   } else if (digits == 0L && value == round(value) && abs(value) < 1e9) {
-    format(value)
+    # `scientific = FALSE` because this branch exists to print a whole number as
+    # a whole number, and bare format() does not: it switches to scientific
+    # notation whenever that is the shorter string, so a sample size of exactly
+    # 100000 printed as "1e+05" and an 800-row model as "800" but a 100000-row
+    # one as "1e+05". Stata's %5.0f never does that, and this block is a
+    # transcription of Stata's output.
+    format(value, scientific = FALSE)
   } else {
     formatC(value, format = "f", digits = digits)
   }

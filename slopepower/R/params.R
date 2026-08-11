@@ -571,6 +571,27 @@ slope_params <- function(formula, data,
       stop(sprintf("%s: `%s` must contain both groups after removing missing values.",
                    context, comparator), call. = FALSE)
     }
+    # Group membership also has to be a property of the participant rather than
+    # of the visit. Every model below reads `sp_case` row by row, so a
+    # participant whose indicator changes
+    # part-way through their follow-up is fitted as a case for some visits and a
+    # control for others -- loading on both random-effects blocks at once for
+    # `healthy`, and switching arms mid-trial for `treated`. Nothing about the
+    # fit looks wrong afterwards; it just answers a different question. The
+    # participant is also counted in both groups by the size check below, so a
+    # dataset made entirely of such rows could pass that too.
+    split_subject <- tapply(dat$sp_case, dat$sp_subject,
+                            function(g) any(g != g[1L]))
+    if (any(split_subject)) {
+      offenders <- names(split_subject)[which(split_subject)]
+      stop(sprintf(paste0(
+        "%s: `%s` must be constant within a participant, but it changes during ",
+        "follow-up for %d of %d participant(s) (%s%s). Group membership is a ",
+        "property of the participant, not of the visit."),
+        context, comparator, length(offenders), nlevels(dat$sp_subject),
+        paste(sQuote(offenders[seq_len(min(5L, length(offenders)))]), collapse = ", "),
+        if (length(offenders) > 5L) ", ..." else ""), call. = FALSE)
+    }
     # Presence of both groups is not enough: for `healthy`/`treated` each group
     # gets its own variance components (the `healthy` model factorises into two
     # fully independent per-group fits -- see the note above), so a group too

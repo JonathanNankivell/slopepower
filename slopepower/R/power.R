@@ -457,7 +457,7 @@ solve_slope <- function(params, design, effectiveness,
 
   comp <- effect_components(params, design, target, effectiveness, context)
 
-  z_a <- stats::qnorm(1 - alpha / 2)
+  z_a <- z_alpha(alpha, context)
   scaled_effect <- abs(comp$effect_size) * comp$effectiveness
 
   if (solving_for_n) {

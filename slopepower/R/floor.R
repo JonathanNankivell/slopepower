@@ -107,7 +107,7 @@ floor_result <- function(params, effectiveness, target, power, alpha, context) {
   var_tte <- var_floor(params)
   effect_size <- comp$slope_difference / sqrt(var_tte)
   sized <- size_per_arm(abs(effect_size) * comp$effectiveness,
-                        stats::qnorm(1 - alpha / 2), power)
+                        z_alpha(alpha, context), power)
 
   structure(
     list(

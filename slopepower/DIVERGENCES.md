@@ -283,9 +283,34 @@ if (slope_difference == 0) {
 The same holds for a singular information matrix (`treatment_effect_var()`),
 a non-positive-definite implied covariance (`sigma_at()`), a non-PD
 random-effects G matrix on a hand-built `slope_params` (`check_params()`, see
-§9), and a missing `n` in `slope_power()`/`slope_power_grid()` — where Stata
-does not fail at all but silently switches to solving for sample size at 80%
-power.
+§9), an `alpha` so small that `1 - alpha/2` is not distinguishable from 1 in
+double precision (`z_alpha()`, below), and a missing `n` in
+`slope_power()`/`slope_power_grid()` — where Stata does not fail at all but
+silently switches to solving for sample size at 80% power.
+
+The `alpha` case is worth spelling out because the degeneracy is purely
+arithmetic and the true answer is unremarkable. Both languages compute the
+two-sided critical value as `invnormal(1 - 0.5*alpha)` / `qnorm(1 - alpha/2)`
+(`.ado:634`); below about `2.2e-16` that argument rounds to exactly 1, and
+`invnormal(1)`/`qnorm(1)` is infinite, so the sample size divides out to a
+missing value in Stata and would be `Inf` in R. The requirement being solved
+for is finite — 7,584 at `alpha = 1e-16` on the reference parameters, against
+712 at `alpha = 0.05` — so reporting "no sample size is enough" is wrong in
+both. R says why instead. The expression itself is *not* changed to the
+numerically preferable `qnorm(alpha/2, lower.tail = FALSE)`: the two differ in
+the last ulp for a large fraction of alphas — 22% sampled over (1e-6, 0.5),
+rising to 72% over the conventional (0.001, 0.1), and 0.05 itself is one of
+them — and with `ceiling()` downstream that is enough to move a published N by
+one. Parity wins over the last bit of accuracy, per §1.
+
+Related, and also an error rather than a silently different answer: the
+`healthy`/`treated` group indicator must be constant within a participant
+(`slope_params()`). Stata has no such guard, and neither language would
+complain — every model reads the indicator row by row, so a participant whose
+coding changes part-way through follow-up is simply fitted as a case for some
+visits and a control for others. The fit converges and the result looks
+ordinary; it just answers a different question. Group membership is a property
+of the participant, not of the visit.
 
 **Not** divergences, though they read like them, and listed here so the
 distinction survives: Stata already errors on `alpha` outside (0,1)

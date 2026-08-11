@@ -372,3 +372,109 @@ test_that("slopepower() validates dropouts before fitting stage one, not after",
     "one element per follow-up visit"
   )
 })
+
+# --- regressions from the full-package review of eeb5f4b --------------------
+
+test_that("a multi-level subject expression is refused, not evaluated arithmetically", {
+  # The mirror of the covariate guard above, on the other side of the bar. The
+  # subject term is *evaluated*, not expanded as a formula, so `site/id` became
+  # the quotient and `id + site` the sum, and factor() of either invented
+  # participant identifiers that pooled unrelated rows. The fit then succeeded:
+  # on slpower1 `sdmt ~ visit | site/id` returned a slope of -0.753 and claimed
+  # 534 participants, against the true -1.6725 over 200. Nested and crossed
+  # groupings are how nlme and lme4 users spell a second clustering level, and
+  # this package has exactly one (see ?slope_params, "further levels of
+  # clustering"), so the expression can only ever be a mistake.
+  d <- load_paper_data("slpower1")
+  d$site <- rep(1:4, length.out = nrow(d))
+
+  for (f in list(sdmt ~ time | site/id, sdmt ~ time | id + site,
+                 sdmt ~ time | id:site)) {
+    err <- tryCatch(slope_params(f, d), error = conditionMessage)
+    expect_match(err, "subject identifier must be a single grouping term")
+    expect_match(err, "one level of clustering")
+  }
+
+  # A transformation of the identifier is still a single term, exactly as it is
+  # on the time side: `factor()` and friends are ordinary calls, not operators
+  # that combine model terms.
+  ref <- slope_params(sdmt ~ time | id, d)
+  expect_equal(slope_params(sdmt ~ time | factor(id), d)$slope, ref$slope,
+               tolerance = 1e-12)
+  expect_equal(slope_params(sdmt ~ time | factor(id), d)$n_subjects, 200L)
+})
+
+test_that("a group indicator that changes within a participant is refused", {
+  # `sp_case` is read row by row by every model, so a participant coded 1 at
+  # some visits and 0 at others is fitted as a case for part of their follow-up
+  # and a control for the rest -- loading on both random-effects blocks under
+  # `healthy`, switching arms mid-trial under `treated`. The fit converges and
+  # looks entirely ordinary. It also defeats the group-size check, which counts
+  # such a participant once in each group.
+  d <- load_paper_data("slpower2")
+  flip <- d$id <= 5 & d$vdate > as.Date("2010-06-01")
+  d$case[flip] <- 1 - d$case[flip]
+  err <- tryCatch(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case)),
+                  error = conditionMessage)
+  expect_match(err, "`healthy` must be constant within a participant")
+  expect_match(err, "5 of 500 participant")
+
+  # And `treated` is held to the same rule, in its own name.
+  d3 <- load_paper_data("slpower3")
+  d3$treat[d3$id == 1 & d3$visit == 2] <- 1 - d3$treat[d3$id == 1 & d3$visit == 2]
+  expect_error(slope_params(sdmt ~ time | id, d3, treated = treat),
+               "`treated` must be constant within a participant")
+
+  # The unmodified data are unaffected: the guard costs the paper's own fits
+  # nothing.
+  expect_equal(paper_fit("slpower3")$n_subjects, 150L)
+})
+
+test_that("an alpha too small for 1 - alpha/2 errors instead of returning N = Inf", {
+  # z_alpha() keeps Stata's `invnormal(1 - 0.5 * alpha)` spelling, because
+  # `qnorm(alpha/2, lower.tail = FALSE)` differs in the last ulp and ceiling()
+  # can turn that into an off-by-one in a published N. The cost of parity is
+  # that 1 - alpha/2 saturates at 1 below about 2.2e-16, qnorm(1) is Inf and
+  # ceiling(Inf) is Inf: slope_sample_size() reported n = Inf, "no sample size
+  # is enough", where the true requirement is 7,584 -- an order of magnitude
+  # from the 712 the same call gives at alpha = 0.05. Stata reports a missing N
+  # here; CONTRACT.md 6 says the port says so instead.
+  p <- ref_params()
+  for (a in c(1e-16, 1e-17, 1e-300)) {
+    err <- tryCatch(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33, alpha = a),
+                    error = conditionMessage)
+    expect_match(err, "too small to compute a critical value")
+    expect_false(is.infinite(suppressWarnings(as.numeric(err))))
+  }
+  # The floor shares the arithmetic, so it shares the guard.
+  expect_error(slope_sample_size_floor(p, effectiveness = 0.33, alpha = 1e-17),
+               "too small to compute a critical value")
+
+  # Everything an actual study would use is untouched, and still finite.
+  for (a in c(0.05, 0.01, 1e-8, 1e-14)) {
+    expect_true(is.finite(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33,
+                                            alpha = a)$n))
+  }
+  # And the default is bit-for-bit what it was: parity with the .ado, not a
+  # numerically nicer formula, is what z_alpha() is written to preserve.
+  expect_identical(slopepower:::z_alpha(0.05, "ctx"), stats::qnorm(1 - 0.05 / 2))
+})
+
+test_that("whole numbers print in full rather than in scientific notation", {
+  # fmt_line()'s digits = 0 branch exists to print a whole number as a whole
+  # number, and bare format() does not: it switches to scientific notation
+  # whenever that is the shorter string. So an N of exactly 100000 printed as
+  # "1e+05" in a block that is otherwise a transcription of Stata's %5.0f
+  # output -- and so did the observation count of a 100000-row model.
+  fmt_line <- slopepower:::fmt_line
+  expect_match(fmt_line("N", 1e5, digits = 0L), "N = 100000$")
+  expect_match(fmt_line("N", 1e8, digits = 0L), "N = 100000000$")
+  expect_match(fmt_line("N", 712, digits = 0L), "N = 712$")
+
+  p <- ref_params()
+  out <- capture.output(print(slope_power(p, c(0, 1, 2), n = 100000,
+                                          effectiveness = 0.33)))
+  expect_true(any(grepl("specified N = 100000", out, fixed = TRUE)))
+  expect_true(any(grepl("actual N = 100000", out, fixed = TRUE)))
+  expect_false(any(grepl("1e+05", out, fixed = TRUE)))
+})
