@@ -1,6 +1,2 @@
 YEAR: 2026
 COPYRIGHT HOLDER: Jonathan Nankivell
-
-This license covers the R implementation only. Portions of this package are
-derived from Stata code and data copyrighted by other parties and reproduced
-under separate permission; see the inst/COPYRIGHTS file for details.
