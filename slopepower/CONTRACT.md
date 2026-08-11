@@ -103,7 +103,8 @@ signature. Neither accepts the other's input: `slope_sample_size(..., n = 450)` 
 the mismatch that used to be silently resolved by which argument was left `NULL` can no longer be
 expressed. **Do not reintroduce a combined entry point**, and do not give `n` a default.
 
-Both classes inherit from `"slope_result"`, which is what `as.data.frame()` dispatches on.
+Both classes inherit from `"slope_result"`, which is what `as.data.frame()` dispatches on. So does
+`slope_sample_size_floor` (section 4.3), which answers neither question but bounds the first.
 
 ### 4.1 `slope_sample_size`
 
@@ -133,6 +134,34 @@ here and `power` the output.
 There is **no `solve_for` field**: the class carries that information. `as.data.frame()` still
 emits a `solve_for` column, derived from the class, so that rows from both functions bind into one
 interpretable table. Column names are identical across both classes and every comparator.
+
+### 4.3 `slope_sample_size_floor`
+
+S3 class `c("slope_sample_size_floor", "slope_result")`, from `R/floor.R`. The same fields as
+`slope_sample_size` **minus `design`**, for 12:
+
+```r
+list(n, n_per_arm, power, alpha, effectiveness, target, tte, var_tte, effect_size,
+     slope_difference, reference_slope, params)
+```
+
+There is no `design` because there is no design: the value bounds every schedule at once (section
+5.7). **Do not add one**, and do not let it acquire a `visits` or `dropout` argument — the same
+rule, for the same reason, as `slope_effect_size()`'s refusal of `effectiveness`. An argument the
+answer does not depend on can only be ignored.
+
+It is a **generic**, unlike the two stage-two entry points, with methods on `slope_params` (which
+takes `effectiveness`, `target`, `power` and `alpha`, exactly as `slope_sample_size()` does) and on
+`slope_result` (which reads all four off the object, so the floor and the design it bounds are
+guaranteed comparable). `...` exists only because the generic has it and is rejected by
+`reject_dots()`; a silently ignored `design =` would make the result look design-specific.
+
+The `slope_result` method refuses a `slope_power` object whose `power` has saturated at exactly 1,
+where `qnorm(1)` is `Inf` — the same double-precision edge that section 5.6 handles for `var_tte`.
+
+`as.data.frame()` gains two consequences: `solve_for` is `"n_floor"`, and `n_follow_up` is
+`NA_integer_` rather than a count, because the row belongs to no schedule. The 4.1/4.2 guarantee
+that column *names* are identical across classes is unaffected.
 
 ---
 
@@ -262,6 +291,41 @@ participant. The reported value carries that rounding and is slightly larger tha
 bounded above by `n_per_arm / (n_per_arm - 1)` times it. This matches the Stata original, which
 reports the same rounded quantity. Do not "fix" the two branches into agreement — assert the
 inequality instead.
+
+### 5.7 The floor over all designs (`R/floor.R`)
+
+No counterpart in Stata or in the paper; derived in the "What s\* is" vignette, section 6.
+
+```
+slope_var_floor(params) = 2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)
+```
+
+Twice the Schur complement of the random-effects covariance matrix, i.e. twice `Var(b_i | a_i)`.
+Positive whenever that matrix is positive definite, which `check_re_covariance()` already
+guarantees on every route into a `slope_params` object — so there is no degenerate branch to
+write.
+
+Three facts, each load-bearing for how it is documented:
+
+- It is the **infimum of `slope_var(params, visits)` over all `visits`, and is not attained**.
+  Since `Sigma = Sigma_0 + sigma2_residual * I`, every contrast has `c'Sigma c > c'Sigma_0 c`
+  strictly, so `t' Sigma^-1 t` stays strictly below its limit at every finite schedule. The
+  documentation says "infimum, not minimum", and `test-floor.R` asserts the strict inequality over
+  random schedules rather than an approximate equality.
+- **Dropout can only raise it**, so the bound holds over designs *and* dropout patterns. That is
+  why `slope_sample_size_floor()` needs no `design`, not merely why it has none.
+- **Length alone does not reach it.** Two visits a distance `t` apart converge as `t -> Inf` on
+  `2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`, strictly larger
+  whenever `sigma_cov != 0`: only repeated measurement recovers the whole baseline correction. Do
+  not shorten this to "as the trial gets longer" — a reader who lengthens a two-visit trial aims
+  at the wrong number, and `test-floor.R` pins the two limits apart.
+
+The sample size follows through `size_per_arm()`, the single implementation of equation (6) that
+`solve_slope()` also calls (section 5.5). The sharing is the point: `slope_sample_size(...)$n >=
+slope_sample_size_floor(...)$n` holds by construction rather than by two implementations happening
+to agree. After `ceiling()` the bound is attained — on `slpower1` at `effectiveness = 0.33` both
+the floor and a fifty-year schedule of 501 visits give N = 236, against 712 for the paper's p.588
+design.
 
 ---
 

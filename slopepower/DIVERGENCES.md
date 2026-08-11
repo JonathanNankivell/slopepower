@@ -619,6 +619,36 @@ accept it as the "right" answer either.
 
 ---
 
+## 23. `slope_sample_size_floor()` — a bound the paper does not state
+
+**Stata** has nothing like it, and neither does the paper: §2.2's `s*` is
+always evaluated at a stated `schedule()`, and Table 1 explores schedules
+one at a time.
+
+**R** exports `slope_var_floor()` and `slope_sample_size_floor()`, the
+greatest lower bound of `s*^2` — and hence of `N` — over *every* visit
+schedule. It falls out of the closed form `s*^2 = 2 / (t' Sigma^-1 t)`
+derived in the `what-is-s-star` vignette, and is
+`2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)`, twice the variance of
+a participant's random slope given their random intercept.
+
+This is an *addition*, not a change: no existing number moves, and the port
+still computes everything the paper computes the way the paper computes it.
+It is included because the Table 1 exercise — try nine schedules, see which
+is affordable — has no stopping rule without it. The floor says when the
+search is pointless: on `slpower1` at 33% effectiveness it is 236, against
+712 for the paper's own two-year design, so a trial that cannot afford 236
+cannot be rescued by any visit schedule.
+
+Two things kept it honest rather than clever. The sample size goes through
+`size_per_arm()`, the same equation (6) `solve_slope()` calls, so the bound
+and the thing it bounds cannot drift apart. And it takes no `design`
+argument in either method (CONTRACT.md §4.3) — the value does not depend on
+one, and dropout can only raise it, so the bound covers designs with
+withdrawal too.
+
+---
+
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded

@@ -7,7 +7,8 @@
 \method{as.data.frame}{slope_result}(x, row.names = NULL, optional = FALSE, ...)
 }
 \arguments{
-\item{x}{A \code{slope_sample_size} or \code{slope_power} object.}
+\item{x}{A \code{slope_sample_size}, \code{slope_power} or \code{slope_sample_size_floor}
+object.}
 
 \item{row.names, optional}{Passed on for consistency with the generic; ignored.}
 
@@ -25,9 +26,13 @@ its slope columns depending on which model was fitted.
 }
 \details{
 \code{solve_for} records which question produced the row --- \code{"n"} for
-\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{"power"} for \code{\link[=slope_power]{slope_power()}}. It is derived from the
-object's class, and exists so that a bound table stays interpretable; the
-functions themselves have no such switch.
+\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{"power"} for \code{\link[=slope_power]{slope_power()}}, \code{"n_floor"} for
+\code{\link[=slope_sample_size_floor]{slope_sample_size_floor()}}. It is derived from the object's class, and
+exists so that a bound table stays interpretable; the functions themselves
+have no such switch.
+
+A \code{"n_floor"} row has \code{n_follow_up = NA}, because the bound it reports holds
+for every visit schedule and so is attached to none of them.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
@@ -38,5 +43,9 @@ as.data.frame(res)
 # questions safe to bind into one comparison table.
 res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
 rbind(as.data.frame(res), as.data.frame(res2))
+
+# The floor binds in too, as the row no schedule can beat.
+rbind(as.data.frame(res),
+      as.data.frame(slope_sample_size_floor(pars, effectiveness = 0.33)))
 
 }

@@ -166,12 +166,17 @@ slope_se <- function(params) {
 #' like a successful bootstrap of something else entirely -- and that is exactly
 #' the shape of a call written against the pre-generic interface, where the
 #' calculation was re-specified here rather than dispatched on.
+#'
+#' `context` rather than a hard-coded `"slope_bootstrap()"`: the same hazard,
+#' and the same fix, applies to every generic in the package whose methods
+#' carry `...` only because the generic does. [slope_sample_size_floor()] is
+#' the second.
 #' @noRd
-reject_dots <- function(dots, advice) {
+reject_dots <- function(dots, advice, context) {
   if (length(dots) == 0L) return(invisible(NULL))
   nms <- names(dots) %||% rep("", length(dots))
   shown <- ifelse(nzchar(nms), nms, "<unnamed>")
-  stop(sprintf("slope_bootstrap(): unused argument%s (%s).\n  %s",
+  stop(sprintf("%s: unused argument%s (%s).\n  %s", context,
                if (length(dots) > 1L) "s" else "",
                paste(shown, collapse = ", "), advice), call. = FALSE)
 }
@@ -444,7 +449,7 @@ slope_bootstrap <- function(x, R = 199, type = c("bca", "percentile"), ...,
 bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
                                 R, type, statistic, level, seed, progress, dots) {
   statistic <- match_statistic(statistic, choices, advice)
-  reject_dots(dots, dots_advice_result(label))
+  reject_dots(dots, dots_advice_result(label), "slope_bootstrap()")
   fixed <- stats::setNames(list(x[[fixed_name]]), fixed_name)
   # `compute` closes over `slim` -- just the four inputs resolve_args() reads --
   # rather than `x` itself, so it does not keep x$params$fit (the original fit
@@ -504,7 +509,8 @@ slope_bootstrap.slope_params <- function(x, R = 199,
     "Bootstrapping a `slope_params` object gives an interval for the fitted\n",
     "  slope, which needs no trial design. For an interval around a sample size\n",
     "  or a power, bootstrap the result instead:\n",
-    "    slope_bootstrap(slope_sample_size(params, design, ...), R = 999)"))
+    "    slope_bootstrap(slope_sample_size(params, design, ...), R = 999)"),
+    "slope_bootstrap()")
   run_bootstrap(x, function(p) p$slope, x$slope, "slope", R, type, level, seed,
                 progress)
 }

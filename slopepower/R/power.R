@@ -231,17 +231,28 @@ treatment_effect_var <- function(sigma, t, context) {
 # effect size
 # ---------------------------------------------------------------------------
 
-#' Resolve the reference slope, effectiveness and dropout-weighted effect size
+#' Resolve the reference slope, the effectiveness and the target treatment
+#' effect --- everything that does not involve the visit schedule
+#'
+#' Split from [effect_components()] because the design-free half is the whole of
+#' what [slope_sample_size_floor()] needs: the floor is a bound over every
+#' schedule, so it has no `design` to weight by, but it targets exactly the same
+#' \eqn{\beta_2} and must reach it by exactly the same route. Duplicating this
+#' resolution there would let the two drift into targeting different effects
+#' from the same `params`.
+#'
+#' `params` arrives already validated by [check_params()] -- both callers are
+#' entry points that run it themselves, and re-running it here would be the
+#' "two standards" duplication that [sigma_at()] and [treatment_effect_var()]
+#' are likewise split to avoid.
 #'
 #' `effectiveness` and `target` arrive already reconciled: whether the caller
 #' typed an `effectiveness` is knowable only at the exported boundary, so
-#' [check_target_effectiveness()] is applied there -- by both stage-two entry
-#' points and both grid wrappers alike -- rather than being plumbed down here as
-#' a `missing()` flag on every intervening signature.
+#' [check_target_effectiveness()] is applied there -- by the stage-two entry
+#' points, the grid wrappers and the floor alike -- rather than being plumbed
+#' down here as a `missing()` flag on every intervening signature.
 #' @noRd
-effect_components <- function(params, design, target, effectiveness, context) {
-  check_params(params, context)
-  design <- as_trial_design(design, context)
+target_components <- function(params, target, effectiveness, context) {
   target <- match.arg(target, c("effectiveness", "observed"))
 
   comparator <- params$comparator
@@ -271,6 +282,42 @@ effect_components <- function(params, design, target, effectiveness, context) {
                  context), call. = FALSE)
   }
   tte <- -effectiveness * slope_difference
+
+  # The target effect should move the untreated slope toward the reference, not
+  # further from zero. It moves further out only when the reference is itself
+  # more extreme than the group being treated.
+  if (abs(params$slope + tte) > abs(params$slope)) {
+    # Classed like the baseline-dropout warning in design.R, and for the same
+    # reason: grid_impl() collects this one specifically, by class, to report
+    # it once per grid rather than once per cell.
+    warning(warningCondition(
+      sprintf(paste0("%s: the target treatment effect (%.4g) makes the slope more extreme ",
+                     "(%.4g -> %.4g). The comparator slope is further from zero than the ",
+                     "group being treated; check that `slope_comparator` is the intended target."),
+              context, tte, params$slope, params$slope + tte),
+      class = "slopepower_tte_direction"))
+  }
+
+  list(
+    target           = target,
+    effectiveness    = effectiveness,
+    reference_slope  = reference_slope,
+    slope_difference = slope_difference,
+    tte              = tte
+  )
+}
+
+#' Resolve the reference slope, effectiveness and dropout-weighted effect size
+#'
+#' The design-dependent half; [target_components()] is the rest, and is called
+#' *after* `as_trial_design()` so that a design warning still precedes a target
+#' warning in the order they always did.
+#' @noRd
+effect_components <- function(params, design, target, effectiveness, context) {
+  check_params(params, context)
+  design <- as_trial_design(design, context)
+  comp <- target_components(params, target, effectiveness, context)
+  slope_difference <- comp$slope_difference
 
   visits <- design$visits
   dropout <- design$dropout
@@ -304,31 +351,7 @@ effect_components <- function(params, design, target, effectiveness, context) {
   }
   effect_size <- sign(slope_difference) * sqrt(eff2)
 
-  # The target effect should move the untreated slope toward the reference, not
-  # further from zero. It moves further out only when the reference is itself
-  # more extreme than the group being treated.
-  if (abs(params$slope + tte) > abs(params$slope)) {
-    # Classed like the baseline-dropout warning in design.R, and for the same
-    # reason: grid_impl() collects this one specifically, by class, to report
-    # it once per grid rather than once per cell.
-    warning(warningCondition(
-      sprintf(paste0("%s: the target treatment effect (%.4g) makes the slope more extreme ",
-                     "(%.4g -> %.4g). The comparator slope is further from zero than the ",
-                     "group being treated; check that `slope_comparator` is the intended target."),
-              context, tte, params$slope, params$slope + tte),
-      class = "slopepower_tte_direction"))
-  }
-
-  list(
-    target           = target,
-    effectiveness    = effectiveness,
-    reference_slope  = reference_slope,
-    slope_difference = slope_difference,
-    tte              = tte,
-    effect_size      = effect_size,
-    var_full         = var_full,
-    design           = design
-  )
+  c(comp, list(effect_size = effect_size, var_full = var_full, design = design))
 }
 
 #' Dropout-weighted standardised effect size
@@ -393,6 +416,22 @@ slope_effect_size <- function(params, design,
 # the shared solver
 # ---------------------------------------------------------------------------
 
+#' Equation (6): the per-arm sample size a scaled effect needs
+#'
+#' The one place `ceiling((z_{1-alpha/2} + z_{power})^2 / effect^2)` is written.
+#' [solve_slope()] uses it for a stated design and
+#' [slope_sample_size_floor()] for the limit over all of them; sharing it is
+#' what makes "no design can beat this" a statement about the same arithmetic
+#' rather than about a second implementation of it.
+#'
+#' `scaled_effect` is `abs(effect_size) * effectiveness` --- both factors, per
+#' CONTRACT.md section 5.5.
+#' @noRd
+size_per_arm <- function(scaled_effect, z_a, power) {
+  z_sum_sq <- (z_a + stats::qnorm(power))^2
+  list(z_sum_sq = z_sum_sq, n_per_arm = ceiling(z_sum_sq / scaled_effect^2))
+}
+
 #' Everything `slope_sample_size()` and `slope_power()` have in common
 #'
 #' Exactly one of `n` and `power` is supplied; the other is solved for. This is
@@ -422,11 +461,12 @@ solve_slope <- function(params, design, effectiveness,
   scaled_effect <- abs(comp$effect_size) * comp$effectiveness
 
   if (solving_for_n) {
-    # (z_alpha + z_beta)^2, the numerator of the sample-size formula. Named
-    # rather than written twice because the var_tte back-solve below divides by
-    # this same quantity, and the two cannot be allowed to drift apart.
-    z_sum_sq <- (z_a + stats::qnorm(power))^2
-    n_per_arm <- ceiling(z_sum_sq / scaled_effect^2)
+    sized <- size_per_arm(scaled_effect, z_a, power)
+    # (z_alpha + z_beta)^2, the numerator of the sample-size formula. Kept
+    # because the var_tte back-solve below divides by this same quantity, and
+    # the two cannot be allowed to drift apart.
+    z_sum_sq <- sized$z_sum_sq
+    n_per_arm <- sized$n_per_arm
     n_total <- 2 * n_per_arm
   } else {
     n_total <- 2 * floor(n / 2)
@@ -829,11 +869,16 @@ print.slope_power <- function(x, ...) {
 #' its slope columns depending on which model was fitted.
 #'
 #' `solve_for` records which question produced the row --- `"n"` for
-#' [slope_sample_size()], `"power"` for [slope_power()]. It is derived from the
-#' object's class, and exists so that a bound table stays interpretable; the
-#' functions themselves have no such switch.
+#' [slope_sample_size()], `"power"` for [slope_power()], `"n_floor"` for
+#' [slope_sample_size_floor()]. It is derived from the object's class, and
+#' exists so that a bound table stays interpretable; the functions themselves
+#' have no such switch.
 #'
-#' @param x A `slope_sample_size` or `slope_power` object.
+#' A `"n_floor"` row has `n_follow_up = NA`, because the bound it reports holds
+#' for every visit schedule and so is attached to none of them.
+#'
+#' @param x A `slope_sample_size`, `slope_power` or `slope_sample_size_floor`
+#'   object.
 #' @param row.names,optional Passed on for consistency with the generic; ignored.
 #' @param ... Ignored.
 #' @return A one-row data frame.
@@ -847,6 +892,10 @@ print.slope_power <- function(x, ...) {
 #' # questions safe to bind into one comparison table.
 #' res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
 #' rbind(as.data.frame(res), as.data.frame(res2))
+#'
+#' # The floor binds in too, as the row no schedule can beat.
+#' rbind(as.data.frame(res),
+#'       as.data.frame(slope_sample_size_floor(pars, effectiveness = 0.33)))
 #'
 #' @export
 as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ...) {
@@ -865,10 +914,14 @@ as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ..
     comparator       = x$params$comparator,
     reference_slope  = x$reference_slope,
     slope_difference = x$slope_difference,
-    n_follow_up      = length(x$design$visits) - 1L,
+    # NA, not 0 or -1: a floor result carries no `design` at all, because the
+    # bound holds whatever the schedule is (CONTRACT.md section 4.3).
+    n_follow_up      = if (is.null(x$design)) NA_integer_ else length(x$design$visits) - 1L,
     n_obs            = as.numeric(x$params$n_obs %||% NA_real_),
     n_subjects       = as.numeric(x$params$n_subjects %||% NA_real_),
-    solve_for        = if (inherits(x, "slope_power")) "power" else "n",
+    solve_for        = if (inherits(x, "slope_sample_size_floor")) "n_floor"
+                       else if (inherits(x, "slope_power")) "power"
+                       else "n",
     row.names        = row.names,
     stringsAsFactors = FALSE
   )
