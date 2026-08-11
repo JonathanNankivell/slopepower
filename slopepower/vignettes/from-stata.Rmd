@@ -522,6 +522,10 @@ adding them would go beyond what Nash et al. specify.
 * `vignette("harmful-previous-trial", package = "slopepower")` -- what to reuse
   from a trial in which the treatment made things worse, and why
   `target = "observed"` is the wrong tool there.
+* `vignette("what-is-s-star", package = "slopepower")` -- what `s*` actually is
+  in both implementations, why the `s*/sqrt(N)` scaling is exact, and why 1:1
+  allocation and monotone dropout are limits of the construction rather than of
+  the port.
 * `DIVERGENCES.md` in the package sources -- the same ground as this vignette,
   written for someone auditing the port against the `.ado` file line by line,
   with the Stata source of each item quoted.

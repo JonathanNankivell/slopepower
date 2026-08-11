@@ -244,11 +244,14 @@ slope_sample_size_floor(ss)
 Neither takes a visit schedule, because neither depends on one — and dropout can
 only push the requirement up, so the bound covers designs with withdrawal too. If
 the floor is already unaffordable, the visit schedule is not what needs to change.
-The result inherits from `slope_result`, so its `as.data.frame()` row binds in
-alongside the grid's, marked `solve_for = "n_floor"`.
+The result inherits from `slope_result`, so its `as.data.frame()` row binds
+together with the rows `as.data.frame()` gives for `slope_sample_size()` and
+`slope_power()` results, marked `solve_for = "n_floor"`. (The grid functions
+return a differently shaped table — one row per design, with the schedule
+columns — so the floor row does not `rbind()` onto that.)
 
 The bound is approached only as the schedule becomes both long *and* dense;
-lengthening a two-visit trial bottoms out higher, at
+lengthening a two-visit trial only converges on the higher value
 `2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`. The
 `what-is-s-star` vignette derives all of this.
 

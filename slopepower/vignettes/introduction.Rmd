@@ -413,6 +413,10 @@ and ask what recruitment it costs.
   treatment of one case touched on above: what to reuse from a previous
   trial, and what not to, when its treatment effect cannot simply be
   targeted again.
+* `vignette("what-is-s-star", package = "slopepower")` derives the single
+  number all of the above rests on: what the "two-person trial" standard
+  error is, why the `s*/sqrt(N)` scaling is exact, and the floor on sample
+  size that no visit schedule can beat.
 
 ## Reference
 

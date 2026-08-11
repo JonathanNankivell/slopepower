@@ -425,6 +425,9 @@ None of these is visible in a bootstrap interval.
   and what it targets.
 * `slope_bootstrap()` -- the tool this vignette recommends spending the
   sensitivity-analysis effort on instead of correcting for the bias.
+* `vignette("what-is-s-star", package = "slopepower")` -- what the bootstrap is
+  putting an interval around: `s*` derived from first principles, and the floor
+  on sample size that no visit schedule can beat.
 
 ## Reference
 

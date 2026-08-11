@@ -96,9 +96,10 @@ c(sigma2_intercept = as.numeric(VarCorr(fit2)[1, 1]),
   sigma2_residual  = as.numeric(VarCorr(fit2)[3, 1]))
 ```
 
-against true values of 100, 2 and 10. With six observations and three fixed
-effects there are two residual degrees of freedom and nothing to estimate a
-covariance structure from; the reported standard error is an estimate with
+against true values of 100, 2 and 10. With six observations, three fixed effects
+and four variance parameters to go with them — `lme()` reports two denominator
+degrees of freedom for the interaction — there is next to nothing to pin the
+covariance structure down; the reported standard error is an estimate with
 essentially no precision, and it is a different number for every seed.
 
 \(s_*\) is not that. Equation (5) of the paper is
@@ -232,8 +233,8 @@ each is a real restriction on what `slopepower` can be used for:
   see section 8.
 * **1:1 allocation.** \(s_*/\sqrt N\) counts \(N\) *pairs*. Under \(r{:}1\)
   allocation the two arms contribute different counts and the pair is no longer
-  the replicate; `slope_power()` enforces an even \(n\) split evenly for exactly
-  this reason.
+  the replicate; `slope_power()` rounds `n` down to an even number and splits it
+  evenly for exactly this reason.
 * **\(\Sigma\) the same in both arms and known.** The first is the paper's model
   assumption (variance components are constrained equal across arms in stage
   one); the second is section 1 above.
@@ -416,9 +417,16 @@ rbind(t = tt,
       closed    = one_fu(pars, tt))
 ```
 
-The third term does not involve \(t\). **Lengthening a two-visit trial has a
-hard floor**, and it is not zero: however far apart you place the two visits,
-\(s_*^2\) cannot fall below \(2(\sigma_b^2 - \sigma_{ab}^2/(\sigma_a^2+\sigma_\epsilon^2))\).
+The third term does not involve \(t\). **Lengthening a two-visit trial does not
+buy unlimited precision**: as the two visits move apart the first two terms die
+away and \(s_*^2\) settles at
+\(2(\sigma_b^2 - \sigma_{ab}^2/(\sigma_a^2+\sigma_\epsilon^2))\), which is not
+zero. (With \(\sigma_{ab} > 0\), as here, the \(t^{-1}\) term is positive and
+the approach is from above, so that limit is a genuine lower bound over two-visit
+schedules. With \(\sigma_{ab} < 0\) it is negative and \(s_*^2\) dips slightly
+under the limit at a finite \(t\) before coming back up to it. Neither case gets
+below the schedule-free floor derived next.)
+
 The reason is not subtle once seen — with two visits you learn each
 participant's own slope, but each participant's own slope *is* \(\beta_1 +
 \beta_2 g_i + b_i\), and the \(b_i\) never go away. You are estimating a
