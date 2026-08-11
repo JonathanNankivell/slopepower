@@ -146,7 +146,10 @@ slope_se <- function(params) {
   terms <- vapply(slope_fixef_parts(params$comparator),
                   function(p) resolve_fixef_name(b, p),
                   character(1L))
-  if (anyNA(terms) || !all(terms %in% names(b))) {
+  # `anyNA()` alone: resolve_fixef_name() returns either a member of names(b)
+  # or NA, so a non-NA element being absent from names(b) is not a second
+  # failure mode to test for.
+  if (anyNA(terms)) {
     warning(sprintf(paste0(
       "%s: could not identify the slope terms in the fitted model (have %s); ",
       "returning NA. If this call came from slope_bootstrap(), its section 2.6 ",

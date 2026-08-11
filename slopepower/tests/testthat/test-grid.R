@@ -62,6 +62,38 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
   }
 })
 
+test_that("a grid row carries exactly what as.data.frame() reports for that cell", {
+  # grid_impl() reads its six result columns straight off the result object
+  # rather than through as.data.frame.slope_result(), because routing every
+  # cell through that method to keep 6 of its 18 columns was the single most
+  # expensive line in the loop. This is the guarantee that bought back: the two
+  # must report the same numbers for the same object, so that a grid row and a
+  # bound as.data.frame() row can never disagree.
+  shared <- c("n", "n_per_arm", "power", "tte", "var_tte", "effect_size")
+  p <- paper_fit("slpower1")
+
+  for (nm in names(table1_visits)) {
+    v <- table1_visits[[nm]]
+    for (drop in list(NULL, rep(0.05, length(v) - 1L))) {
+      des <- suppressWarnings(trial_design(v, drop))
+      out <- suppressWarnings(slope_power_grid(
+        p, visits = list(only = v), dropout = list(only = drop),
+        n = 450, effectiveness = 0.33))
+      direct <- as.data.frame(suppressWarnings(
+        slope_power(p, des, n = 450, effectiveness = 0.33)))
+      expect_equal(unlist(out[1L, shared]), unlist(direct[shared]),
+                   tolerance = 0, info = nm)
+    }
+  }
+
+  # The same for the sample-size grid, whose rows come off a different class.
+  out <- slope_sample_size_grid(p, visits = list(only = c(0, 1, 2)),
+                                dropout = list(only = NULL), effectiveness = 0.33)
+  direct <- as.data.frame(slope_sample_size(p, trial_design(c(0, 1, 2)),
+                                            effectiveness = 0.33))
+  expect_equal(unlist(out[1L, shared]), unlist(direct[shared]), tolerance = 0)
+})
+
 test_that("slope_power_grid() reproduces all nine Table 1 powers in one call", {
   out <- suppressWarnings(slope_power_grid(
     paper_fit("slpower1"),

@@ -201,21 +201,40 @@ grid_impl <- function(visits, dropout, evaluate, context) {
   visit_list <- as_visits_list(visits, context)
   drop_list <- as_dropout_list(dropout, context)
 
-  rows <- vector("list", length(visit_list) * length(drop_list))
+  n_cells <- length(visit_list) * length(drop_list)
+  # Twelve preallocated columns, filled in place and made a data frame once at
+  # the end. Assembling a one-row data frame per cell and rbind()ing the list
+  # cost more than the calculation the grid exists to perform -- about 2 ms a
+  # cell against 0.6 ms for the sample size itself, so roughly 60% of a grid's
+  # total runtime went on building the table rather than filling it.
+  out <- list(
+    design        = character(n_cells),
+    dropout       = character(n_cells),
+    n_visits      = integer(n_cells),
+    n_follow_up   = integer(n_cells),
+    last_visit    = numeric(n_cells),
+    dropout_total = numeric(n_cells),
+    n             = numeric(n_cells),
+    n_per_arm     = numeric(n_cells),
+    power         = numeric(n_cells),
+    tte           = numeric(n_cells),
+    var_tte       = numeric(n_cells),
+    effect_size   = numeric(n_cells)
+  )
   baseline_only <- character(0L)
   tte_direction <- character(0L)
   k <- 0L
 
   for (di in seq_along(visit_list)) {
     v <- visit_list[[di]]
+    vname <- names(visit_list)[di]
     if (!is.numeric(v)) {
       stop(sprintf("%s: element \"%s\" of `visits` is not numeric.",
-                   context, names(visit_list)[di]), call. = FALSE)
+                   context, vname), call. = FALSE)
     }
     for (dj in seq_along(drop_list)) {
       k <- k + 1L
       dname <- names(drop_list)[dj]
-      vname <- names(visit_list)[di]
 
       inc <- expand_dropout(drop_list[[dj]], v, context, dname)
 
@@ -251,46 +270,52 @@ grid_impl <- function(visits, dropout, evaluate, context) {
         error = grid_cell_error(context, vname, dname)
       )
 
-      # The six result columns are pulled from as.data.frame.slope_result()
-      # rather than off `res` directly, so this row can never drift from what
-      # that method reports for the same object.
-      res_cols <- as.data.frame(res)[c("n", "n_per_arm", "power", "tte",
-                                       "var_tte", "effect_size")]
-      rows[[k]] <- cbind(
-        data.frame(
-          design        = vname,
-          dropout       = dname,
-          n_visits      = length(v),
-          n_follow_up   = length(v) - 1L,
-          last_visit    = v[length(v)],
-          dropout_total = sum(des$dropout),
-          stringsAsFactors = FALSE
-        ),
-        res_cols
-      )
+      out$design[k]        <- vname
+      out$dropout[k]       <- dname
+      out$n_visits[k]      <- length(v)
+      out$n_follow_up[k]   <- length(v) - 1L
+      out$last_visit[k]    <- v[length(v)]
+      out$dropout_total[k] <- sum(des$dropout)
+
+      # The six result columns are read straight off `res`. That is the same
+      # thing as.data.frame.slope_result() reports -- it copies each of these
+      # six from `x` unchanged -- and routing through it instead was the single
+      # most expensive line in the loop, at 1.3 ms a cell. The guarantee that
+      # the two cannot drift is kept by test-grid.R, which pins a grid row
+      # against as.data.frame() of the same object, rather than by paying for
+      # the other twelve columns and discarding them.
+      out$n[k]           <- res$n
+      out$n_per_arm[k]   <- res$n_per_arm
+      out$power[k]       <- res$power
+      out$tte[k]         <- res$tte
+      out$var_tte[k]     <- res$var_tte
+      out$effect_size[k] <- res$effect_size
     }
   }
 
-  if (length(baseline_only) > 0L) {
-    warning(sprintf(paste0("%s: in %d of %d combinations a non-zero proportion is expected to ",
-                           "attend the baseline visit only (%s). Those participants provide no ",
-                           "follow-up measurement and so contribute nothing to the comparison of ",
-                           "slopes."),
-                    context, length(baseline_only), k,
-                    paste(baseline_only, collapse = "; ")), call. = FALSE)
-  }
-  if (length(tte_direction) > 0L) {
-    warning(sprintf(paste0("%s: in %d of %d combinations the target treatment effect makes the ",
-                           "slope more extreme (%s). The comparator slope is further from zero ",
-                           "than the group being treated; check that `slope_comparator` is the ",
-                           "intended target."),
-                    context, length(tte_direction), k,
-                    paste(tte_direction, collapse = "; ")), call. = FALSE)
-  }
+  report_collected(context, baseline_only, k,
+                   paste0("a non-zero proportion is expected to attend the baseline visit ",
+                          "only (%s). Those participants provide no follow-up measurement ",
+                          "and so contribute nothing to the comparison of slopes."))
+  report_collected(context, tte_direction, k,
+                   paste0("the target treatment effect makes the slope more extreme (%s). ",
+                          "The comparator slope is further from zero than the group being ",
+                          "treated; check that `slope_comparator` is the intended target."))
 
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
-  out
+  as.data.frame(out, stringsAsFactors = FALSE)
+}
+
+#' Report one class of collected per-cell warning, once for the whole grid
+#'
+#' Both collectors in [grid_impl()] owe the user the same sentence -- how many
+#' of how many combinations, and which -- and differ only in what they then say
+#' about it. Writing the preamble twice let the two drift; `tail` supplies just
+#' the clause that differs, with a single `%s` where the cell list goes.
+#' @noRd
+report_collected <- function(context, cells, k, tail) {
+  if (length(cells) == 0L) return(invisible(NULL))
+  warning(sprintf("%s: in %d of %d combinations %s", context, length(cells), k,
+                  sprintf(tail, paste(cells, collapse = "; "))), call. = FALSE)
 }
 
 #' Compare the power of many candidate trial designs

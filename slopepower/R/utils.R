@@ -56,9 +56,10 @@ check_scalar <- function(x, name, context,
 #' single-value case, this the vector one.
 #' @noRd
 check_finite_vector <- function(x, name, ctx) {
-  if (any(!is.finite(x))) {
+  bad <- which(!is.finite(x))
+  if (length(bad)) {
     stop(sprintf("%s: `%s` must be finite; element(s) %s are not.",
-                 ctx, name, paste(which(!is.finite(x)), collapse = ", ")), call. = FALSE)
+                 ctx, name, paste(bad, collapse = ", ")), call. = FALSE)
   }
   invisible(x)
 }
@@ -77,6 +78,18 @@ check_variance <- function(x, name, context) {
 }
 
 #' Is a symmetric matrix positive definite?
+#'
+#' By eigendecomposition, deliberately, though a Cholesky factorisation answers
+#' the yes/no question about three times faster and was tried here. The two
+#' criteria are not interchangeable: `all(ev > tol * max(1, abs(ev[1])))` puts an
+#' *absolute* floor of `tol` under the eigenvalues, so a well-conditioned matrix
+#' scaled uniformly below it -- every variance component around 1e-9, reachable
+#' through [slope_params_manual()] -- is rejected here but factorises cleanly.
+#' Over 8,000 random symmetric 2x2--8x8 matrices the two disagreed on 14, every
+#' one of them of that shape. Realistic covariances agree (0 disagreements over
+#' 6,000 built the way `sigma_at()` and `check_re_covariance()` build them), but
+#' the disagreement is exactly at the accept/reject boundary of a CONTRACT.md
+#' section 6 guard, so the speed is not worth moving it.
 #' @noRd
 is_positive_definite <- function(m, tol = 1e-10) {
   if (!is.matrix(m) || nrow(m) != ncol(m)) return(FALSE)
@@ -279,8 +292,9 @@ label_numeric <- function(x) paste(fmt_num(x), collapse = ", ")
 #' @noRd
 resolve_fixef_name <- function(b, parts) {
   cand <- unique(c(paste(parts, collapse = ":"), paste(rev(parts), collapse = ":")))
-  hit <- cand[cand %in% names(b)]
-  if (length(hit)) hit[1L] else NA_character_
+  # `character(0)[1L]` is already NA_character_, so the documented "or
+  # NA_character_" needs no branch of its own.
+  cand[cand %in% names(b)][1L]
 }
 
 #' Add `effectiveness` to an argument list, unless target = "observed" implies it
@@ -331,6 +345,20 @@ check_column_name <- function(value, name, data, context) {
          call. = FALSE)
   }
   invisible(value)
+}
+
+#' Print one labelled line
+#'
+#' Every print method in the package emits its labelled lines through here, so
+#' that the line *and* the newline around it are written one way. Wrapping the
+#' `cat()` as well as the formatting is not fussiness: when the call sites
+#' spelled `cat(fmt_line(...), "\n", sep = "")` by hand, the ten in
+#' [print.slope_params()] omitted the `sep`, so that method alone emitted a
+#' trailing space before every newline. That is exactly the drift `fmt_line()`
+#' was extracted to prevent, reappearing in the plumbing around it.
+#' @noRd
+cat_line <- function(label, value, width = 39L, digits = 3L) {
+  cat(fmt_line(label, value, width = width, digits = digits), "\n", sep = "")
 }
 
 #' Format a labelled value the way the Stata command does, for print methods

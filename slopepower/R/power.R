@@ -252,6 +252,26 @@ treatment_effect_var <- function(sigma, t, context) {
 #' points, the grid wrappers and the floor alike -- rather than being plumbed
 #' down here as a `missing()` flag on every intervening signature.
 #' @noRd
+#' Is the reference slope the comparator's own slope, or zero?
+#'
+#' CONTRACT.md section 5.3 in one predicate. Two places need the answer: the
+#' calculation, which uses it to pick `reference_slope`, and
+#' [print_data_block()], which uses it to decide whether to show the comparator
+#' slope and the difference from it at all. Written twice, in two shapes, they
+#' could drift -- and a renderer that disagreed with the calculation would
+#' silently misdescribe the number beside it rather than error, which is the
+#' hazard [slope_labels()] was extracted to remove for the slopes' *names*.
+#'
+#' `target = "observed"` implies `comparator == "treated"` (enforced in
+#' [target_components()]), so naming the comparator in that arm would be
+#' redundant. Note the third row of the section 5.3 table: with
+#' `target = "effectiveness"` a treated arm is *ignored*, and the effect is
+#' measured toward zero.
+#' @noRd
+reference_is_comparator <- function(comparator, target) {
+  identical(target, "observed") || identical(comparator, "healthy")
+}
+
 target_components <- function(params, target, effectiveness, context) {
   target <- match.arg(target, c("effectiveness", "observed"))
 
@@ -263,16 +283,16 @@ target_components <- function(params, target, effectiveness, context) {
                           'trial and requires `params` with comparator = "treated"; got "%s".'),
                    context, comparator), call. = FALSE)
     }
-    reference_slope <- params$slope_comparator
     effectiveness <- 1
   } else {
     check_scalar(effectiveness, "effectiveness", context,
                  lower = 0, upper = 1, lower_open = TRUE, upper_open = FALSE)
-    reference_slope <- switch(comparator,
-      none    = 0,
-      healthy = params$slope_comparator,
-      treated = 0
-    )
+  }
+
+  reference_slope <- if (reference_is_comparator(comparator, target)) {
+    params$slope_comparator
+  } else {
+    0
   }
 
   slope_difference <- params$slope - reference_slope
@@ -432,6 +452,44 @@ size_per_arm <- function(scaled_effect, z_a, power) {
   list(z_sum_sq = z_sum_sq, n_per_arm = ceiling(z_sum_sq / scaled_effect^2))
 }
 
+#' The canonical `slope_result` field list, in CONTRACT.md order
+#'
+#' The one place the shape of a stage-two result is written. Both
+#' [solve_slope()] and [floor_result()] in floor.R return this, so CONTRACT.md
+#' sections 4.1-4.3 -- the three result classes carry the same fields, and
+#' `as.data.frame()` emits the same column names for all of them -- holds by
+#' construction rather than by two list literals happening to agree. They did
+#' agree, field for field and expression for expression, which is precisely the
+#' drift risk: adding a field here and forgetting the other file would leave the
+#' floor returning `NULL` for it, and `data.frame()` drops a `NULL` column
+#' rather than erroring, so the failure would surface much later as an `rbind()`
+#' mismatch between a floor row and a sample-size row.
+#'
+#' `design` is the one field the floor has no value for (section 4.3: there is
+#' no design, and one must not be added), so it is appended only when supplied
+#' --- `c()` keeps it last, where section 4.2 requires it. Both branches of
+#' `solve_slope()` satisfy `n == 2 * n_per_arm`, including the power branch,
+#' where `n_per_arm` is derived from the evened-down `n`.
+#' @noRd
+stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
+                             effect_size, params, design = NULL) {
+  out <- list(
+    n                = 2 * n_per_arm,
+    n_per_arm        = n_per_arm,
+    power            = power,
+    alpha            = alpha,
+    effectiveness    = if (identical(comp$target, "observed")) NA_real_ else comp$effectiveness,
+    target           = comp$target,
+    tte              = comp$tte,
+    var_tte          = var_tte,
+    effect_size      = effect_size,
+    slope_difference = comp$slope_difference,
+    reference_slope  = comp$reference_slope,
+    params           = params
+  )
+  if (is.null(design)) out else c(out, list(design = design))
+}
+
 #' Everything `slope_sample_size()` and `slope_power()` have in common
 #'
 #' Exactly one of `n` and `power` is supplied; the other is solved for. This is
@@ -467,10 +525,10 @@ solve_slope <- function(params, design, effectiveness,
     # the two cannot be allowed to drift apart.
     z_sum_sq <- sized$z_sum_sq
     n_per_arm <- sized$n_per_arm
-    n_total <- 2 * n_per_arm
   } else {
-    n_total <- 2 * floor(n / 2)
-    n_per_arm <- n_total / 2
+    # Forced even and split 1:1, so `n_per_arm` -- not the requested `n` -- is
+    # what the result is built from; `stage_two_result()` reports 2 * n_per_arm.
+    n_per_arm <- floor(n / 2)
     power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
   }
 
@@ -494,21 +552,9 @@ solve_slope <- function(params, design, effectiveness,
     comp$tte^2 / scaled_effect^2
   }
 
-  list(
-    n                = n_total,
-    n_per_arm        = n_per_arm,
-    power            = power,
-    alpha            = alpha,
-    effectiveness    = if (identical(comp$target, "observed")) NA_real_ else comp$effectiveness,
-    target           = comp$target,
-    tte              = comp$tte,
-    var_tte          = var_tte,
-    effect_size      = comp$effect_size,
-    slope_difference = comp$slope_difference,
-    reference_slope  = comp$reference_slope,
-    params           = params,
-    design           = comp$design
-  )
+  stage_two_result(comp, n_per_arm = n_per_arm, power = power, alpha = alpha,
+                   var_tte = var_tte, effect_size = comp$effect_size,
+                   params = params, design = comp$design)
 }
 
 #' Shared documentation for the two stage-two entry points
@@ -778,25 +824,38 @@ print_data_block <- function(x) {
   comparator <- params$comparator
 
   cat("\nData characteristics:\n")
-  cat(fmt_line("number of observations in model", params$n_obs %||% NA, digits = 0L), "\n", sep = "")
-  cat(fmt_line("number of participants in model", params$n_subjects %||% NA, digits = 0L), "\n", sep = "")
+  cat_line("number of observations in model", params$n_obs %||% NA, digits = 0L)
+  cat_line("number of participants in model", params$n_subjects %||% NA, digits = 0L)
 
   # The comparator slope, and the difference from it, are shown exactly when the
-  # target is measured against it: for healthy controls always, for a previous
-  # trial's treated arm only under target = "observed" -- with
-  # target = "effectiveness" that arm is ignored and the reference slope is zero
-  # (CONTRACT.md section 5.3), so printing it would misdescribe the calculation.
+  # target is measured against it -- the same question the calculation asks to
+  # pick its reference slope, so it is asked through the same predicate rather
+  # than restated here. With target = "effectiveness" a treated arm is ignored
+  # and the reference slope is zero (CONTRACT.md section 5.3), so printing it
+  # would misdescribe the calculation.
   labels <- slope_labels(comparator)
-  show_comparator <- comparator == "healthy" ||
-    (comparator == "treated" && identical(x$target, "observed"))
+  show_comparator <- reference_is_comparator(comparator, x$target)
 
   if (show_comparator) {
-    cat(fmt_line("observed difference in slopes", x$slope_difference), "\n", sep = "")
+    cat_line("observed difference in slopes", x$slope_difference)
   }
-  cat(fmt_line(labels$own, params$slope), "\n", sep = "")
+  cat_line(labels$own, params$slope)
   if (show_comparator) {
-    cat(fmt_line(labels$comparator, params$slope_comparator), "\n", sep = "")
+    cat_line(labels$comparator, params$slope_comparator)
   }
+  invisible(x)
+}
+
+#' The target lines of the "Parameters for planned study" block
+#'
+#' Split from the schedule lines below because the sample-size floor prints
+#' these two and then says it has no schedule at all (CONTRACT.md section 4.3).
+#' It used to re-spell them, so two of the printed labels and their widths
+#' existed in two files with nothing connecting them.
+#' @noRd
+print_target_lines <- function(x) {
+  cat_line("effectiveness", x$effectiveness)
+  cat_line("target treatment difference in slopes", x$tte)
   invisible(x)
 }
 
@@ -804,10 +863,9 @@ print_data_block <- function(x) {
 #' @noRd
 print_design_block <- function(x) {
   design <- x$design
-  cat(fmt_line("effectiveness", x$effectiveness), "\n", sep = "")
-  cat(fmt_line("target treatment difference in slopes", x$tte), "\n", sep = "")
-  cat(fmt_line("number of follow-up visits", length(design$visits) - 1L, digits = 0L), "\n", sep = "")
-  cat(fmt_line("schedule (and dropouts)", schedule_string(design)), "\n", sep = "")
+  print_target_lines(x)
+  cat_line("number of follow-up visits", length(design$visits) - 1L, digits = 0L)
+  cat_line("schedule (and dropouts)", schedule_string(design))
   invisible(x)
 }
 
@@ -825,12 +883,12 @@ print_design_block <- function(x) {
 print.slope_sample_size <- function(x, ...) {
   print_data_block(x)
   cat("\nParameters for planned study:\n")
-  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
-  cat(fmt_line("power", x$power), "\n", sep = "")
+  cat_line("alpha", x$alpha)
+  cat_line("power", x$power)
   print_design_block(x)
   cat("\n  Estimated sample size:\n")
-  cat(fmt_line("N", x$n, digits = 0L), "\n", sep = "")
-  cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
+  cat_line("N", x$n, digits = 0L)
+  cat_line("N per arm", x$n_per_arm, digits = 0L)
   cat("\n")
   invisible(x)
 }
@@ -849,13 +907,13 @@ print.slope_sample_size <- function(x, ...) {
 print.slope_power <- function(x, ...) {
   print_data_block(x)
   cat("\nParameters for planned study:\n")
-  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
-  cat(fmt_line("specified N", x$n_requested, digits = 0L), "\n", sep = "")
-  cat(fmt_line("actual N", x$n, digits = 0L), "\n", sep = "")
-  cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
+  cat_line("alpha", x$alpha)
+  cat_line("specified N", x$n_requested, digits = 0L)
+  cat_line("actual N", x$n, digits = 0L)
+  cat_line("N per arm", x$n_per_arm, digits = 0L)
   print_design_block(x)
   cat("\nEstimated power:\n")
-  cat(fmt_line("power", x$power), "\n", sep = "")
+  cat_line("power", x$power)
   cat("\n")
   invisible(x)
 }

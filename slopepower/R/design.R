@@ -226,14 +226,7 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
   }
   dropout <- as.numeric(dropout)
 
-  if (length(dropout) != n_intervals) {
-    stop(sprintf(paste0("%s: `dropout` must have one element per follow-up visit: ",
-                        "length(visits) - 1 = %d, but length(dropout) = %d.",
-                        "\n  visits = %s covers %d follow-up visit%s after baseline."),
-                 ctx, n_intervals, length(dropout),
-                 fmt_call_vec(visits), n_intervals,
-                 if (n_intervals == 1L) "" else "s"), call. = FALSE)
-  }
+  check_dropout_length(dropout, visits, "dropout", ctx)
 
   check_dropout_values(dropout, "dropout", ctx)
 
@@ -284,6 +277,28 @@ check_dropout_values <- function(dropout, name, ctx) {
 }
 
 #' @rdname check_dropout_values
+#'
+#' The length rule, shared for the same reason and by the same argument:
+#' [as_trial_design()] used to write its own terser version of this message, so
+#' a hand-built design -- the one route whose author had no constructor to
+#' guide them -- got the *worse* of the two diagnoses for the identical
+#' mistake. `name` carries the caller's spelling of the vector so the message
+#' names what the user actually typed.
+#' @noRd
+check_dropout_length <- function(dropout, visits, name, ctx) {
+  n_intervals <- length(visits) - 1L
+  if (length(dropout) != n_intervals) {
+    stop(sprintf(paste0("%s: `%s` must have one element per follow-up visit: ",
+                        "length(visits) - 1 = %d, but length(%s) = %d.",
+                        "\n  visits = %s covers %d follow-up visit%s after baseline."),
+                 ctx, name, n_intervals, name, length(dropout),
+                 fmt_call_vec(visits), n_intervals,
+                 if (n_intervals == 1L) "" else "s"), call. = FALSE)
+  }
+  invisible(dropout)
+}
+
+#' @rdname check_dropout_values
 #' @noRd
 check_dropout_total <- function(dropout, name, ctx) {
   total <- sum(dropout)
@@ -325,10 +340,11 @@ as_trial_design <- function(design, context) {
   }
   visits <- validate_visits(design$visits, context)
   dropout <- design$dropout
-  if (!is.numeric(dropout) || length(dropout) != length(visits) - 1L) {
-    stop(sprintf("%s: `design$dropout` must have one entry per follow-up visit (%d), got %d.",
-                 context, length(visits) - 1L, length(dropout)), call. = FALSE)
+  if (!is.numeric(dropout)) {
+    stop(sprintf("%s: `design$dropout` must be numeric; got %s.",
+                 context, class(dropout)[1L]), call. = FALSE)
   }
+  check_dropout_length(dropout, visits, "design$dropout", context)
   check_dropout_values(dropout, "design$dropout", context)
   check_dropout_total(dropout, "design$dropout", context)
 
@@ -379,12 +395,13 @@ print.trial_design <- function(x, ...) {
 
   cat(sprintf("  Dropout:     supplied as %s\n\n", x$dropout_type))
   cat("    last visit   first missed   proportion   cumulative\n")
+  # `dropout` and `cum` are already length k; only the visit columns need
+  # offsetting against each other.
   cum <- cumsum(x$dropout)
-  j <- seq_len(k)
   cat(sprintf("    %10s   %12s   %10s   %10s\n",
-              fmt_num(x$visits[j]), fmt_num(x$visits[j + 1L]),
-              formatC(x$dropout[j], format = "f", digits = 3),
-              formatC(cum[j], format = "f", digits = 3)),
+              fmt_num(x$visits[-n_visits]), fmt_num(x$visits[-1L]),
+              formatC(x$dropout, format = "f", digits = 3),
+              formatC(cum, format = "f", digits = 3)),
       sep = "")
   cat(sprintf("\n  Completers:  %s attend all %d visits\n",
               formatC(1 - sum(x$dropout), format = "f", digits = 3), n_visits))

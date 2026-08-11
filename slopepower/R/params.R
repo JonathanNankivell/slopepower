@@ -487,9 +487,10 @@ slope_params <- function(formula, data,
   tim     <- coerce_time(eval_column(parts$time, data, env, context, "time"), context)
   subject <- eval_column(parts$subject, data, env, context, "subject")
 
+  # Same shape as coerce_time() above, for the same problem.
+  if (inherits(y, "haven_labelled")) y <- as.numeric(y)
   if (!is.numeric(y)) {
-    if (inherits(y, "haven_labelled")) y <- as.numeric(y) else
-      stop(sprintf("%s: the outcome must be numeric.", context), call. = FALSE)
+    stop(sprintf("%s: the outcome must be numeric.", context), call. = FALSE)
   }
 
   healthy_expr <- substitute(healthy)
@@ -621,9 +622,6 @@ slope_params <- function(formula, data,
 
   if (comparator == "none") {
     fit <- fit_none_model(dat, ctrl)
-    b <- nlme::fixef(fit)
-    slope <- fixef_term(b, slope_fixef_parts("none")[[1L]], context)
-    slope_comparator <- NA_real_
 
   } else if (comparator == "treated") {
     # Stata: mixed y time placebo#c.time || subject: time, cov(uns)
@@ -631,11 +629,6 @@ slope_params <- function(formula, data,
     # slopes. A numeric placebo indicator keeps the coefficient mapping explicit.
     dat$sp_placebo_time <- (1 - dat$sp_case) * dat$sp_time
     fit <- fit_treated_model(dat, ctrl)
-    b <- nlme::fixef(fit)
-    parts            <- slope_fixef_parts("treated")
-    time_term        <- fixef_term(b, parts[[1L]], context)
-    slope            <- time_term + fixef_term(b, parts[[2L]], context)  # control arm
-    slope_comparator <- time_term                                        # treated arm
 
   } else {
     dat$sp_control      <- 1 - dat$sp_case
@@ -644,24 +637,29 @@ slope_params <- function(formula, data,
     dat$sp_grp <- factor(ifelse(dat$sp_case == 1, "case", "control"),
                          levels = c("control", "case"))
 
+    # Both outcomes are decided inside the handler, so `fit` only ever holds a
+    # model or NULL. Capturing the condition into `fit` and testing its class
+    # afterwards made "did the full model fail?" a fact about `fit`'s type, and
+    # left a window in which the variable held a condition object rather than a
+    # fit.
     fit <- NULL
     if (!isTRUE(common_variance)) {
-      fit <- tryCatch(fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl),
-                      error = function(e) e)
-      if (inherits(fit, "error")) {
-        if (isFALSE(common_variance)) {
-          stop(sprintf(paste0("%s: the full model did not converge and ",
-                              "`common_variance = FALSE` forbids the reduced ",
-                              "structure. Underlying error: %s"),
-                       context, conditionMessage(fit)), call. = FALSE)
-        }
-        message(sprintf(paste0("%s: the full random-effects structure for healthy ",
-                               "controls did not converge; falling back to a ",
-                               "random intercept only for controls (equivalent to ",
-                               "the Stata `nocontvar` option). This does not affect ",
-                               "the estimates returned for cases."), context))
-        fit <- NULL
-      }
+      fit <- tryCatch(
+        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl),
+        error = function(e) {
+          if (isFALSE(common_variance)) {
+            stop(sprintf(paste0("%s: the full model did not converge and ",
+                                "`common_variance = FALSE` forbids the reduced ",
+                                "structure. Underlying error: %s"),
+                         context, conditionMessage(e)), call. = FALSE)
+          }
+          message(sprintf(paste0("%s: the full random-effects structure for healthy ",
+                                 "controls did not converge; falling back to a ",
+                                 "random intercept only for controls (equivalent to ",
+                                 "the Stata `nocontvar` option). This does not affect ",
+                                 "the estimates returned for cases."), context))
+          NULL
+        })
     }
     if (is.null(fit)) {
       reduced_used <- TRUE
@@ -671,13 +669,23 @@ slope_params <- function(formula, data,
                                      context, conditionMessage(e)), call. = FALSE)
                       })
     }
-
-    b <- nlme::fixef(fit)
-    parts            <- slope_fixef_parts("healthy")
-    time_term        <- fixef_term(b, parts[[1L]], context)
-    slope            <- time_term + fixef_term(b, parts[[2L]], context)  # cases
-    slope_comparator <- time_term                                        # controls
   }
+
+  # One rule for all three models: the slope is the sum of the comparator's
+  # fixed-effect parts, and the comparator's own slope is the first of them
+  # (the bare time term) -- the treated arm under `treated`, the healthy
+  # controls under `healthy`, and nothing at all under `none`, which has a
+  # single part. Written per branch, the `treated` and `healthy` blocks were
+  # identical apart from a comparator string already in scope, so the guarantee
+  # slope_fixef_parts() exists to give -- that the values summed here and the
+  # variances summed in slope_se() can never name different coefficients -- held
+  # only by inspection. This is the same vapply() over the same mapping that
+  # slope_se() (bootstrap.R) already uses.
+  b <- nlme::fixef(fit)
+  fixef_values <- vapply(slope_fixef_parts(comparator),
+                         function(p) fixef_term(b, p, context), numeric(1L))
+  slope <- sum(fixef_values)
+  slope_comparator <- if (length(fixef_values) > 1L) fixef_values[[1L]] else NA_real_
 
   # Random-effects covariance and residual variance are extracted by the same
   # names either way: the case-specific random-slope block and residual level
@@ -866,25 +874,24 @@ print.slope_params <- function(x, ...) {
   cat("Slope parameters (", lab, ")\n\n", sep = "")
 
   if (!is.na(x$n_obs)) {
-    cat(fmt_line("number of observations in model", x$n_obs, digits = 0L), "\n")
-    cat(fmt_line("number of participants in model", x$n_subjects, digits = 0L), "\n")
+    cat_line("number of observations in model", x$n_obs, digits = 0L)
+    cat_line("number of participants in model", x$n_subjects, digits = 0L)
   } else {
-    cat(fmt_line("source", "supplied directly"), "\n")
+    cat_line("source", "supplied directly")
   }
 
   labels <- slope_labels(x$comparator)
-  cat(fmt_line(labels$own, x$slope), "\n")
+  cat_line(labels$own, x$slope)
   if (!is.na(x$slope_comparator)) {
-    cat(fmt_line(labels$comparator, x$slope_comparator), "\n")
-    cat(fmt_line("observed difference in slopes",
-                 x$slope - x$slope_comparator), "\n")
+    cat_line(labels$comparator, x$slope_comparator)
+    cat_line("observed difference in slopes", x$slope - x$slope_comparator)
   }
 
   cat("\n")
-  cat(fmt_line("variance of random intercepts", x$sigma2_intercept), "\n")
-  cat(fmt_line("variance of random slopes", x$sigma2_slope), "\n")
-  cat(fmt_line("covariance of intercept and slope", x$sigma_cov), "\n")
-  cat(fmt_line("residual variance", x$sigma2_residual), "\n")
+  cat_line("variance of random intercepts", x$sigma2_intercept)
+  cat_line("variance of random slopes", x$sigma2_slope)
+  cat_line("covariance of intercept and slope", x$sigma_cov)
+  cat_line("residual variance", x$sigma2_residual)
 
   if (isTRUE(x$common_variance)) {
     cat("\nNote: reduced random-effects structure used for healthy controls\n")

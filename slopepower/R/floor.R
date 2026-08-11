@@ -110,20 +110,12 @@ floor_result <- function(params, effectiveness, target, power, alpha, context) {
                         z_alpha(alpha, context), power)
 
   structure(
-    list(
-      n                = 2 * sized$n_per_arm,
-      n_per_arm        = sized$n_per_arm,
-      power            = power,
-      alpha            = alpha,
-      effectiveness    = if (identical(comp$target, "observed")) NA_real_ else comp$effectiveness,
-      target           = comp$target,
-      tte              = comp$tte,
-      var_tte          = var_tte,
-      effect_size      = effect_size,
-      slope_difference = comp$slope_difference,
-      reference_slope  = comp$reference_slope,
-      params           = params
-    ),
+    # No `design` argument, so the field is absent rather than NULL -- the 12
+    # fields of CONTRACT.md section 4.3, from the same assembler that gives
+    # solve_slope() its 13.
+    stage_two_result(comp, n_per_arm = sized$n_per_arm, power = power,
+                     alpha = alpha, var_tte = var_tte,
+                     effect_size = effect_size, params = params),
     class = c("slope_sample_size_floor", "slope_result")
   )
 }
@@ -286,18 +278,17 @@ slope_sample_size_floor.default <- function(x, ...) {
 print.slope_sample_size_floor <- function(x, ...) {
   print_data_block(x)
   cat("\nParameters for planned study:\n")
-  cat(fmt_line("alpha", x$alpha), "\n", sep = "")
-  cat(fmt_line("power", x$power), "\n", sep = "")
-  cat(fmt_line("effectiveness", x$effectiveness), "\n", sep = "")
-  cat(fmt_line("target treatment difference in slopes", x$tte), "\n", sep = "")
+  cat_line("alpha", x$alpha)
+  cat_line("power", x$power)
+  print_target_lines(x)
   # Where print.slope_sample_size() shows the schedule and its dropouts. Saying
   # so explicitly, rather than omitting the line, is the point of the object:
   # the reader should not have to wonder which schedule produced the number.
-  cat(fmt_line("visit schedule", "any (the bound holds for all)"), "\n", sep = "")
+  cat_line("visit schedule", "any (the bound holds for all)")
   cat("\n  Lower bound on sample size:\n")
-  cat(fmt_line("N", x$n, digits = 0L), "\n", sep = "")
-  cat(fmt_line("N per arm", x$n_per_arm, digits = 0L), "\n", sep = "")
-  cat(fmt_line("limiting s*^2", x$var_tte), "\n", sep = "")
+  cat_line("N", x$n, digits = 0L)
+  cat_line("N per arm", x$n_per_arm, digits = 0L)
+  cat_line("limiting s*^2", x$var_tte)
   cat("\n")
   invisible(x)
 }
