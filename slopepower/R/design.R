@@ -106,6 +106,7 @@ fmt_call_vec <- function(x) {
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 #' calculations for trials that compare slopes over time: Introducing the
 #' slopepower command. \emph{Stata Journal} 21(3): 575--601.
+#' \doi{10.1177/1536867X211045512}
 #'
 #' @examples
 #' trial_design(c(0, 1, 2))
@@ -276,14 +277,13 @@ check_dropout_values <- function(dropout, name, ctx) {
   invisible(dropout)
 }
 
-#' @rdname check_dropout_values
-#'
 #' The length rule, shared for the same reason and by the same argument:
 #' [as_trial_design()] used to write its own terser version of this message, so
 #' a hand-built design -- the one route whose author had no constructor to
 #' guide them -- got the *worse* of the two diagnoses for the identical
 #' mistake. `name` carries the caller's spelling of the vector so the message
 #' names what the user actually typed.
+#' @rdname check_dropout_values
 #' @noRd
 check_dropout_length <- function(dropout, visits, name, ctx) {
   n_intervals <- length(visits) - 1L

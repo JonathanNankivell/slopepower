@@ -456,6 +456,7 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
 #' sample-size calculations for trials that compare slopes over time:
 #' Introducing the slopepower command. \emph{The Stata Journal} 21(3): 575--601.
+#' \doi{10.1177/1536867X211045512}
 #'
 #' @seealso [slope_params_manual()] to supply parameters directly,
 #'   [slope_sample_size()] and [slope_power()] for stage two,

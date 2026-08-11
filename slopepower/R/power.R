@@ -231,6 +231,26 @@ treatment_effect_var <- function(sigma, t, context) {
 # effect size
 # ---------------------------------------------------------------------------
 
+#' Is the reference slope the comparator's own slope, or zero?
+#'
+#' CONTRACT.md section 5.3 in one predicate. Two places need the answer: the
+#' calculation, which uses it to pick `reference_slope`, and
+#' [print_data_block()], which uses it to decide whether to show the comparator
+#' slope and the difference from it at all. Written twice, in two shapes, they
+#' could drift -- and a renderer that disagreed with the calculation would
+#' silently misdescribe the number beside it rather than error, which is the
+#' hazard [slope_labels()] was extracted to remove for the slopes' *names*.
+#'
+#' `target = "observed"` implies `comparator == "treated"` (enforced in
+#' [target_components()]), so naming the comparator in that arm would be
+#' redundant. Note the third row of the section 5.3 table: with
+#' `target = "effectiveness"` a treated arm is *ignored*, and the effect is
+#' measured toward zero.
+#' @noRd
+reference_is_comparator <- function(comparator, target) {
+  identical(target, "observed") || identical(comparator, "healthy")
+}
+
 #' Resolve the reference slope, the effectiveness and the target treatment
 #' effect --- everything that does not involve the visit schedule
 #'
@@ -252,26 +272,6 @@ treatment_effect_var <- function(sigma, t, context) {
 #' points, the grid wrappers and the floor alike -- rather than being plumbed
 #' down here as a `missing()` flag on every intervening signature.
 #' @noRd
-#' Is the reference slope the comparator's own slope, or zero?
-#'
-#' CONTRACT.md section 5.3 in one predicate. Two places need the answer: the
-#' calculation, which uses it to pick `reference_slope`, and
-#' [print_data_block()], which uses it to decide whether to show the comparator
-#' slope and the difference from it at all. Written twice, in two shapes, they
-#' could drift -- and a renderer that disagreed with the calculation would
-#' silently misdescribe the number beside it rather than error, which is the
-#' hazard [slope_labels()] was extracted to remove for the slopes' *names*.
-#'
-#' `target = "observed"` implies `comparator == "treated"` (enforced in
-#' [target_components()]), so naming the comparator in that arm would be
-#' redundant. Note the third row of the section 5.3 table: with
-#' `target = "effectiveness"` a treated arm is *ignored*, and the effect is
-#' measured toward zero.
-#' @noRd
-reference_is_comparator <- function(comparator, target) {
-  identical(target, "observed") || identical(comparator, "healthy")
-}
-
 target_components <- function(params, target, effectiveness, context) {
   target <- match.arg(target, c("effectiveness", "observed"))
 
@@ -622,6 +622,7 @@ solve_slope <- function(params, design, effectiveness,
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 #' calculations for trials that compare slopes over time: Introducing the
 #' slopepower command. \emph{Stata Journal} 21(3): 575--601.
+#' \doi{10.1177/1536867X211045512}
 #'
 #' @name stage_two
 #' @keywords internal
