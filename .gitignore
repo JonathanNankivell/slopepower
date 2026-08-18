@@ -8,3 +8,12 @@
 
 # direnv / nix
 .direnv/
+.envrc
+flake.nix
+flake.lock
+
+# root-level Stata / reference files
+/*.dta
+/slopepower.ado
+/slopepower.sthlp
+/*.pdf
