@@ -54,18 +54,37 @@ Not supported:
 
 ## Installing
 
-The package source lives in this directory. From any other directory:
+The package lives on GitHub at
+[JonathanNankivell/slopepower](https://github.com/JonathanNankivell/slopepower),
+in the `slopepower` subdirectory of the repository (the repository root also
+holds the original Stata `.ado`/`.sthlp` files and the reference `.dta` data
+this package was ported from). Install straight from there:
 
 ```r
 install.packages("remotes")   # once
-remotes::install_local("~/Documents/Masters Documents/Summer project/transpilation/slopepower")
+remotes::install_github("JonathanNankivell/slopepower", subdir = "slopepower",
+                         build_vignettes = TRUE)
 ```
 
-or from a shell:
+If you already have a local clone, install from that copy instead of fetching
+from GitHub again:
+
+```r
+remotes::install_local("<path to your clone>/slopepower", build_vignettes = TRUE)
+```
+
+or from a shell, which knits the vignettes by default (this is what CRAN does):
 
 ```sh
-R CMD INSTALL "$HOME/Documents/Masters Documents/Summer project/transpilation/slopepower"
+R CMD build "<path to your clone>/slopepower" && R CMD INSTALL slopepower_*.tar.gz
 ```
+
+Building the vignettes needs **pandoc** on `PATH` — see [Vignettes](#vignettes)
+below — and adds a little time to the install. If you don't want them, drop
+`build_vignettes` (or set it to `FALSE`), or pass `--no-build-vignettes` to
+`R CMD build`; either way `vignette("...")` will then report that none exist.
+Once installed the built HTML is self-contained; reading it needs neither
+pandoc nor a network connection.
 
 Then in any project:
 
@@ -77,27 +96,8 @@ Requirements: R >= 4.1 and `nlme` (which ships with R). `haven` is only needed i
 you read Stata `.dta` files; `testthat` only for the test suite.
 
 Re-run the install command after pulling changes — there is no auto-reload. If you
-are editing the package itself, `devtools::load_all("<that path>")` is faster.
-
-### Installing the vignettes too
-
-Neither command above installs the vignettes: `R CMD INSTALL` never builds them,
-and `remotes::install_local()` does not by default, so `vignette("...")` will
-report that none exist. Ask for them explicitly:
-
-```r
-remotes::install_local("<that path>", build_vignettes = TRUE)
-```
-
-or build the tarball first, which is what CRAN does:
-
-```sh
-R CMD build "<that path>" && R CMD INSTALL slopepower_*.tar.gz
-```
-
-Either route knits the vignettes, so both need **pandoc** on `PATH` — see
-[Vignettes](#vignettes) below. Once installed the built HTML is self-contained;
-reading it needs neither pandoc nor a network connection.
+are editing the package itself, `devtools::load_all("<path to your clone>/slopepower")`
+is faster.
 
 ## Basic use
 

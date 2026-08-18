@@ -32,6 +32,8 @@ Description: An R implementation of the Stata 'slopepower' command of Nash,
 License: MIT + file LICENSE
 Copyright: For details of contributions and copyright holders, see the
     'inst/COPYRIGHTS' file.
+URL: https://github.com/JonathanNankivell/slopepower
+BugReports: https://github.com/JonathanNankivell/slopepower/issues
 Encoding: UTF-8
 Depends: R (>= 4.1)
 Imports: nlme, stats
