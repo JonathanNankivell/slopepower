@@ -321,9 +321,17 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     }
   }
 
+  # Sign-straddling is what section 2.6's pre-check (above, on the analytic
+  # standard error) is a proxy for; this is the thing itself, measured on the
+  # replicates that were actually drawn, so it holds even if the model's
+  # standard error was a poor guide (or `se` came back NA).
+  straddle <- mean(sign(good) != sign(observed))
+
   structure(list(observed = observed, replicates = good, ci = ci,
                  type = used_type, statistic = statistic, R = R,
-                 n_failed = n_failed, level = level, se = se),
+                 n_failed = n_failed, level = level, se = se,
+                 boot_mean = mean(good), boot_sd = stats::sd(good),
+                 straddle = straddle),
             class = "slope_bootstrap")
 }
 
@@ -378,7 +386,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' @param progress Report progress while resampling.
 #'
 #' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,
-#'   `ci`, `type`, `statistic`, `R`, `n_failed`, `level` and `se`.
+#'   `ci`, `type`, `statistic`, `R`, `n_failed`, `level`, `se`, `boot_mean` and
+#'   `boot_sd` (the mean and SD of `replicates`), and `straddle` (the proportion
+#'   of `replicates` with a different sign from `observed`).
 #'
 #' @references
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
@@ -575,10 +585,16 @@ print.slope_bootstrap <- function(x, ...) {
   cat("<slope_bootstrap>\n")
   cat(sprintf("  Statistic:   %s\n", x$statistic))
   cat(sprintf("  Observed:    %s\n", format(x$observed, digits = 6)))
+  cat(sprintf("  Bootstrap:   mean %s, SD %s\n",
+              format(x$boot_mean, digits = 6), format(x$boot_sd, digits = 6)))
   cat(sprintf("  Replicates:  %d used%s\n", length(x$replicates),
               if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else ""))
   cat(sprintf("  %.0f%% %s CI: [%s, %s]\n", 100 * x$level,
               if (identical(x$type, "bca")) "BCa" else "percentile",
               format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
+  if (x$straddle > 0) {
+    cat(sprintf(paste0("  Note:        %.1f%% of replicates fall on the opposite side of ",
+                       "zero from the observed value.\n"), 100 * x$straddle))
+  }
   invisible(x)
 }

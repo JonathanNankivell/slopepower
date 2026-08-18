@@ -92,7 +92,9 @@ quantity the object exists to report.}
 }
 \value{
 An object of class \code{slope_bootstrap}, with elements \code{observed}, \code{replicates},
-\code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed}, \code{level} and \code{se}.
+\code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed}, \code{level}, \code{se}, \code{boot_mean} and
+\code{boot_sd} (the mean and SD of \code{replicates}), and \code{straddle} (the proportion
+of \code{replicates} with a different sign from \code{observed}).
 }
 \description{
 Resamples subjects with replacement, refits the stage-one mixed model on each
@@ -200,6 +202,7 @@ slope_bootstrap(ss3, R = 100, seed = 42)
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
+\doi{10.1177/1536867X211045512}
 }
 \seealso{
 \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_params]{slope_params()}},

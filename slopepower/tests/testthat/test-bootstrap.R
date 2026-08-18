@@ -19,6 +19,27 @@ test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
   expect_lt(abs(mean(reps, na.rm = TRUE) - paper_fit("slpower1")$slope), 0.5)
 })
 
+test_that("slope_bootstrap() reports the mean, SD and straddle of its replicates", {
+  b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 15, seed = 1))
+  expect_equal(b$boot_mean, mean(b$replicates))
+  expect_equal(b$boot_sd, stats::sd(b$replicates))
+  # A well-estimated decline slope: no replicate should cross zero.
+  expect_equal(b$straddle, 0)
+})
+
+test_that("slope_bootstrap() straddle counts replicates of the opposite sign", {
+  # Flattened as in the section 2.6 warning test above, so some replicate
+  # slopes land on the other side of zero from the (small negative) observed
+  # slope.
+  d <- load_paper_data("slpower1")
+  d$sdmt <- d$sdmt + 1.66 * d$time
+  flat <- slope_params(sdmt ~ time | id, d)
+  b <- suppressWarnings(slope_bootstrap(flat, R = 30, seed = 1))
+  expect_gt(b$straddle, 0)
+  expect_equal(b$straddle,
+              mean(sign(b$replicates) != sign(b$observed)))
+})
+
 test_that("slope_bootstrap() is reproducible under a fixed seed", {
   a <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10, seed = 42))
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 10, seed = 42))
@@ -296,6 +317,27 @@ test_that("print.slope_bootstrap() labels a percentile interval and omits a zero
   expect_true(any(grepl("95% percentile CI:", out, fixed = TRUE)))
   expect_true(any(grepl("6 used", out, fixed = TRUE)))
   expect_false(any(grepl("failed", out, fixed = TRUE)))
+})
+
+test_that("print.slope_bootstrap() always reports the bootstrap mean and SD", {
+  out <- capture.output(print(boot_bca))
+  expect_true(any(grepl(sprintf("mean %s, SD %s",
+                                format(boot_bca$boot_mean, digits = 6),
+                                format(boot_bca$boot_sd, digits = 6)),
+                        out, fixed = TRUE)))
+})
+
+test_that("print.slope_bootstrap() notes straddling only when it occurs", {
+  expect_false(any(grepl("opposite side of", capture.output(print(boot_bca)),
+                         fixed = TRUE)))
+
+  d <- load_paper_data("slpower1")
+  d$sdmt <- d$sdmt + 1.66 * d$time
+  flat <- slope_params(sdmt ~ time | id, d)
+  b <- suppressWarnings(slope_bootstrap(flat, R = 30, seed = 1))
+  out <- capture.output(print(b))
+  expect_true(any(grepl(sprintf("%.1f%% of replicates", 100 * b$straddle),
+                        out, fixed = TRUE)))
 })
 
 # --- slope_se() ----------------------------------------------------------
