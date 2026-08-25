@@ -281,12 +281,22 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # Suppressed once around the whole loop rather than per replicate: messages
   # (the progress ticks below) are a different condition class and pass through
   # regardless.
+  #
+  # The refit is caught separately from `compute` so that the replicate's own
+  # slope can be read off it: that -- not the statistic -- is what the
+  # sign-straddling check below has to be measured on. Both failure modes still
+  # land on NA and are discarded together, so which of the two failed does not
+  # change the accounting.
   replicates <- rep(NA_real_, R)
+  slopes <- rep(NA_real_, R)
   tick <- max(1L, floor(R / 10))
   suppressWarnings(for (b in seq_len(R)) {
-    replicates[b] <- tryCatch(
-      compute(refitter(resample_frame(frame, subject_index, groups))),
-      error = function(e) NA_real_)
+    p <- tryCatch(refitter(resample_frame(frame, subject_index, groups)),
+                  error = function(e) NULL)
+    if (!is.null(p)) {
+      slopes[b] <- p$slope
+      replicates[b] <- tryCatch(compute(p), error = function(e) NA_real_)
+    }
     if (isTRUE(progress) && b %% tick == 0L) {
       message(sprintf("%s: %d of %d replicates", context, b, R))
     }
@@ -295,6 +305,10 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   failed <- is.na(replicates)
   n_failed <- sum(failed)
   good <- replicates[!failed]
+  # No NAs to guard against: `slopes[b]` is filled whenever the refit that
+  # `replicates[b]` also depends on succeeded, and new_slope_params() admits
+  # only a finite slope.
+  good_slopes <- slopes[!failed]
   if (length(good) < 2L) {
     stop(sprintf("%s: %d of %d replicates failed; not enough succeeded to form an interval.",
                  context, n_failed, R), call. = FALSE)
@@ -325,7 +339,18 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # standard error) is a proxy for; this is the thing itself, measured on the
   # replicates that were actually drawn, so it holds even if the model's
   # standard error was a poor guide (or `se` came back NA).
-  straddle <- mean(sign(good) != sign(observed))
+  #
+  # Measured on the replicate *slopes*, against the fitted slope -- never on
+  # `good` against `observed`. What the paper (p.583) warns about is bootstrap
+  # samples yielding "estimates of the mean slope that are both negative and
+  # positive", so that some replicates describe a trial reducing a rising slope
+  # and others one reducing a falling slope. Comparing the statistic's own sign
+  # answers a different question, and for the two statistics this exists to
+  # report it is not a question at all: a sample size is a positive integer and
+  # a power lies in [0, 1], so `sign(good) != sign(observed)` was identically 0
+  # for them and the check silently never fired. It agreed with this only for
+  # `statistic = "slope"`, where the two are the same comparison.
+  straddle <- mean(sign(good_slopes) != sign(params$slope))
 
   structure(list(observed = observed, replicates = good, ci = ci,
                  type = used_type, statistic = statistic, R = R,
@@ -388,7 +413,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,
 #'   `ci`, `type`, `statistic`, `R`, `n_failed`, `level`, `se`, `boot_mean` and
 #'   `boot_sd` (the mean and SD of `replicates`), and `straddle` (the proportion
-#'   of `replicates` with a different sign from `observed`).
+#'   of retained replicates whose *refitted slope* has a different sign from the
+#'   fitted slope, whatever `statistic` was asked for --- the section 2.6 hazard
+#'   itself, rather than the analytic proxy for it in `se`).
 #'
 #' @references
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
@@ -593,8 +620,8 @@ print.slope_bootstrap <- function(x, ...) {
               if (identical(x$type, "bca")) "BCa" else "percentile",
               format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
   if (x$straddle > 0) {
-    cat(sprintf(paste0("  Note:        %.1f%% of replicates fall on the opposite side of ",
-                       "zero from the observed value.\n"), 100 * x$straddle))
+    cat(sprintf(paste0("  Note:        %.1f%% of replicates refit a slope on the opposite ",
+                       "side of zero from the fitted one.\n"), 100 * x$straddle))
   }
   invisible(x)
 }
