@@ -230,6 +230,47 @@ resolve_args <- function(p, result) {
   maybe_add_effectiveness(args, result$effectiveness, result$target)
 }
 
+#' Read and restore the caller's random number stream
+#'
+#' `set.seed()` writes to `.Random.seed` in the global environment, so a bare
+#' call to it inside a function reseeds the *session*: every subsequent draw the
+#' caller makes -- a simulation, a permutation test, a second bootstrap left
+#' unseeded on purpose -- is silently determined by whatever seed they passed to
+#' make this one result reproducible. Asking for a reproducible answer should not
+#' be the thing that makes the rest of a script reproducible too, and the effect
+#' leaves no trace: nothing about the returned object records that the stream
+#' moved.
+#'
+#' `current_seed()` returns `NULL` when the caller has not drawn anything yet, in
+#' which case there is no `.Random.seed` and R will initialise one from the clock
+#' and process id on first use. `restore_seed()` puts that state back by removing
+#' the variable rather than writing a placeholder, so the caller's next draw is as
+#' unpredictable as it would have been. The existence check inside it is not
+#' redundant with the one in `current_seed()`: the two run either side of the
+#' bootstrap, and `.Random.seed` is only absent at the second if nothing in
+#' between drew -- which, for a seeded call, cannot happen, but the guard costs
+#' nothing and makes `restore_seed()` total.
+#' @noRd
+current_seed <- function() {
+  if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+    get(".Random.seed", envir = globalenv(), inherits = FALSE)
+  } else {
+    NULL
+  }
+}
+
+#' @rdname current_seed
+#' @noRd
+restore_seed <- function(old) {
+  g <- globalenv()
+  if (is.null(old)) {
+    if (exists(".Random.seed", envir = g, inherits = FALSE)) rm(".Random.seed", envir = g)
+  } else {
+    assign(".Random.seed", old, envir = g)
+  }
+  invisible(NULL)
+}
+
 #' Bootstrap a scalar computed from resampled stage-one parameters
 #'
 #' The resampling scheme, the section 2.6 check and the interval construction are
@@ -242,7 +283,19 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   type <- match.arg(type, c("bca", "percentile"))
   check_whole_number(R, "R", "replicates", context, lower = 1)
   check_probability(level, "level", context)
-  if (!is.null(seed)) set.seed(seed)
+  # Seeded calls are reproducible without reseeding the session: the caller's
+  # stream is put back on the way out. `on.exit()` rather than a restore at the
+  # end, because this function can leave by several routes -- the "not enough
+  # replicates succeeded" stop, an error no tryCatch covers, a user interrupt
+  # part-way through several hundred fits -- and all of them must leave the
+  # stream as they found it. `seed = NULL` touches nothing, so an unseeded
+  # bootstrap draws from and advances the stream as any other RNG-using function
+  # does; back-to-back unseeded calls must give different answers.
+  if (!is.null(seed)) {
+    old_seed <- current_seed()
+    on.exit(restore_seed(old_seed), add = TRUE)
+    set.seed(seed)
+  }
 
   # `observed` is read off the object rather than recomputed. It is the same
   # number either way -- `compute` on the original parameters reproduces the
@@ -407,7 +460,10 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' @param ... Not used. The calculation is taken from `x`, so any argument here
 #'   is an error rather than something silently ignored.
 #' @param level Confidence level for the interval.
-#' @param seed Optional integer seed, for reproducibility.
+#' @param seed Optional integer seed, for reproducibility. The caller's random
+#'   number stream is restored afterwards, so a seeded call reproduces its own
+#'   result without reseeding the session; leaving it `NULL` draws from, and
+#'   advances, the stream as usual.
 #' @param progress Report progress while resampling.
 #'
 #' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,

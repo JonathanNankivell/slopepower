@@ -73,6 +73,89 @@ test_that("slope_bootstrap() is reproducible under a fixed seed", {
   expect_equal(a$replicates, b$replicates)
 })
 
+# --- and does so without reseeding the caller ----------------------------
+# `seed` exists to make one result reproducible. It must not also decide what
+# every later draw in the caller's script does, which a bare set.seed() inside
+# the function would: .Random.seed lives in the global environment.
+
+test_that("a seeded slope_bootstrap() leaves the caller's stream untouched", {
+  set.seed(99)
+  before <- .Random.seed
+  suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 4,
+                                   type = "percentile", seed = 7))
+  expect_identical(.Random.seed, before)
+
+  # The state being equal is the mechanism; this is what it buys the caller.
+  set.seed(99)
+  want <- stats::runif(3)
+  set.seed(99)
+  suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 4,
+                                   type = "percentile", seed = 7))
+  expect_equal(stats::runif(3), want)
+})
+
+test_that("the stream is restored even when the bootstrap errors out", {
+  # R = 1 cannot yield the two replicates an interval needs, so this leaves by
+  # the stop() rather than by returning -- the reason the restore is an
+  # on.exit() and not a line at the end of the function.
+  set.seed(99)
+  before <- .Random.seed
+  expect_error(
+    suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 1,
+                                     type = "percentile", seed = 7)),
+    "not enough succeeded")
+  expect_identical(.Random.seed, before)
+})
+
+test_that("a seeded bootstrap leaves no .Random.seed where there was none", {
+  # A session that has not drawn yet has no .Random.seed at all, and R seeds
+  # itself from the clock on first use. Restoring that means removing the
+  # variable, not writing a placeholder that would fix the caller's next draw.
+  #
+  # Emptying the global stream is this test's setup, so it puts back whatever
+  # was there on the way out: a later test drawing without a seed of its own
+  # must not depend on whether this one ran first.
+  outer <- slopepower:::current_seed()
+  on.exit(slopepower:::restore_seed(outer), add = TRUE)
+  if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+    rm(".Random.seed", envir = globalenv())
+  }
+  suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 4,
+                                   type = "percentile", seed = 7))
+  expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+})
+
+test_that("an unseeded slope_bootstrap() still draws from, and advances, the stream", {
+  # The other half of the contract: NULL touches nothing, so consecutive
+  # unseeded calls must differ rather than repeat.
+  set.seed(1)
+  a <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 5,
+                                        type = "percentile"))
+  b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 5,
+                                        type = "percentile"))
+  expect_false(isTRUE(all.equal(a$replicates, b$replicates)))
+})
+
+test_that("restore_seed() is total on both states", {
+  old <- slopepower:::current_seed()
+  on.exit(slopepower:::restore_seed(old), add = TRUE)
+
+  set.seed(5)
+  saved <- slopepower:::current_seed()
+  expect_type(saved, "integer")
+  stats::runif(1)
+  slopepower:::restore_seed(saved)
+  expect_identical(.Random.seed, saved)
+
+  rm(".Random.seed", envir = globalenv())
+  expect_null(slopepower:::current_seed())
+  slopepower:::restore_seed(NULL)          # nothing to remove; must not error
+  expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+  set.seed(5)
+  slopepower:::restore_seed(NULL)          # now there is; must remove it
+  expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+})
+
 test_that("slope_bootstrap() dispatches on what it is handed", {
   p <- paper_fit("slpower1")
   ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
