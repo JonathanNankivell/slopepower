@@ -64,6 +64,92 @@ test_that("cumulative dropout cannot exceed 1", {
   )
 })
 
+# --- dropout_rate() on the ordinary (non-grid) path -------------------------
+#
+# dropout_rate() was originally defined in grid.R and expanded only by
+# grid_impl(), so trial_design(v, dropout_rate(0.05)) -- the call dropout_rate()'s
+# own documentation pointed at -- failed with "`dropout` must be numeric or
+# NULL; got dropout_rate". These pin the constructor as the place the expansion
+# happens, which is what makes the grid's use of it a special case rather than
+# the only case.
+
+test_that("trial_design() expands a dropout_rate() to per-interval proportions", {
+  d <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05)))
+  expect_equal(d$dropout, rep(0.05, 3))
+  expect_true(d$has_dropout)
+  # Expansion does not change the provenance the object records: the vector it
+  # produced is incremental, which is what "incremental" already means here.
+  expect_identical(d$dropout_type, "incremental")
+})
+
+test_that("the same rate expands differently for different schedules", {
+  # The whole point of the object: 5% per unit time over 3 units is the same
+  # total dropout however many visits it is spread across.
+  annual <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05)))
+  halves <- suppressWarnings(trial_design(seq(0, 3, by = 0.5), dropout = dropout_rate(0.05)))
+  single <- suppressWarnings(trial_design(c(0, 3), dropout = dropout_rate(0.05)))
+
+  expect_equal(annual$dropout, rep(0.05, 3))
+  expect_equal(halves$dropout, rep(0.025, 6))
+  expect_equal(single$dropout, 0.15)
+  expect_equal(sum(annual$dropout), sum(halves$dropout))
+  expect_equal(sum(annual$dropout), sum(single$dropout))
+})
+
+test_that("`per` scales the rate to the units of the visit times", {
+  d <- suppressWarnings(trial_design(c(0, 6, 12, 24), dropout = dropout_rate(0.10, per = 12)))
+  expect_equal(d$dropout, c(0.05, 0.05, 0.10))
+})
+
+test_that("a zero rate yields a design with no dropout", {
+  d <- trial_design(c(0, 1, 2), dropout = dropout_rate(0))
+  expect_equal(d$dropout, c(0, 0))
+  expect_false(d$has_dropout)
+})
+
+test_that("a rate implying total dropout above 1 errors in terms of the rate", {
+  err <- expect_error(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.5)),
+                      "exceeds 1")
+  # Diagnosed by `rate` and `per`, not by the expanded vector: naming a vector
+  # the caller never wrote would send them looking for the wrong mistake.
+  expect_match(conditionMessage(err), "rate of 0.5 per 1")
+  expect_match(conditionMessage(err), "lasting 3")
+})
+
+test_that("a dropout_rate() cannot be combined with dropout_type = cumulative", {
+  err <- expect_error(
+    trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05),
+                 dropout_type = "cumulative"),
+    "cannot be combined")
+  expect_match(conditionMessage(err), "already incremental")
+})
+
+test_that("a rate and the vector it expands to give the same design", {
+  rate <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05)))
+  hand <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = rep(0.05, 3)))
+  expect_equal(rate, hand)
+})
+
+test_that("a rate warns about the baseline-only stratum like any other dropout", {
+  # Not suppressed here: every non-zero rate puts someone in the baseline-only
+  # stratum, and on this path -- unlike the grid, which collects the warning and
+  # reports it once per table -- the user is told each time.
+  expect_warning(trial_design(c(0, 1, 2), dropout = dropout_rate(0.05)),
+                 "contribute nothing")
+})
+
+test_that("a dropout_rate() in a hand-built design is refused with the fix", {
+  # `trial_design()` expands on construction, so a rate surviving into the
+  # stored field means the object never went through the constructor. Expanding
+  # it at the stage-two boundary would leave `has_dropout` describing something
+  # else, so as_trial_design() names the constructor instead.
+  d <- structure(list(visits = c(0, 1, 2, 3), dropout = dropout_rate(0.05),
+                      has_dropout = TRUE, dropout_type = "incremental"),
+                 class = "trial_design")
+  err <- expect_error(slope_sample_size(ref_params(), d), "must be numeric")
+  expect_match(conditionMessage(err), "trial_design(visits = c(0, 1, 2, 3)", fixed = TRUE)
+})
+
 # --- the Stata-form checks this layer restates or repairs --------------------
 
 test_that("dropout summing to exactly 1 is accepted", {
