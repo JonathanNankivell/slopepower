@@ -8,6 +8,16 @@
 #
 # R is kept small throughout; these test the machinery, not the coverage.
 
+# A slope flattened to just under the section 2.6 threshold, so that a handful
+# of replicates genuinely refit a slope of the other sign. Three tests need it;
+# built on demand rather than at load time so that a fit is not paid for by
+# every other test in the file.
+flat_fit <- function() {
+  d <- load_paper_data("slpower1")
+  d$sdmt <- d$sdmt + 1.66 * d$time
+  slope_params(sdmt ~ time | id, d)
+}
+
 test_that("slope_bootstrap() returns replicates with a spread, for the slope", {
   b <- suppressWarnings(slope_bootstrap(paper_fit("slpower1"), R = 15, seed = 1))
   expect_true(is.list(b))
@@ -31,13 +41,30 @@ test_that("slope_bootstrap() straddle counts replicates of the opposite sign", {
   # Flattened as in the section 2.6 warning test above, so some replicate
   # slopes land on the other side of zero from the (small negative) observed
   # slope.
-  d <- load_paper_data("slpower1")
-  d$sdmt <- d$sdmt + 1.66 * d$time
-  flat <- slope_params(sdmt ~ time | id, d)
-  b <- suppressWarnings(slope_bootstrap(flat, R = 30, seed = 1))
+  b <- suppressWarnings(slope_bootstrap(flat_fit(), R = 30, seed = 1))
   expect_gt(b$straddle, 0)
+  # For `statistic = "slope"` the replicates *are* the refitted slopes, so the
+  # definition below coincides with the general one.
   expect_equal(b$straddle,
               mean(sign(b$replicates) != sign(b$observed)))
+})
+
+test_that("slope_bootstrap() straddle is measured on the slope, not the statistic", {
+  # The point of the check: a sample size is a positive integer, so its own
+  # sign can never straddle zero. What straddles is the slope each replicate
+  # refits, and the same resampling (same seed, same subjects drawn) must
+  # therefore report the same proportion whichever statistic is asked for.
+  flat <- flat_fit()
+  ref <- suppressWarnings(slope_bootstrap(flat, R = 30, seed = 1))
+  ss <- suppressWarnings(
+    slope_sample_size(flat, c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(
+    slope_bootstrap(ss, R = 30, type = "percentile", seed = 1))
+
+  expect_true(all(b$replicates > 0))          # nothing to straddle here
+  expect_equal(mean(sign(b$replicates) != sign(b$observed)), 0)
+  expect_gt(b$straddle, 0)
+  expect_equal(b$straddle, ref$straddle)
 })
 
 test_that("slope_bootstrap() is reproducible under a fixed seed", {
@@ -328,13 +355,10 @@ test_that("print.slope_bootstrap() always reports the bootstrap mean and SD", {
 })
 
 test_that("print.slope_bootstrap() notes straddling only when it occurs", {
-  expect_false(any(grepl("opposite side of", capture.output(print(boot_bca)),
+  expect_false(any(grepl("opposite side of zero", capture.output(print(boot_bca)),
                          fixed = TRUE)))
 
-  d <- load_paper_data("slpower1")
-  d$sdmt <- d$sdmt + 1.66 * d$time
-  flat <- slope_params(sdmt ~ time | id, d)
-  b <- suppressWarnings(slope_bootstrap(flat, R = 30, seed = 1))
+  b <- suppressWarnings(slope_bootstrap(flat_fit(), R = 30, seed = 1))
   out <- capture.output(print(b))
   expect_true(any(grepl(sprintf("%.1f%% of replicates", 100 * b$straddle),
                         out, fixed = TRUE)))
