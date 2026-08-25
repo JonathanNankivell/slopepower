@@ -36,6 +36,7 @@ slope_params(sdmt ~ visit | id, data = slpower1)
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
+\doi{10.1177/1536867X211045512}
 }
 \seealso{
 \link{slpower2} and \link{slpower3} for the two-group examples.
