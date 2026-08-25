@@ -17,12 +17,20 @@ immediately with the offending name, rather than at the moment a user happens
 to reach the branch that calls it.
 }
 
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/JonathanNankivell/slopepower}
+  \item Report bugs at \url{https://github.com/JonathanNankivell/slopepower/issues}
+}
+
+}
 \author{
-\strong{Maintainer}: Jonathan Nankivell \email{nankivelljonathan@gmail.com} (Author and copyright holder of the R implementation) [copyright holder]
+\strong{Maintainer}: Jonathan Nankivell \email{Jonathan.Nankivell1@lshtm.ac.uk} (Author and copyright holder of the R implementation) [copyright holder]
 
 Authors:
 \itemize{
-  \item Jonathan Nankivell \email{nankivelljonathan@gmail.com} (Author and copyright holder of the R implementation) [copyright holder]
+  \item Jonathan Nankivell \email{Jonathan.Nankivell1@lshtm.ac.uk} (Author and copyright holder of the R implementation) [copyright holder]
 }
 
 Other contributors:
