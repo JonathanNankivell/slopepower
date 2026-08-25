@@ -82,7 +82,10 @@ is an error rather than something silently ignored.}
 
 \item{level}{Confidence level for the interval.}
 
-\item{seed}{Optional integer seed, for reproducibility.}
+\item{seed}{Optional integer seed, for reproducibility. The caller's random
+number stream is restored afterwards, so a seeded call reproduces its own
+result without reseeding the session; leaving it \code{NULL} draws from, and
+advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
