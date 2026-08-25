@@ -94,7 +94,9 @@ quantity the object exists to report.}
 An object of class \code{slope_bootstrap}, with elements \code{observed}, \code{replicates},
 \code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed}, \code{level}, \code{se}, \code{boot_mean} and
 \code{boot_sd} (the mean and SD of \code{replicates}), and \code{straddle} (the proportion
-of \code{replicates} with a different sign from \code{observed}).
+of retained replicates whose \emph{refitted slope} has a different sign from the
+fitted slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
+itself, rather than the analytic proxy for it in \code{se}).
 }
 \description{
 Resamples subjects with replacement, refits the stage-one mixed model on each
