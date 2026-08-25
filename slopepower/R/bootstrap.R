@@ -41,19 +41,53 @@ boot_frame <- function(params, context) {
 #'
 #' The call to `slope_params()` -- formula, `origin = "none"` (the times in the
 #' recovered frame have already been re-origined per subject, so this avoids
-#' repeating that work and the message that goes with it), and which comparator
-#' argument to pass -- is identical for every replicate of a given bootstrap;
-#' only the resampled frame differs. Assembling it once here, rather than once
-#' per replicate, means [run_bootstrap()]'s loop -- run several hundred times,
-#' plus once per subject for the BCa jackknife -- reconstructs only what
-#' actually changes between replicates.
+#' repeating that work and the message that goes with it), which comparator
+#' argument to pass, and the random-effects structure to hold fixed -- is
+#' identical for every replicate of a given bootstrap; only the resampled frame
+#' differs. Assembling it once here, rather than once per replicate, means
+#' [run_bootstrap()]'s loop -- run several hundred times, plus once per subject
+#' for the BCa jackknife -- reconstructs only what actually changes between
+#' replicates.
+#'
+#' `common_variance` is pinned to `params$common_variance`, which records the
+#' structure the *observed* fit ended up with -- whether the caller asked for it
+#' or `slope_params()` fell back to it -- so every replicate fits the model the
+#' point estimate came from. Left unset, as it was, the argument defaulted to
+#' `NULL` on every replicate, and all four combinations went wrong:
+#'
+#' * `TRUE`: the observed fit used the reduced structure; every replicate tried
+#'   the full one. Different model, same interval.
+#' * `FALSE`: the caller forbade the reduced structure, and `slope_params()`
+#'   errors on it -- but a replicate passing `NULL` fell back to it silently and
+#'   was counted as a success, so the interval contained fits the caller had
+#'   ruled out.
+#' * `NULL` either way: replicates that could not fit the full structure fell
+#'   back one at a time, mixing two models within a single interval instead of
+#'   being reported as failures.
+#'
+#' It matters only under `healthy`, and there only through `slope_comparator`.
+#' The model factorises per group (see the `common_variance` note in
+#' [slope_params()]), so the case estimates are invariant; the *controls'* slope
+#' is not, and that is what `slope_difference` -- and so every stage-two answer
+#' -- is measured against. Balanced complete data hides this entirely, because
+#' GLS then coincides with OLS whatever the covariance structure; ragged
+#' follow-up does not, and resampling preserves each subject's own visit
+#' pattern, so an unbalanced study stays unbalanced in every replicate.
 #' @noRd
-make_refitter <- function(comparator) {
+make_refitter <- function(params) {
+  comparator <- params$comparator
   args <- list(formula = y ~ time | subject, data = quote(frame), origin = "none")
   cl <- as.call(c(list(quote(slope_params)), args,
-                  if (identical(comparator, "healthy")) list(healthy = quote(group))
-                  else if (identical(comparator, "treated")) list(treated = quote(group))
-                  else NULL))
+                  if (identical(comparator, "healthy")) {
+                    # Only under `healthy`: slope_params() warns that
+                    # `common_variance` is ignored for the other two, and
+                    # passing it there would earn that warning several hundred
+                    # times over for an argument that changes nothing.
+                    list(healthy = quote(group),
+                         common_variance = isTRUE(params$common_variance))
+                  } else if (identical(comparator, "treated")) {
+                    list(treated = quote(group))
+                  } else NULL))
   # Evaluated with the closure's own frame as the enclosure, so the free symbol
   # `slope_params` resolves through this function's environment into the package
   # namespace. Rooting it in `parent.frame()` instead looked the name up in
@@ -271,7 +305,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
     unname(split(positions, sub_group))
   }
-  refitter <- make_refitter(params$comparator)
+  refitter <- make_refitter(params)
 
   # Warnings are suppressed for every replicate. Anything worth saying about the
   # calculation -- a target effect that makes the slope more extreme, say -- is a
@@ -389,6 +423,14 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' came from two-group data, resampling is stratified so that each replicate has
 #' the same number of cases and controls (or treated and control subjects) as the
 #' original.
+#'
+#' Every replicate refits the random-effects structure the original fit ended up
+#' with, so a `healthy` study whose controls were fitted with a random intercept
+#' only --- because `common_variance = TRUE` asked for it, or because the full
+#' structure failed to converge --- is bootstrapped under that same structure
+#' throughout. A replicate that cannot fit it is discarded and counted in
+#' `n_failed` rather than quietly refitted under the other one, so an interval
+#' never mixes the two.
 #'
 #' Refitting a mixed model several hundred times is slow, and `type = "bca"` adds
 #' a leave-one-subject-out jackknife on top, costing one further fit per subject.

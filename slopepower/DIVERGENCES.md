@@ -496,6 +496,20 @@ a subject drawn twice counts as two people rather than colliding), and
 stratification by group is automatic whenever `comparator != "none"`. There
 is nothing to misconfigure because there is nothing to configure.
 
+Every replicate also refits the random-effects structure the observed fit
+ended up with. Stata gets this for free: `nocontvar` is part of the command
+string the `bootstrap:` prefix re-runs, and there is no automatic fallback
+for it to disagree with. R has one (divergence 11), so the structure a fit
+ended up with is not always the one that was asked for, and it has to be
+read off `params$common_variance` and pinned — otherwise a replicate that
+could not fit the full structure would quietly fall back to the reduced one
+and land in the same interval as a point estimate fitted the other way. A
+replicate that cannot fit the pinned structure is counted in `n_failed`
+instead. This is visible only under `healthy`, and only through the
+controls' slope: the model factorises per group, so the case estimates are
+invariant, but `slope_comparator` — what `slope_difference` is measured
+against — is not.
+
 `slope_bootstrap()` also warns when the fitted slope is less than 2.5× its
 standard error, per the paper's own §2.6 recommendation — a check the Stata
 side leaves to the user to remember to apply by eye.

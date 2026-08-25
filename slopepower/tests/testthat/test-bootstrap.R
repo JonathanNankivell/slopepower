@@ -269,7 +269,7 @@ test_that("bca_interval() falls back when under three jackknife values survive",
   # not the already-covered qnorm(0)/qnorm(1) guard above it.
   expect_null(bca_interval(theta = c(1, 2, 3, 4, 5), observed = 3,
                            frame = frame, subject_index = subject_index,
-                           refitter = slopepower:::make_refitter("none"),
+                           refitter = slopepower:::make_refitter(boot_pair_fit),
                            compute = function(p) p$slope,
                            probs = c(0.025, 0.975)))
 })
@@ -362,6 +362,78 @@ test_that("print.slope_bootstrap() notes straddling only when it occurs", {
   out <- capture.output(print(b))
   expect_true(any(grepl(sprintf("%.1f%% of replicates", 100 * b$straddle),
                         out, fixed = TRUE)))
+})
+
+# --- the random-effects structure held fixed across replicates -----------
+# `common_variance` matters only under `healthy`, and only through the
+# controls' slope: the model factorises per group, so the case estimates are
+# invariant either way. It is therefore `slope_comparator` --- and every
+# stage-two answer measured against it --- that moves when a replicate fits a
+# different structure from the one the point estimate came from.
+
+# Ragged control follow-up, deliberately: with balanced complete data GLS
+# coincides with OLS whatever the covariance structure, and the two fits agree
+# to every digit, so a balanced fixture could not tell the structures apart.
+ragged_healthy <- function() {
+  set.seed(2)
+  subj <- data.frame(id = 1:80, case = rep(c(1, 0), each = 40))
+  subj$intercept <- stats::rnorm(80, 50, 10)
+  subj$slope <- stats::rnorm(80, ifelse(subj$case == 1, -1.7, -0.3), 1.4)
+  d <- merge(subj, data.frame(visit = 0:3))
+  d$sdmt <- d$intercept + d$slope * d$visit + stats::rnorm(nrow(d), 0, 3)
+  set.seed(11)
+  d[!(d$case == 0 & d$visit > 0 & stats::runif(nrow(d)) < 0.35), ]
+}
+
+test_that("make_refitter() pins the structure the observed fit ended up with", {
+  d <- ragged_healthy()
+  full <- suppressWarnings(
+    slope_params(sdmt ~ visit | id, d, healthy = case, common_variance = FALSE))
+  red <- suppressWarnings(
+    slope_params(sdmt ~ visit | id, d, healthy = case, common_variance = TRUE))
+  expect_false(full$common_variance)
+  expect_true(red$common_variance)
+
+  expect_equal(
+    slopepower:::make_refitter(full)(slopepower:::boot_frame(full, "test"))$common_variance,
+    FALSE)
+  expect_equal(
+    slopepower:::make_refitter(red)(slopepower:::boot_frame(red, "test"))$common_variance,
+    TRUE)
+
+  # Not merely a label: the two structures disagree about the controls' slope,
+  # which is what makes pinning it worth doing. The case slope is invariant.
+  expect_equal(full$slope, red$slope)
+  expect_false(isTRUE(all.equal(full$slope_comparator, red$slope_comparator)))
+})
+
+test_that("slope_bootstrap() replicates keep the reduced structure when it was used", {
+  d <- ragged_healthy()
+  red <- suppressWarnings(
+    slope_params(sdmt ~ visit | id, d, healthy = case, common_variance = TRUE))
+
+  seen <- c()
+  refitter <- slopepower:::make_refitter(red)
+  frame <- slopepower:::boot_frame(red, "test")
+  subject_index <- split(seq_len(nrow(frame)), frame$subject)
+  sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
+  groups <- unname(split(seq_along(subject_index), sub_group))
+
+  set.seed(4)
+  for (i in seq_len(5L)) {
+    p <- refitter(slopepower:::resample_frame(frame, subject_index, groups))
+    seen <- c(seen, p$common_variance)
+  }
+  expect_true(all(seen))
+})
+
+test_that("make_refitter() leaves common_variance off the non-healthy calls", {
+  # slope_params() warns that `common_variance` is ignored without `healthy`;
+  # passing it anyway would earn that warning once per replicate.
+  for (fit in list(paper_fit("slpower1"), paper_fit("slpower3"))) {
+    cl <- environment(slopepower:::make_refitter(fit))$cl
+    expect_false("common_variance" %in% names(as.list(cl)))
+  }
 })
 
 # --- slope_se() ----------------------------------------------------------
