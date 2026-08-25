@@ -125,6 +125,14 @@ came from two-group data, resampling is stratified so that each replicate has
 the same number of cases and controls (or treated and control subjects) as the
 original.
 
+Every replicate refits the random-effects structure the original fit ended up
+with, so a \code{healthy} study whose controls were fitted with a random intercept
+only --- because \code{common_variance = TRUE} asked for it, or because the full
+structure failed to converge --- is bootstrapped under that same structure
+throughout. A replicate that cannot fit it is discarded and counted in
+\code{n_failed} rather than quietly refitted under the other one, so an interval
+never mixes the two.
+
 Refitting a mixed model several hundred times is slow, and \code{type = "bca"} adds
 a leave-one-subject-out jackknife on top, costing one further fit per subject.
 Start with a small \code{R} to gauge the cost.
