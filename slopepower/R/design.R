@@ -6,6 +6,108 @@ fmt_call_vec <- function(x) {
   if (length(x) == 1L) fmt_num(x) else paste0("c(", paste(fmt_num(x), collapse = ", "), ")")
 }
 
+# ---------------------------------------------------------------------------
+# dropout rates
+#
+# `dropout_rate()` lives beside `trial_design()` rather than with the grid
+# functions that were once its only consumer, because it is an alternative way
+# of saying what `trial_design()`'s `dropout` argument means, not a feature of
+# the grid. It was originally defined in grid.R, and the consequence was that
+# the object could only be expanded by the grid: `trial_design(v,
+# dropout_rate(0.05))` -- the call its own documentation pointed at -- was
+# rejected as a non-numeric dropout.
+# ---------------------------------------------------------------------------
+
+#' A constant dropout rate per unit of time
+#'
+#' Dropout proportions are supplied to [trial_design()] per visit, so the same
+#' underlying withdrawal rate needs a different vector for every candidate visit
+#' schedule: "5% per year" over three years is `0.15` for a trial with a single
+#' final visit, `rep(0.05, 3)` with annual visits, and `rep(0.025, 6)` with
+#' six-monthly visits. `dropout_rate()` expresses the rate once and lets
+#' [trial_design()] expand it correctly for whichever schedule it is given ---
+#' which is what makes it useful to the grid functions, where one object drives
+#' every row of a table of competing schedules.
+#'
+#' The expansion is linear in elapsed time, matching the way the worked example in
+#' section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
+#' visit is `visits[j]` is `rate * (visits[j + 1] - visits[j])`. Every dropout is
+#' expressed as a fraction of the randomised cohort, not of those still in
+#' follow-up, so the increments sum to `rate * total_duration`.
+#'
+#' Because the expansion produces incremental proportions by construction, a
+#' `dropout_rate` cannot be combined with `dropout_type = "cumulative"`; see
+#' [trial_design()].
+#'
+#' This object only produces the per-visit proportions. What the calculation then
+#' does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
+#' what it assumes about why people withdraw --- is described in
+#' [trial_design()].
+#'
+#' @param rate Expected proportion of the randomised sample withdrawing per `per`
+#'   units of time. Must be non-negative.
+#' @param per Length of time `rate` refers to, in the units of the `time` variable
+#'   used to estimate the slope parameters. Defaults to 1, i.e. `rate` is a
+#'   per-unit-time rate.
+#'
+#' @return An object of class `dropout_rate`.
+#'
+#' @examples
+#' dropout_rate(0.05)              # 5% per unit time
+#' dropout_rate(0.10, per = 12)    # 10% per 12 months, if time is in months
+#'
+#' # The same rate, expanded for two different schedules
+#' trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05))$dropout
+#' trial_design(c(0, 1.5, 3), dropout = dropout_rate(0.05))$dropout
+#'
+#' @seealso [trial_design()], [slope_power_grid()], [slope_sample_size_grid()]
+#' @export
+dropout_rate <- function(rate, per = 1) {
+  context <- "dropout_rate()"
+  check_scalar(rate, "rate", context, lower = 0, upper = Inf, lower_open = FALSE)
+  check_scalar(per, "per", context, lower = 0, upper = Inf, lower_open = TRUE)
+  structure(list(rate = as.numeric(rate), per = as.numeric(per)),
+            class = "dropout_rate")
+}
+
+#' @describeIn dropout_rate Print a dropout rate.
+#' @param x A `dropout_rate` object.
+#' @param ... Ignored.
+#' @export
+print.dropout_rate <- function(x, ...) {
+  cat(sprintf("<dropout_rate> %s per %s unit%s of time\n",
+              fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s"))
+  invisible(x)
+}
+
+#' Expand a `dropout_rate` into incremental proportions for one schedule
+#'
+#' The single place a rate becomes numbers, called by [validate_dropout()] on
+#' the ordinary path and by `expand_dropout()` (grid.R) on the grid path, so the
+#' two cannot expand the same object differently. `where` carries the grid's
+#' cell label into the message; it is empty for a direct [trial_design()] call,
+#' which has no cell to name.
+#' @noRd
+expand_dropout_rate <- function(spec, visits, ctx, where = "") {
+  increments <- (spec$rate / spec$per) * diff(visits)
+  total <- sum(increments)
+  # The same bound `check_dropout_total()` enforces on `dropout` generally --
+  # reusing its shared DROPOUT_TOL so the threshold itself cannot drift between
+  # the two -- but diagnosed here in terms of `rate` and `per` rather than the
+  # expanded vector, because the general check would otherwise report a
+  # `dropout_rate()` mistake by naming a vector the caller never wrote. Both
+  # callers run `increments` through `check_dropout_total()` afterwards anyway,
+  # so a bug in this earlier, friendlier check could not let an invalid total
+  # through uncaught.
+  if (total > 1 + DROPOUT_TOL) {
+    stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
+                        "implies total dropout of %s, which exceeds 1."),
+                 ctx, where, fmt_num(spec$rate), fmt_num(spec$per),
+                 fmt_num(diff(range(visits))), fmt_num(total)), call. = FALSE)
+  }
+  increments
+}
+
 #' Describe a proposed trial's visit schedule and dropout pattern
 #'
 #' `trial_design()` bundles the design of a *future* trial --- when participants
@@ -18,13 +120,17 @@ fmt_call_vec <- function(x) {
 #'   time 0**, strictly increasing, of length at least 2. Times may be any real
 #'   values --- `c(0, 0.5, 1, 1.5, 2)` is valid --- expressed in the same units as
 #'   the `time` variable used to estimate the slope parameters.
-#' @param dropout Optional numeric vector of expected dropout proportions, of
-#'   length `length(visits) - 1`. `NULL` (the default) means no dropout.
+#' @param dropout Optional expected dropout. Either a numeric vector of
+#'   proportions, of length `length(visits) - 1`, or a [dropout_rate()] object
+#'   giving a constant rate per unit of time, which is expanded to one
+#'   proportion per interval of `visits`. `NULL` (the default) means no dropout.
 #' @param dropout_type How `dropout` is expressed. `"incremental"` (the default)
 #'   means element `j` is the proportion of participants whose **last attended
 #'   visit is `visits[j]`**. `"cumulative"` means element `j` is the proportion
 #'   who have withdrawn by `visits[j + 1]`, i.e. who fail to attend it. Whichever
-#'   is supplied, the stored `dropout` field is always incremental.
+#'   is supplied, the stored `dropout` field is always incremental. A
+#'   [dropout_rate()] produces incremental proportions by construction, so it
+#'   cannot be combined with `"cumulative"`.
 #'
 #' @details
 #' # Baseline is explicit
@@ -115,7 +221,11 @@ fmt_call_vec <- function(x) {
 #' trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
 #'              dropout_type = "cumulative")
 #'
-#' @seealso [slope_params()], [slope_sample_size()], [slope_power()]
+#' # The same 2.5% per unit time, stated once rather than per schedule
+#' trial_design(seq(0, 3, by = 0.5), dropout = dropout_rate(0.025))
+#'
+#' @seealso [slope_params()], [slope_sample_size()], [slope_power()],
+#'   [dropout_rate()]
 #' @export
 trial_design <- function(visits,
                          dropout = NULL,
@@ -221,8 +331,23 @@ validate_dropout <- function(dropout, n_intervals, dropout_type, visits, ctx) {
     return(rep(0, n_intervals))
   }
 
-  if (!is.numeric(dropout)) {
-    stop(sprintf("%s: `dropout` must be numeric or NULL; got %s.",
+  if (inherits(dropout, "dropout_rate")) {
+    # Rejected rather than ignored. A rate expands to incremental proportions
+    # by construction, so there is no sense in which it could have been
+    # supplied cumulatively; accepting the pair would store incremental values
+    # in a design whose `dropout_type` -- and whose print method -- announce
+    # them as cumulative.
+    if (identical(dropout_type, "cumulative")) {
+      stop(sprintf(paste0("%s: a dropout_rate() cannot be combined with dropout_type = ",
+                          "\"cumulative\"; it expands to the proportion withdrawing within ",
+                          "each interval, which is already incremental. Drop the ",
+                          "`dropout_type` argument, or supply the cumulative proportions ",
+                          "as a numeric vector."),
+                   ctx), call. = FALSE)
+    }
+    dropout <- expand_dropout_rate(dropout, visits, ctx)
+  } else if (!is.numeric(dropout)) {
+    stop(sprintf("%s: `dropout` must be numeric, a dropout_rate() object, or NULL; got %s.",
                  ctx, class(dropout)[1L]), call. = FALSE)
   }
   dropout <- as.numeric(dropout)
@@ -341,8 +466,21 @@ as_trial_design <- function(design, context) {
   visits <- validate_visits(design$visits, context)
   dropout <- design$dropout
   if (!is.numeric(dropout)) {
-    stop(sprintf("%s: `design$dropout` must be numeric; got %s.",
-                 context, class(dropout)[1L]), call. = FALSE)
+    # A `dropout_rate` reaching here means the object was assembled by hand or
+    # had `$dropout` overwritten: `trial_design()` expands a rate on
+    # construction, so one that survives into the stored field never went
+    # through it. The field is incremental proportions by contract (CONTRACT.md
+    # section 3) and expanding it now would leave the rest of the object --
+    # `has_dropout` in particular -- describing something else, so this says
+    # where the expansion belongs instead of doing it here.
+    hint <- if (inherits(design$dropout, "dropout_rate")) {
+      sprintf("\n  Pass the rate to trial_design(visits = %s, dropout = ...), which expands it.",
+              fmt_call_vec(visits))
+    } else {
+      ""
+    }
+    stop(sprintf("%s: `design$dropout` must be numeric; got %s.%s",
+                 context, class(dropout)[1L], hint), call. = FALSE)
   }
   check_dropout_length(dropout, visits, "design$dropout", context)
   check_dropout_values(dropout, "design$dropout", context)

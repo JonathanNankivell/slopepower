@@ -84,6 +84,13 @@ list(
 `diff(c(0, cumulative))`; the cumulative vector must be non-decreasing and bounded by 1.
 `dropout = NULL` means no dropout and yields a zero vector.
 
+A `dropout_rate(rate, per)` object may be supplied in place of the vector; `trial_design()`
+expands it to `(rate / per) * diff(visits)` before the checks above. The expansion is the
+constructor's, not the grid's, so `trial_design()` and `slope_*_grid()` cannot expand the same
+rate differently. It yields incremental proportions by construction and is therefore rejected
+alongside `dropout_type = "cumulative"`. The **stored field is always the expanded numeric
+vector** — a `dropout_rate` is never a legal value of `dropout` in the object above.
+
 ---
 
 ## 4. Stage-two result objects (`R/power.R`)

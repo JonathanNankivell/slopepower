@@ -7,62 +7,21 @@
 # each row of that table.
 
 # ---------------------------------------------------------------------------
-# dropout rates
+# dropout specifications
+#
+# `dropout_rate()` itself lives in design.R, beside the `trial_design()`
+# argument it is an alternative spelling of. Only the grid's own handling of a
+# specification -- naming the failing cell, and the length rule that a grid
+# makes newly relevant -- is here.
 # ---------------------------------------------------------------------------
 
-#' A constant dropout rate per unit of time
-#'
-#' Dropout proportions are supplied to [trial_design()] per visit, so the same
-#' underlying withdrawal rate needs a different vector for every candidate visit
-#' schedule: "5% per year" over three years is `0.15` for a trial with a single
-#' final visit, `rep(0.05, 3)` with annual visits, and `rep(0.025, 6)` with
-#' six-monthly visits. `dropout_rate()` expresses the rate once and lets
-#' the grid functions expand it correctly for each design.
-#'
-#' The expansion is linear in elapsed time, matching the way the worked example in
-#' section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
-#' visit is `visits[j]` is `rate * (visits[j + 1] - visits[j])`. Every dropout is
-#' expressed as a fraction of the randomised cohort, not of those still in
-#' follow-up, so the increments sum to `rate * total_duration`.
-#'
-#' This object only produces the per-visit proportions. What the calculation then
-#' does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
-#' what it assumes about why people withdraw --- is described in
-#' [trial_design()].
-#'
-#' @param rate Expected proportion of the randomised sample withdrawing per `per`
-#'   units of time. Must be non-negative.
-#' @param per Length of time `rate` refers to, in the units of the `time` variable
-#'   used to estimate the slope parameters. Defaults to 1, i.e. `rate` is a
-#'   per-unit-time rate.
-#'
-#' @return An object of class `dropout_rate`.
-#'
-#' @examples
-#' dropout_rate(0.05)              # 5% per unit time
-#' dropout_rate(0.10, per = 12)    # 10% per 12 months, if time is in months
-#'
-#' @seealso [slope_power_grid()], [slope_sample_size_grid()], [trial_design()]
-#' @export
-dropout_rate <- function(rate, per = 1) {
-  context <- "dropout_rate()"
-  check_scalar(rate, "rate", context, lower = 0, upper = Inf, lower_open = FALSE)
-  check_scalar(per, "per", context, lower = 0, upper = Inf, lower_open = TRUE)
-  structure(list(rate = as.numeric(rate), per = as.numeric(per)),
-            class = "dropout_rate")
-}
-
-#' @describeIn dropout_rate Print a dropout rate.
-#' @param x A `dropout_rate` object.
-#' @param ... Ignored.
-#' @export
-print.dropout_rate <- function(x, ...) {
-  cat(sprintf("<dropout_rate> %s per %s unit%s of time\n",
-              fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s"))
-  invisible(x)
-}
-
 #' Expand a dropout specification for one visit schedule
+#'
+#' The grid's wrapper around `expand_dropout_rate()` (design.R): it adds the
+#' cell label to any message, and applies the length rule to a bare numeric
+#' vector *before* `trial_design()` sees it, because a length mismatch means
+#' something specific in a grid -- a fixed vector paired with a schedule it was
+#' not written for -- that a single design cannot exhibit.
 #'
 #' @param spec `NULL`, a numeric vector of incremental proportions, or a
 #'   `dropout_rate` object.
@@ -76,23 +35,7 @@ expand_dropout <- function(spec, visits, context, label) {
   if (is.null(spec)) return(NULL)
 
   if (inherits(spec, "dropout_rate")) {
-    increments <- (spec$rate / spec$per) * diff(visits)
-    total <- sum(increments)
-    # The same bound `check_dropout_total()` (design.R) enforces on `dropout`
-    # generally -- reusing its shared DROPOUT_TOL so the threshold itself
-    # cannot drift between the two -- but diagnosed here in terms of `rate`
-    # and `per` rather than the expanded vector, because `trial_design(v,
-    # increments)` below would otherwise report a `dropout_rate()` mistake by
-    # naming a vector the caller never wrote. `trial_design()` still checks
-    # `increments` itself once this returns, so a bug in this early check
-    # could not let an invalid total through uncaught.
-    if (total > 1 + DROPOUT_TOL) {
-      stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
-                          "implies total dropout of %s, which exceeds 1."),
-                   context, where, fmt_num(spec$rate), fmt_num(spec$per),
-                   fmt_num(diff(range(visits))), fmt_num(total)), call. = FALSE)
-    }
-    return(increments)
+    return(expand_dropout_rate(spec, visits, context, where))
   }
 
   if (is.numeric(spec)) {

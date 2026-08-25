@@ -170,7 +170,13 @@ slope difference.
 trial_design(visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
 trial_design(visits = c(0, 1, 2, 5), dropout = c(0.05, 0.1, 0.2),
              dropout_type = "cumulative")   # converted to incremental
+trial_design(visits = c(0, 1, 2, 3), dropout = dropout_rate(0.05))  # 5% per unit time
 ```
+
+`dropout_rate(rate, per = 1)` states a constant withdrawal rate once and lets
+`trial_design()` expand it to `(rate / per) * diff(visits)` — one proportion per
+interval, whatever the schedule. It yields incremental proportions by
+construction, so it cannot be combined with `dropout_type = "cumulative"`.
 
 Participants who attend baseline only carry no slope information; a non-zero
 first element warns.
@@ -221,9 +227,9 @@ slope_sample_size_grid(
 ```
 
 Both return one row per visits × dropout combination, with identical columns. Use
-`dropout_rate(rate, per = 1)` rather than a fixed vector when schedules have
-different numbers of visits, so the same withdrawal rate is expanded correctly for
-each.
+`dropout_rate()` rather than a fixed vector when the schedules being compared have
+different numbers of visits: each cell expands it against its own schedule, so the
+same withdrawal rate means the same thing in every row.
 
 ### The floor no design can beat
 

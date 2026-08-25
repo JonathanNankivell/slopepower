@@ -19,14 +19,18 @@ time 0}, strictly increasing, of length at least 2. Times may be any real
 values --- \code{c(0, 0.5, 1, 1.5, 2)} is valid --- expressed in the same units as
 the \code{time} variable used to estimate the slope parameters.}
 
-\item{dropout}{Optional numeric vector of expected dropout proportions, of
-length \code{length(visits) - 1}. \code{NULL} (the default) means no dropout.}
+\item{dropout}{Optional expected dropout. Either a numeric vector of
+proportions, of length \code{length(visits) - 1}, or a \code{\link[=dropout_rate]{dropout_rate()}} object
+giving a constant rate per unit of time, which is expanded to one
+proportion per interval of \code{visits}. \code{NULL} (the default) means no dropout.}
 
 \item{dropout_type}{How \code{dropout} is expressed. \code{"incremental"} (the default)
 means element \code{j} is the proportion of participants whose \strong{last attended
 visit is \code{visits[j]}}. \code{"cumulative"} means element \code{j} is the proportion
 who have withdrawn by \code{visits[j + 1]}, i.e. who fail to attend it. Whichever
-is supplied, the stored \code{dropout} field is always incremental.}
+is supplied, the stored \code{dropout} field is always incremental. A
+\code{\link[=dropout_rate]{dropout_rate()}} produces incremental proportions by construction, so it
+cannot be combined with \code{"cumulative"}.}
 
 \item{x}{A \code{trial_design} object.}
 
@@ -114,6 +118,9 @@ trial_design(seq(0, 3, by = 0.5), dropout = rep(0.025, 6))
 trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
              dropout_type = "cumulative")
 
+# The same 2.5\% per unit time, stated once rather than per schedule
+trial_design(seq(0, 3, by = 0.5), dropout = dropout_rate(0.025))
+
 }
 \references{
 Dawson, J. D., and S. W. Lagakos. 1991. Analyzing laboratory marker changes in
@@ -132,7 +139,9 @@ a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
+\doi{10.1177/1536867X211045512}
 }
 \seealso{
-\code{\link[=slope_params]{slope_params()}}, \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}
+\code{\link[=slope_params]{slope_params()}}, \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}},
+\code{\link[=dropout_rate]{dropout_rate()}}
 }
