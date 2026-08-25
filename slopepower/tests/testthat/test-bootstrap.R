@@ -324,10 +324,10 @@ test_that("slope_bootstrap(progress = TRUE) ticks every max(1, R/10) replicates"
 # --- bca_interval() and its fallbacks -----------------------------------
 # The acceleration needs a leave-one-subject-out jackknife, matching the
 # clustering of the bootstrap itself, and there are fits for which it cannot be
-# had. bca_interval() answers NULL in each such case and run_bootstrap() keeps
-# the percentile interval it has already computed, so the observable
-# consequence of every fallback is the same: `type = "bca"` in, `$type ==
-# "percentile"` out.
+# had. bca_interval() answers with a string saying which in each such case and
+# run_bootstrap() keeps the percentile interval it has already computed, so the
+# observable consequence of every fallback is the same -- `type = "bca"` in,
+# `$type == "percentile"` out -- while the warning distinguishes them.
 bca_interval <- slopepower:::bca_interval
 
 # Two subjects is the fewest slope_params() will fit. Leaving one out leaves
@@ -347,26 +347,48 @@ test_that("bca_interval() falls back when under three jackknife values survive",
   subject_index <- split(seq_len(nrow(frame)), frame$subject)
   expect_length(subject_index, 2L)
 
-  # `theta` straddles `observed`, so mean(theta < observed) is 0.4 and the bias
-  # correction z0 is perfectly computable: the NULL below is the jackknife's,
-  # not the already-covered qnorm(0)/qnorm(1) guard above it.
-  expect_null(bca_interval(theta = c(1, 2, 3, 4, 5), observed = 3,
-                           frame = frame, subject_index = subject_index,
-                           refitter = slopepower:::make_refitter(boot_pair_fit),
-                           compute = function(p) p$slope,
-                           probs = c(0.025, 0.975)))
+  # `theta` straddles `observed` -- two below, one tied, two above, so the
+  # half-counted proportion is 0.5 and z0 is perfectly computable. What fails
+  # below is the jackknife, and the returned reason has to say so rather than
+  # blaming the bias correction.
+  expect_match(bca_interval(theta = c(1, 2, 3, 4, 5), observed = 3,
+                            frame = frame, subject_index = subject_index,
+                            refitter = slopepower:::make_refitter(boot_pair_fit),
+                            compute = function(p) p$slope,
+                            probs = c(0.025, 0.975)),
+               "acceleration could not be computed")
+})
+
+test_that("bca_interval() half-counts replicates tied with the observed value", {
+  frame <- slopepower:::boot_frame(boot_pair_fit, "test")
+  subject_index <- split(seq_len(nrow(frame)), frame$subject)
+  args <- list(frame = frame, subject_index = subject_index,
+               refitter = slopepower:::make_refitter(boot_pair_fit),
+               compute = function(p) p$slope, probs = c(0.025, 0.975))
+
+  # Every replicate tied with the observed value. Counting ties as "below"
+  # makes the proportion 0 and qnorm(0) = -Inf, so this used to be rejected as
+  # one-sided; half-counted it is 0.5, meaning no bias to correct, and the run
+  # gets as far as the jackknife.
+  expect_match(do.call(bca_interval, c(list(theta = rep(3, 5), observed = 3), args)),
+               "acceleration could not be computed")
+
+  # Genuinely one-sided is still rejected, and still named as such.
+  expect_match(do.call(bca_interval, c(list(theta = c(4, 5, 6), observed = 3), args)),
+               "every replicate falls strictly on one side")
 })
 
 test_that("slope_bootstrap() reports a percentile interval when BCa cannot be had", {
   expect_warning(
     b <- slope_bootstrap(boot_pair_fit, R = 6, seed = 2, type = "bca"),
-    "bias-correction could not be computed")
+    "acceleration could not be computed")
   expect_equal(b$type, "percentile")
   # No replicate failed under this seed, so the fallback is not a shortage of
   # replicates; and they straddle the observed slope, so it is not the bias
   # correction either. What is missing is the jackknife.
   expect_equal(b$n_failed, 0)
-  prop <- mean(b$replicates < boot_pair_fit$slope)
+  prop <- (sum(b$replicates < boot_pair_fit$slope) +
+             sum(b$replicates == boot_pair_fit$slope) / 2) / length(b$replicates)
   expect_gt(prop, 0)
   expect_lt(prop, 1)
   # The interval reported is exactly the percentile one already in hand.
@@ -400,6 +422,74 @@ test_that("slope_bootstrap() returns a genuine BCa interval when it can", {
   pctl <- stats::quantile(boot_bca$replicates, c(0.025, 0.975),
                           names = FALSE, type = 7)
   expect_false(isTRUE(all.equal(boot_bca$ci, pctl)))
+})
+
+# --- a sample-size interval stays on the lattice n lives on --------------
+
+test_that("a bootstrapped n is reported as sizes a trial could be run at", {
+  pars <- paper_fit("slpower1")
+  ss <- suppressWarnings(
+    slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(
+    slope_bootstrap(ss, R = 40, type = "percentile", seed = 3))
+
+  # Every replicate is 2 * ceiling(...); so is every endpoint. Left as
+  # quantile() returns them the interval ran to 963.3 participants, which is
+  # not a trial anyone can field.
+  expect_true(all(b$replicates %% 2 == 0))
+  expect_true(all(b$ci %% 2 == 0))
+
+  # Widened outward, so the reported range always contains the interpolated
+  # one: rounding must not be able to narrow a confidence interval.
+  interp <- stats::quantile(b$replicates, c(0.025, 0.975),
+                            names = FALSE, type = 7)
+  expect_lte(b$ci[1L], interp[1L])
+  expect_gte(b$ci[2L], interp[2L])
+  expect_equal(b$ci, slopepower:::widen_to_lattice(interp, "n"))
+})
+
+test_that("widen_to_lattice() widens only outward, and only for n", {
+  expect_equal(widen <- slopepower:::widen_to_lattice(c(519.45, 963.3), "n"),
+               c(518, 964))
+  # Already achievable: nothing moves.
+  expect_equal(slopepower:::widen_to_lattice(c(520, 964), "n"), c(520, 964))
+  # The continuous statistics are left exactly alone.
+  for (st in c("power", "tte", "slope")) {
+    expect_equal(slopepower:::widen_to_lattice(c(-1.5, 2.5), st), c(-1.5, 2.5))
+  }
+})
+
+test_that("the sample-size interval does not swing on floating-point in `probs`", {
+  # `probs` is (1 - level) / 2, which for level = 0.95 is one ulp above 0.025.
+  # Reading endpoints off with quantile(type = 1) -- order statistics, so
+  # lattice points by construction -- makes that ulp decide which side of a
+  # step the answer falls on whenever p * B is a whole number, which is exactly
+  # what R = 200 or 1000 gives. Interpolating and widening afterwards moves the
+  # knife edge onto the lattice, where a perturbation maps a point to itself.
+  set.seed(1)
+  reps <- 2 * sample(200:600, 1000, replace = TRUE)
+  exact <- c(0.025, 0.975)
+  fp <- c((1 - 0.95) / 2, 1 - (1 - 0.95) / 2)
+  expect_false(identical(exact, fp))
+
+  for (B in c(40L, 1000L)) {
+    g <- reps[seq_len(B)]
+    widened <- function(p) {
+      slopepower:::widen_to_lattice(
+        stats::quantile(g, p, names = FALSE, type = 7), "n")
+    }
+    expect_equal(widened(exact), widened(fp))
+    # The construction that was rejected, shown swinging on the same data.
+    expect_false(identical(stats::quantile(g, exact, names = FALSE, type = 1),
+                           stats::quantile(g, fp, names = FALSE, type = 1)))
+  }
+})
+
+test_that("the continuous statistics keep the interpolating quantile", {
+  b <- suppressWarnings(
+    slope_bootstrap(paper_fit("slpower1"), R = 15, type = "percentile", seed = 1))
+  expect_equal(b$ci, stats::quantile(b$replicates, c(0.025, 0.975),
+                                     names = FALSE, type = 7))
 })
 
 # --- printing ------------------------------------------------------------
