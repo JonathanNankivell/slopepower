@@ -398,6 +398,30 @@ Read together, the two tables are the same design space from opposite ends:
 fix a recruitment target and ask what power it buys, or fix a power target
 and ask what recruitment it costs.
 
+Both tables so far vary the trial and hold the assumptions fixed. The
+assumptions can be varied in exactly the same way: `effectiveness`, `alpha`
+and whichever of `n` and `power` the grid is not solving for each take a
+list of values, and every one of them is priced against every design. The
+uncomfortable question about the table above is how much of it depends on
+assuming a treatment that slows decline by 33%, and a grid answers that
+without leaving the table:
+
+```{r grid-sensitivity}
+tbl_s <- slope_sample_size_grid(
+  pars1, visits = list(annual = 0:3), dropout = dropout_rate(0.05),
+  power         = c(`80pc` = 0.8, `90pc` = 0.9),
+  effectiveness = list(`25pc` = 0.25, `33pc` = 0.33, `40pc` = 0.4)
+)
+tbl_s[, c("design", "dropout", "effectiveness", "power", "n")]
+```
+
+The sample size scales with the inverse square of the effect being targeted,
+so an assumed effectiveness the trial does not achieve is by far the most
+expensive of the two axes to be wrong about -- much more so than the choice
+between 80% and 90% power. Each axis reports its value in the column of the
+same name; the names given to the levels are what identify a cell in any
+error or warning message.
+
 ## Where to go next
 
 * `?slope_params` sets out the three models fitted in stage one in full,

@@ -23,14 +23,22 @@ Each must begin at 0.}
 \item{dropout}{\code{NULL}, a numeric vector of incremental proportions, a
 \code{\link[=dropout_rate]{dropout_rate()}} object, or a named list mixing any of these.}
 
-\item{power}{Target power, held constant across the grid. Defaults to 0.8.}
+\item{power}{Target power. Defaults to 0.8. A single value is held constant
+across the grid; several make it another axis.}
 
-\item{effectiveness, target, alpha}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held
-constant across the grid.}
+\item{effectiveness, alpha}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}}. A single value is
+held constant across the grid; a numeric vector or named list of values
+makes that argument another axis of the grid, so that every design is sized
+at every level of it. Names are used to identify the cell in any message;
+the value itself is what the table reports, in the column of the same name.}
+
+\item{target}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held constant across the
+grid.}
 }
 \value{
-A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{power} is
-constant; \code{n} and \code{n_per_arm} are what vary.
+A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n} and
+\code{n_per_arm} are what vary; \code{power} is constant unless it was itself given
+several values.
 }
 \description{
 The companion to \code{\link[=slope_power_grid]{slope_power_grid()}}: holds the target power fixed and reports
@@ -52,6 +60,36 @@ slope_sample_size_grid(
   pars, power = 0.8, effectiveness = 0.33,
   visits  = list(annual = c(0, 1, 2, 3), six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
+)
+
+# Sensitivity analysis: `power`, `effectiveness` and `alpha` may each take
+# several values, and each becomes another axis of the same table. Here two
+# dropout assumptions are sized at two target powers and two assumed
+# effectivenesses, for eight rows in all.
+slope_sample_size_grid(
+  pars, visits = 0:3,
+  dropout = list(`0pc` = dropout_rate(0), `5pc` = dropout_rate(0.05)),
+  power = c(`80pc` = 0.8, `90pc` = 0.9),
+  effectiveness = list(`20pc` = 0.2, `30pc` = 0.3)
+)
+
+# A bare vector is as good a spelling of an axis as a named list, and with a
+# single design the long table reshapes into the shape such a sweep is
+# usually reported in -- the assumption being varied down the side, the
+# target power across the top. The sample size scales with the inverse
+# square of the effect targeted, so the effectiveness axis is by far the
+# more expensive of the two to be wrong about.
+sens <- slope_sample_size_grid(
+  pars, visits = 0:3, effectiveness = c(0.20, 0.25, 0.33),
+  power = c(0.8, 0.9)
+)
+xtabs(n ~ effectiveness + power, sens)
+
+# Varying alpha as well: a sweep over all three assumptions at once, for one
+# design, is twelve rows and one call.
+slope_sample_size_grid(
+  pars, visits = 0:3, effectiveness = c(0.25, 0.33),
+  power = c(0.8, 0.9), alpha = c(0.05, 0.01, 0.001)
 )
 
 # Case/healthy-control comparator: two cases and two healthy controls, a

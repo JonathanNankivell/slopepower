@@ -63,13 +63,14 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
 })
 
 test_that("a grid row carries exactly what as.data.frame() reports for that cell", {
-  # grid_impl() reads its six result columns straight off the result object
+  # grid_impl() reads its eight result columns straight off the result object
   # rather than through as.data.frame.slope_result(), because routing every
-  # cell through that method to keep 6 of its 18 columns was the single most
+  # cell through that method to keep 8 of its 18 columns was the single most
   # expensive line in the loop. This is the guarantee that bought back: the two
   # must report the same numbers for the same object, so that a grid row and a
   # bound as.data.frame() row can never disagree.
-  shared <- c("n", "n_per_arm", "power", "tte", "var_tte", "effect_size")
+  shared <- c("n", "n_per_arm", "power", "alpha", "effectiveness",
+              "tte", "var_tte", "effect_size")
   p <- paper_fit("slpower1")
 
   for (nm in names(table1_visits)) {
@@ -352,7 +353,138 @@ test_that("a cell that fails is reported by its labels, with the cause attached"
   err <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450,
                                        effectiveness = 0.33))
   expect_match(conditionMessage(err),
-               'design "0, 1, 2" with dropout "none" failed', fixed = TRUE)
+               'design "0, 1, 2", dropout "none" failed', fixed = TRUE)
   # CONTRACT.md 6: a zero slope difference errors rather than yielding N = .
   expect_match(conditionMessage(err), "slope difference is exactly zero", fixed = TRUE)
+})
+
+# --- axes beyond visits and dropout -----------------------------------------
+
+test_that("effectiveness, power and alpha each become an axis when given several values", {
+  # The sensitivity analysis the grid could not previously express: hold the
+  # design fixed and vary an assumption instead. Every argument the grid used to
+  # hold constant takes a list on the same terms `visits` and `dropout` do.
+  p <- paper_fit("slpower1")
+  out <- slope_sample_size_grid(
+    p, visits = c(0, 1, 2), dropout = NULL,
+    power = c(`80pc` = 0.8, `90pc` = 0.9),
+    effectiveness = list(`20pc` = 0.2, `30pc` = 0.3),
+    alpha = 0.05)
+
+  expect_equal(nrow(out), 4L)
+  # The scalar axes report their own value, not their label: unlike a schedule
+  # or a dropout specification, the value is a single number that fits in a
+  # column, and one that a caller will want to sort, filter and plot against.
+  expect_equal(out$power, c(0.8, 0.8, 0.9, 0.9))
+  expect_equal(out$effectiveness, c(0.2, 0.3, 0.2, 0.3))
+  expect_equal(out$alpha, rep(0.05, 4L))
+  # Declared order nests the axes: power varies slower than effectiveness.
+  for (i in seq_len(nrow(out))) {
+    direct <- slope_sample_size(p, trial_design(c(0, 1, 2)),
+                                power = out$power[i],
+                                effectiveness = out$effectiveness[i])
+    expect_equal(out$n[i], direct$n, tolerance = 0)
+  }
+})
+
+test_that("slope_power_grid() varies n and alpha the same way", {
+  p <- paper_fit("slpower1")
+  out <- slope_power_grid(
+    p, visits = list(annual = c(0, 1, 2), denser = seq(0, 2, 0.5)), dropout = NULL,
+    n = c(450, 600), effectiveness = 0.33, alpha = c(0.05, 0.01))
+
+  expect_equal(nrow(out), 2L * 2L * 2L)
+  expect_equal(out$n, rep(c(450, 450, 600, 600), 2L))
+  expect_equal(out$alpha, rep(c(0.05, 0.01), 4L))
+  # design slowest, then n, then alpha -- and a tighter alpha buys less power
+  expect_equal(out$design, rep(c("annual", "denser"), each = 4L))
+  expect_true(all(out$power[c(2, 4, 6, 8)] < out$power[c(1, 3, 5, 7)]))
+
+  for (i in seq_len(nrow(out))) {
+    v <- if (out$design[i] == "annual") c(0, 1, 2) else seq(0, 2, 0.5)
+    direct <- slope_power(p, trial_design(v), n = out$n[i], alpha = out$alpha[i],
+                          effectiveness = 0.33)
+    expect_equal(out$power[i], direct$power, tolerance = 0)
+  }
+})
+
+test_that("a single value still gives the grid it always did", {
+  # The whole point of nesting the new axes innermost: a call written before
+  # they existed produces the same rows, in the same order, as it always did.
+  p <- paper_fit("slpower1")
+  out <- suppressWarnings(slope_power_grid(
+    p, visits = list(final_only = c(0, 3), annual = 0:3),
+    dropout = list(none = NULL, `5pc` = dropout_rate(0.05)),
+    n = 450, effectiveness = 0.33))
+  expect_equal(nrow(out), 4L)
+  expect_identical(out$design, rep(c("final_only", "annual"), each = 2L))
+  expect_identical(out$dropout, rep(c("none", "5pc"), 2L))
+})
+
+test_that("a scalar axis is named in a failing cell's message only when it varies", {
+  p <- ref_params(comparator = "healthy", slope = 1, slope_comparator = 1)
+  # Two levels of effectiveness: the message has to say which cell failed, so
+  # the label the caller supplied for the level appears alongside the design.
+  err <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450,
+                                       effectiveness = list(low = 0.2, high = 0.4)))
+  expect_match(conditionMessage(err),
+               'design "0, 1, 2", dropout "none", effectiveness "low" failed',
+               fixed = TRUE)
+  # One level: it is the same constant in every cell, so naming it would only
+  # push the message that matters further along the line.
+  err1 <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450,
+                                        effectiveness = 0.33))
+  expect_match(conditionMessage(err1), 'design "0, 1, 2", dropout "none" failed',
+               fixed = TRUE)
+  expect_false(grepl("effectiveness", conditionMessage(err1), fixed = TRUE))
+})
+
+test_that("an unnamed scalar level is labelled by its own value", {
+  p <- ref_params(comparator = "healthy", slope = 1, slope_comparator = 1)
+  err <- expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = c(450, 600),
+                                       effectiveness = 0.33))
+  expect_match(conditionMessage(err), 'n "450"', fixed = TRUE)
+})
+
+test_that("a scalar axis must be of a shape the grid can normalise", {
+  p <- paper_fit("slpower1")
+  # An empty axis is a mistake in the call, exactly as an empty `visits` is.
+  expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = list()),
+               "`n` must be a number", fixed = TRUE)
+  expect_error(slope_sample_size_grid(p, visits = c(0, 1, 2), power = numeric(0)),
+               "`power` must be a number", fixed = TRUE)
+  expect_error(slope_power_grid(p, visits = c(0, 1, 2), n = 450, alpha = "5%"),
+               "`alpha` must be a number", fixed = TRUE)
+  # A bad *element* is left to the stage-two call to reject, against its own
+  # bounds, with the cell that carried it named.
+  err <- expect_error(slope_sample_size_grid(p, visits = c(0, 1, 2),
+                                             power = list(ok = 0.8, silly = 1.4)))
+  expect_match(conditionMessage(err), 'power "silly" failed', fixed = TRUE)
+  expect_match(conditionMessage(err), "`power` must be", fixed = TRUE)
+})
+
+test_that('target = "observed" still refuses an effectiveness, list or not', {
+  p <- paper_fit("slpower3")
+  expect_error(slope_sample_size_grid(p, visits = c(0, 0.5, 2), target = "observed",
+                                      effectiveness = list(a = 0.2, b = 0.3)),
+               "supply only one of")
+  # and with no effectiveness supplied, the axis is absent rather than empty
+  out <- slope_sample_size_grid(p, visits = c(0, 0.5, 2), target = "observed",
+                                power = c(0.8, 0.9))
+  expect_equal(nrow(out), 2L)
+  # NA, not 1: the column reports what the result object carries, and
+  # target = "observed" records no effectiveness at all (power.R:481).
+  expect_equal(out$effectiveness, c(NA_real_, NA_real_))
+})
+
+test_that("the baseline-dropout warning counts designs, not cells", {
+  # The warning is a property of the visits/dropout pair, so a sensitivity axis
+  # multiplying the number of cells must not multiply the number of designs it
+  # claims to have found the problem in.
+  p <- paper_fit("slpower1")
+  w <- capture_warnings(slope_sample_size_grid(
+    p, visits = list(annual = 0:3), dropout = dropout_rate(2 / 30),
+    effectiveness = list(a = 0.2, b = 0.3, c = 0.4)))
+  expect_length(w, 1L)
+  expect_match(w, "in 1 of 1 combinations", fixed = TRUE)
 })
