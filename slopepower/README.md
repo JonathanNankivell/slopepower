@@ -231,6 +231,23 @@ Both return one row per visits × dropout combination, with identical columns. U
 different numbers of visits: each cell expands it against its own schedule, so the
 same withdrawal rate means the same thing in every row.
 
+The assumptions are axes too. `effectiveness`, `alpha` and whichever of `n` and
+`power` the grid is not solving for each take several values as readily as one, and
+every value supplied is priced against every design — a sensitivity analysis in the
+same table:
+
+```r
+slope_sample_size_grid(
+  pars, visits = 0:3,
+  dropout       = list(`0pc` = dropout_rate(0), `20pc` = dropout_rate(2 / 30)),
+  power         = c(`80pc` = 0.8, `90pc` = 0.9),
+  effectiveness = list(`20pc` = 0.2, `30pc` = 0.3)
+)
+```
+
+Each of these axes reports its value in the column of the same name (`power`,
+`alpha`, `effectiveness`, `n`); the names are what identify a cell in any message.
+
 ### The floor no design can beat
 
 Before searching, it is worth knowing what the search can possibly achieve. The

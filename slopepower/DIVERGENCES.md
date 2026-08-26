@@ -215,6 +215,16 @@ designs against the same estimates:
 > against the same estimates — the Stata original refits the model for each
 > row of that table.
 
+Because the fit is reused, a row of a grid costs closed-form algebra rather
+than a REML fit, and the grids take that further than the paper's table
+does: `effectiveness`, `alpha` and whichever of `n` and `power` the grid is
+not solving for each accept several values as readily as one, and every
+value is priced against every design. A sensitivity analysis over the
+assumptions is then one call and one table rather than one table per
+assumption. Nothing about a cell differs from the single-design call it
+stands for — each is exactly `slope_power()`/`slope_sample_size()` at those
+arguments — so this is interface, not method.
+
 `slope_params_manual()` additionally lets a user hand in variance
 components with no data at all (e.g. from a published paper, or from
 Stata's own fitted numbers) — Stata has no such entry point; the data-in-memory

@@ -23,17 +23,25 @@ Each must begin at 0.}
 \item{dropout}{\code{NULL}, a numeric vector of incremental proportions, a
 \code{\link[=dropout_rate]{dropout_rate()}} object, or a named list mixing any of these.}
 
-\item{n}{Total number of participants, held constant across the grid.
-Required.}
+\item{n}{Total number of participants. Required. A single value is held
+constant across the grid; several make it another axis.}
 
-\item{effectiveness, target, alpha}{Passed to \code{\link[=slope_power]{slope_power()}} and held constant
-across the grid.}
+\item{effectiveness, alpha}{Passed to \code{\link[=slope_power]{slope_power()}}. A single value is held
+constant across the grid; a numeric vector or named list of values makes
+that argument another axis of the grid, so that every design is priced at
+every level of it. Names are used to identify the cell in any message; the
+value itself is what the table reports, in the column of the same name.}
+
+\item{target}{Passed to \code{\link[=slope_power]{slope_power()}} and held constant across the grid.}
 }
 \value{
-A data frame with one row per design and dropout combination, with
+A data frame with one row per combination of the axes supplied, with
 columns \code{design}, \code{dropout}, \code{n_visits}, \code{n_follow_up}, \code{last_visit},
-\code{dropout_total}, \code{n}, \code{n_per_arm}, \code{power}, \code{tte}, \code{var_tte} and
-\code{effect_size}. \code{n} is constant; \code{power} is what varies.
+\code{dropout_total}, \code{n}, \code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness},
+\code{tte}, \code{var_tte} and \code{effect_size}. \code{power} is what varies; \code{n} is constant
+unless it was itself given several values. Cells are listed with \code{design}
+varying slowest, then \code{dropout}, then any further axes in the order the
+arguments are declared above.
 }
 \description{
 Evaluates the cross product of a set of visit schedules and a set of dropout
@@ -69,6 +77,36 @@ slope_power_grid(
   pars, n = 450, effectiveness = 0.33,
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
+)
+
+# Sensitivity analysis: any of `n`, `effectiveness` and `alpha` may take
+# several values, and each becomes another axis of the same table. Here the
+# annual schedule is priced at three assumed effectivenesses and two sample
+# sizes, for six rows in all.
+slope_power_grid(
+  pars, visits = 0:3, dropout = dropout_rate(0.05),
+  n = c(`450` = 450, `600` = 600),
+  effectiveness = list(`20pc` = 0.2, `25pc` = 0.25, `33pc` = 0.33)
+)
+
+# A bare vector is as good a spelling of an axis as a named list. With one
+# design and two axes the long table reads better reshaped, which is what
+# the axes reporting their own value in a column of their own name is for:
+# here the assumed effectiveness goes down the side and the significance
+# level across the top.
+sens <- slope_power_grid(
+  pars, visits = 0:3, n = 450,
+  effectiveness = c(0.20, 0.25, 0.33), alpha = c(0.05, 0.01)
+)
+round(xtabs(power ~ effectiveness + alpha, sens), 3)
+
+# Designs and assumptions vary together in one call: three schedules at two
+# assumed effectivenesses is six rows, and the schedules can still be
+# compared within each level because every one of them was priced at it.
+slope_power_grid(
+  pars, n = 450, effectiveness = c(0.25, 0.33),
+  visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
+  dropout = dropout_rate(0.05)
 )
 
 # Case/healthy-control comparator: two cases and two healthy controls, a
