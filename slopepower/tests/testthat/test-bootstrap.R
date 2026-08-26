@@ -541,11 +541,15 @@ test_that("print.slope_bootstrap() always reports the bootstrap mean and SD", {
                         out, fixed = TRUE)))
 })
 
-test_that("print.slope_bootstrap() notes straddling only when it occurs", {
-  expect_false(any(grepl("opposite side of zero", capture.output(print(boot_bca)),
-                         fixed = TRUE)))
+test_that("print.slope_bootstrap() always reports the straddle, zero included", {
+  # The 0.0% case is the point: a reader has to be able to tell "checked, and
+  # nothing crossed zero" from a print method that never checked at all.
+  expect_equal(boot_bca$straddle, 0)
+  expect_true(any(grepl("0.0% of replicates refit a slope on the opposite",
+                        capture.output(print(boot_bca)), fixed = TRUE)))
 
   b <- suppressWarnings(slope_bootstrap(flat_fit(), R = 30, seed = 1))
+  expect_gt(b$straddle, 0)
   out <- capture.output(print(b))
   expect_true(any(grepl(sprintf("%.1f%% of replicates", 100 * b$straddle),
                         out, fixed = TRUE)))
