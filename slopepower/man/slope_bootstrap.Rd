@@ -139,6 +139,13 @@ throughout. A replicate that cannot fit it is discarded and counted in
 \code{n_failed} rather than quietly refitted under the other one, so an interval
 never mixes the two.
 
+A bootstrapped sample size is reported as sample sizes. Every replicate of
+\code{n} is an even integer, so the interval's endpoints are widened out to the
+nearest sizes a trial could actually be fielded at rather than left between
+them, and the bias correction behind a BCa interval counts replicates tied
+with the observed size as half below rather than wholly below. The other
+statistics are continuous and neither applies to them.
+
 \code{R} defaults to 999. A confidence interval needs an order of magnitude more
 replicates than a standard error does, because its endpoints are read from
 the tails: at \code{R = 199} a 2.5\% tail holds about five replicates, and the

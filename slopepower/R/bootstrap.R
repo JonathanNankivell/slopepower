@@ -305,6 +305,43 @@ restore_seed <- function(old) {
   invisible(NULL)
 }
 
+#' Widen an interval onto the lattice its statistic lives on
+#'
+#' `n` is the one statistic the bootstrap reports that is not continuous. Every
+#' replicate of it is `2 * ceiling(...)`, so the whole distribution sits on the
+#' even integers -- but `quantile()` interpolates between order statistics, and
+#' a 95% interval for `slpower1` came back as `[519.45, 963.3]`. Neither
+#' endpoint is a trial anyone can run.
+#'
+#' So the endpoints are moved out to the nearest sizes that are: the lower down,
+#' the upper up. Outward rather than to the nearest, because rounding must not
+#' be able to narrow a confidence interval -- the reported range always contains
+#' the interpolated one, and every value in it is a trial that could actually be
+#' fielded. Both are already on the lattice when the interpolation happened to
+#' land there, so nothing moves in that case.
+#'
+#' The alternative -- reading the endpoints off with `quantile(type = 1)`, the
+#' inverse ECDF, so they are order statistics and therefore lattice points by
+#' construction -- is the textbook estimator for a discrete distribution, and it
+#' is not usable here. Type 1 is a step function of `p`, and `p` is
+#' `(1 - level) / 2`, which for `level = 0.95` is one ulp *above* 0.025 in
+#' binary. When `p * B` is a whole number that ulp decides which side of the
+#' step the answer falls on: at `R = 40` it moved the lower endpoint from the
+#' first order statistic to the second, 452 to 518. `p * B` is a whole number
+#' at exactly the replicate counts people choose -- 200, 1000 -- so the failure
+#' is not a corner case. Interpolating first and widening afterwards moves the
+#' knife edge onto the lattice, where a one-ulp perturbation maps a point to
+#' itself.
+#'
+#' Deliberately keyed on the statistic rather than on the values: `n`'s
+#' discreteness is a property of how [solve_slope()] builds it, not something to
+#' be rediscovered per bootstrap from replicates that happen to look integral.
+#' @noRd
+widen_to_lattice <- function(ci, statistic) {
+  if (!identical(statistic, "n")) return(ci)
+  c(2 * floor(ci[[1L]] / 2), 2 * ceiling(ci[[2L]] / 2))
+}
+
 #' Bootstrap a scalar computed from resampled stage-one parameters
 #'
 #' The resampling scheme, the section 2.6 check and the interval construction are
@@ -412,15 +449,24 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   if (identical(type, "bca")) {
     bca <- bca_interval(good, observed, frame, subject_index, refitter,
                         compute, probs)
-    if (is.null(bca)) {
-      warning(sprintf(paste0("%s: the bias-correction could not be computed (every replicate ",
-                             "falls on one side of the observed value); reporting a percentile ",
-                             "interval instead."), context), call. = FALSE)
+    # A character return is the reason it could not be built. Previously either
+    # failure was reported as "every replicate falls on one side of the observed
+    # value", including the ones where the bias correction was fine and it was
+    # the jackknife that could not be had -- so the warning named a cause the
+    # caller could not act on and, in that case, was simply untrue.
+    if (is.character(bca)) {
+      warning(sprintf("%s: %s; reporting a percentile interval instead.",
+                      context, bca), call. = FALSE)
     } else {
       ci <- bca
       used_type <- "bca"
     }
   }
+
+  # After the choice, so a percentile interval and a BCa one are reported on the
+  # same lattice; before the object is built, so nothing downstream has to know
+  # which statistic needs it.
+  ci <- widen_to_lattice(ci, statistic)
 
   # Sign-straddling is what section 2.6's pre-check (above, on the analytic
   # standard error) is a proxy for; this is the thing itself, measured on the
@@ -484,6 +530,13 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' throughout. A replicate that cannot fit it is discarded and counted in
 #' `n_failed` rather than quietly refitted under the other one, so an interval
 #' never mixes the two.
+#'
+#' A bootstrapped sample size is reported as sample sizes. Every replicate of
+#' `n` is an even integer, so the interval's endpoints are widened out to the
+#' nearest sizes a trial could actually be fielded at rather than left between
+#' them, and the bias correction behind a BCa interval counts replicates tied
+#' with the observed size as half below rather than wholly below. The other
+#' statistics are continuous and neither applies to them.
 #'
 #' `R` defaults to 999. A confidence interval needs an order of magnitude more
 #' replicates than a standard error does, because its endpoints are read from
@@ -689,11 +742,38 @@ slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
 #'
 #' The acceleration comes from a leave-one-subject-out jackknife, matching the
 #' clustering used for the bootstrap itself.
+#'
+#' Returns the interval, or a single string saying why it could not be built --
+#' the two reasons being different enough that the caller's warning has to tell
+#' them apart.
+#'
+#' The bias correction counts a replicate tied with the observed value as half
+#' below rather than not below at all:
+#' \eqn{z_0 = \Phi^{-1}((\#\{\theta^* < \hat\theta\} +
+#' \#\{\theta^* = \hat\theta\}/2) / B)}. The textbook form counts only
+#' those strictly below, which assumes a continuous statistic, where exact ties
+#' have probability zero and the two agree. `n` is not continuous -- it lands on
+#' the even integers -- and ties are ordinary: at an observed 96, 11 of 200
+#' replicates came back exactly 96. Counting every one of them as "below" pushes
+#' `z0` down and carries the whole interval with it, by more the smaller the
+#' sample size, since smaller sizes collide on the lattice more often.
+#'
+#' Two things fall out of the half-count. A bootstrap distribution symmetric
+#' about the observed value gives `z0 = 0` whether or not it has an atom there,
+#' which is what "no bias to correct" ought to mean. And the degenerate branch
+#' is no longer reachable by a pile of ties: with every replicate equal to the
+#' observed value the proportion is 1/2, not 0, so BCa returns an interval
+#' instead of falling back and blaming a one-sided distribution that was in fact
+#' centred. What remains in that branch really is one-sided, which is what its
+#' message now says.
 #' @noRd
 bca_interval <- function(theta, observed, frame, subject_index, refitter,
                          compute, probs) {
-  prop <- mean(theta < observed)
-  if (prop <= 0 || prop >= 1) return(NULL)
+  prop <- (sum(theta < observed) + sum(theta == observed) / 2) / length(theta)
+  if (prop <= 0 || prop >= 1) {
+    return(paste("the bias correction could not be computed (every replicate",
+                 "falls strictly on one side of the observed value)"))
+  }
   z0 <- stats::qnorm(prop)
 
   jack <- rep(NA_real_, length(subject_index))
@@ -703,7 +783,10 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
                         error = function(e) NA_real_)
   })
   jack <- jack[!is.na(jack)]
-  if (length(jack) < 3L) return(NULL)
+  if (length(jack) < 3L) {
+    return(paste("the acceleration could not be computed (under three",
+                 "leave-one-subject-out fits succeeded)"))
+  }
 
   d <- mean(jack) - jack
   denom <- 6 * (sum(d^2))^1.5
@@ -711,7 +794,9 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
 
   z <- stats::qnorm(probs)
   adj <- stats::pnorm(z0 + (z0 + z) / (1 - a * (z0 + z)))
-  if (any(!is.finite(adj))) return(NULL)
+  if (any(!is.finite(adj))) {
+    return("the bias-corrected endpoints were not finite")
+  }
   stats::quantile(theta, adj, names = FALSE, type = 7)
 }
 
