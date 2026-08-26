@@ -817,9 +817,13 @@ print.slope_bootstrap <- function(x, ...) {
   cat(sprintf("  %.0f%% %s CI: [%s, %s]\n", 100 * x$level,
               if (identical(x$type, "bca")) "BCa" else "percentile",
               format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
-  if (x$straddle > 0) {
-    cat(sprintf(paste0("  Note:        %.1f%% of replicates refit a slope on the opposite ",
-                       "side of zero from the fitted one.\n"), 100 * x$straddle))
-  }
+  # Printed unconditionally, including the 0.0% case. This is the measured form
+  # of the section 2.6 hazard, and a reader checking whether the interval means
+  # anything needs to see that it was checked -- an absent line is indis-
+  # tinguishable from a version of the package that never looked. Suppressing it
+  # at zero also made the one number worth reporting visible only when it was
+  # already bad news.
+  cat(sprintf(paste0("  Note:        %.1f%% of replicates refit a slope on the opposite ",
+                     "side of zero from the fitted one.\n"), 100 * x$straddle))
   invisible(x)
 }
