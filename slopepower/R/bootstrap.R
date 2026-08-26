@@ -485,9 +485,23 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' `n_failed` rather than quietly refitted under the other one, so an interval
 #' never mixes the two.
 #'
-#' Refitting a mixed model several hundred times is slow, and `type = "bca"` adds
-#' a leave-one-subject-out jackknife on top, costing one further fit per subject.
-#' Start with a small `R` to gauge the cost.
+#' `R` defaults to 999. A confidence interval needs an order of magnitude more
+#' replicates than a standard error does, because its endpoints are read from
+#' the tails: at `R = 199` a 2.5% tail holds about five replicates, and the
+#' interval wobbles with the seed rather than with the data. Bootstrapping
+#' `slpower1`'s sample size six times over, changing only the seed, the reported
+#' bounds spanned 504--532 and 1021--1061 at `R = 199`, against 504--512 and
+#' 1027--1052 at `R = 999` --- tens of participants of pure Monte Carlo noise on
+#' a number the caller is meant to plan a trial around. The paper's own worked
+#' bootstrap uses 2000. The odd number is the usual convention, `R + 1` round
+#' rather than `R`.
+#'
+#' That costs real time, because every replicate is a mixed-model fit and
+#' `type = "bca"` adds a leave-one-subject-out jackknife on top --- one further
+#' fit per subject. On the paper's `slpower1`, 200 participants, a default BCa
+#' bootstrap is roughly a minute and a half; on `slpower3`, whose model is
+#' slower to fit, nearer two and a half. Pass a small `R` while setting a
+#' calculation up, and leave the default for the answer you intend to report.
 #'
 #' @param x What to bootstrap: a `slope_sample_size` object from
 #'   [slope_sample_size()], a `slope_power` object from [slope_power()], or a
@@ -495,7 +509,8 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #'   The underlying parameters must come from [slope_params()] in either case;
 #'   [slope_params_manual()] objects carry no data to resample. For the `print()`
 #'   method, the `slope_bootstrap` object to show.
-#' @param R Number of bootstrap replicates.
+#' @param R Number of bootstrap replicates. The default is sized for the
+#'   interval this returns rather than for speed; see above before lowering it.
 #' @param type `"bca"` (the default) for bias-corrected and accelerated
 #'   intervals, or `"percentile"`. The paper recommends BCa because the
 #'   distribution of estimated sample sizes is typically skewed.
@@ -572,7 +587,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' @seealso [slope_sample_size()], [slope_power()], [slope_params()],
 #'   [slope_se()] for the standard error behind the section 2.6 check
 #' @export
-slope_bootstrap <- function(x, R = 199, type = c("bca", "percentile"), ...,
+slope_bootstrap <- function(x, R = 999, type = c("bca", "percentile"), ...,
                             level = 0.95, seed = NULL, progress = FALSE) {
   UseMethod("slope_bootstrap")
 }
@@ -605,7 +620,7 @@ bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
 #'   offers only what its object solved for or derived, and defaults to the
 #'   quantity the object exists to report.
 #' @export
-slope_bootstrap.slope_sample_size <- function(x, R = 199,
+slope_bootstrap.slope_sample_size <- function(x, R = 999,
                                               type = c("bca", "percentile"),
                                               statistic = c("n", "tte"), ...,
                                               level = 0.95, seed = NULL,
@@ -622,7 +637,7 @@ slope_bootstrap.slope_sample_size <- function(x, R = 199,
 #' @describeIn slope_bootstrap Bootstrap the power achieved (the default) or the
 #'   target treatment effect behind it.
 #' @export
-slope_bootstrap.slope_power <- function(x, R = 199,
+slope_bootstrap.slope_power <- function(x, R = 999,
                                         type = c("bca", "percentile"),
                                         statistic = c("power", "tte"), ...,
                                         level = 0.95, seed = NULL,
@@ -640,7 +655,7 @@ slope_bootstrap.slope_power <- function(x, R = 199,
 #' @describeIn slope_bootstrap Bootstrap the fitted slope itself, which needs no
 #'   trial design.
 #' @export
-slope_bootstrap.slope_params <- function(x, R = 199,
+slope_bootstrap.slope_params <- function(x, R = 999,
                                          type = c("bca", "percentile"), ...,
                                          level = 0.95, seed = NULL,
                                          progress = FALSE) {
@@ -657,7 +672,7 @@ slope_bootstrap.slope_params <- function(x, R = 199,
 #' @describeIn slope_bootstrap Reject anything else, with a pointer to what is
 #'   accepted.
 #' @export
-slope_bootstrap.default <- function(x, R = 199, type = c("bca", "percentile"),
+slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
                                     ..., level = 0.95, seed = NULL,
                                     progress = FALSE) {
   stop(sprintf(paste0(

@@ -180,6 +180,20 @@ test_that("slope_bootstrap() can bootstrap the sample size itself", {
   expect_equal(b$observed, ss$n)
 })
 
+test_that("the default R is one number, not five that agree by inspection", {
+  # The generic and its four methods each carry `R` in their own signature, and
+  # a caller reaches the default through whichever method dispatch picks. They
+  # have to agree, and nothing but this checks that they do.
+  defaults <- vapply(
+    list(slope_bootstrap,
+         slopepower:::slope_bootstrap.slope_sample_size,
+         slopepower:::slope_bootstrap.slope_power,
+         slopepower:::slope_bootstrap.slope_params,
+         slopepower:::slope_bootstrap.default),
+    function(f) eval(formals(f)$R), numeric(1L))
+  expect_equal(defaults, rep(999, 5L))
+})
+
 test_that("slope_bootstrap() validates R and level", {
   p <- paper_fit("slpower1")
   expect_error(slope_bootstrap(p, R = 0), "R")
