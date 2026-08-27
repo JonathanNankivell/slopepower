@@ -443,30 +443,55 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   }
 
   probs <- c((1 - level) / 2, 1 - (1 - level) / 2)
-  ci <- stats::quantile(good, probs, names = FALSE, type = 7)
-  used_type <- "percentile"
 
-  if (identical(type, "bca")) {
-    bca <- bca_interval(good, observed, frame, subject_index, refitter,
-                        compute, probs)
+  # One jackknife pass serves both intervals. It is taken on first use and kept,
+  # so a bootstrap whose bias correction is degenerate still refits nothing, and
+  # one that needs both columns pays for the refits once.
+  jack <- NULL
+  jack_column <- function(k) {
+    if (is.null(jack)) {
+      jack <<- jackknife_values(frame, subject_index, refitter,
+                                list(compute, function(p) p$slope))
+    }
+    jack[, k]
+  }
+
+  interval <- function(theta, obs, k, what) {
+    ci <- stats::quantile(theta, probs, names = FALSE, type = 7)
+    if (!identical(type, "bca")) return(list(ci = ci, type = "percentile"))
+    bca <- bca_from_jack(theta, obs, jack_column(k), probs)
     # A character return is the reason it could not be built. Previously either
     # failure was reported as "every replicate falls on one side of the observed
     # value", including the ones where the bias correction was fine and it was
     # the jackknife that could not be had -- so the warning named a cause the
     # caller could not act on and, in that case, was simply untrue.
     if (is.character(bca)) {
-      warning(sprintf("%s: %s; reporting a percentile interval instead.",
-                      context, bca), call. = FALSE)
-    } else {
-      ci <- bca
-      used_type <- "bca"
+      warning(sprintf("%s: %s%s; reporting a percentile interval instead.",
+                      context, bca, what), call. = FALSE)
+      return(list(ci = ci, type = "percentile"))
     }
+    list(ci = bca, type = "bca")
+  }
+
+  main <- interval(good, observed, 1L, "")
+  # The replicate slopes get an interval of their own, so that the printed table
+  # can show what the resampling did to the quantity every other row is derived
+  # from -- a sample size two-thirds wider than its point estimate means one
+  # thing if the slope barely moved and another if the slope moved with it.
+  # Under `statistic = "slope"` the two are the same computation on the same
+  # numbers, so it is reused rather than repeated: a second pass would warn
+  # twice about one failure.
+  slope_int <- if (identical(statistic, "slope")) {
+    main
+  } else {
+    interval(good_slopes, params$slope, 2L, " for the replicate slopes")
   }
 
   # After the choice, so a percentile interval and a BCa one are reported on the
   # same lattice; before the object is built, so nothing downstream has to know
-  # which statistic needs it.
-  ci <- widen_to_lattice(ci, statistic)
+  # which statistic needs it. The slope is continuous and needs none of this.
+  ci <- widen_to_lattice(main$ci, statistic)
+  used_type <- main$type
 
   # Sign-straddling is what section 2.6's pre-check (above, on the analytic
   # standard error) is a proxy for; this is the thing itself, measured on the
@@ -489,7 +514,10 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
                  type = used_type, statistic = statistic, R = R,
                  n_failed = n_failed, level = level, se = se,
                  boot_mean = mean(good), boot_sd = stats::sd(good),
-                 straddle = straddle),
+                 straddle = straddle,
+                 slope_observed = params$slope, slope_replicates = good_slopes,
+                 slope_mean = mean(good_slopes), slope_sd = stats::sd(good_slopes),
+                 slope_ci = slope_int$ci, slope_type = slope_int$type),
             class = "slope_bootstrap")
 }
 
@@ -582,6 +610,28 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #'   of retained replicates whose *refitted slope* has a different sign from the
 #'   fitted slope, whatever `statistic` was asked for --- the section 2.6 hazard
 #'   itself, rather than the analytic proxy for it in `se`).
+#'
+#'   The refitted slopes are summarised alongside, whatever `statistic` was
+#'   asked for, in `slope_observed` (the fitted slope), `slope_replicates`,
+#'   `slope_mean`, `slope_sd`, `slope_ci` and `slope_type`. They are what the resampling
+#'   actually perturbs --- every replicate of every other statistic is a
+#'   function of them --- so an interval on the statistic is only as meaningful
+#'   as the one on the slope beneath it. `slope_ci` is built the same way as
+#'   `ci` and from the same jackknife, so it costs no extra model fits, but the
+#'   two can fall back independently: compare `slope_type` with `type`. Under
+#'   `statistic = "slope"` they are one calculation and agree by construction.
+#'
+#'   Every summary is over the retained replicates --- the ones whose refit and
+#'   whose statistic both succeeded; `n_failed` counts the rest, which are
+#'   discarded rather than imputed.
+#'
+#'   For `statistic = "n"` each replicate is a whole trial: [slope_sample_size()]
+#'   is re-solved on that replicate's refitted parameters, and it rounds *up* to
+#'   a whole participant per arm before doubling for the total, so every value in
+#'   `replicates` is an even integer. `boot_mean` and `boot_sd` therefore
+#'   summarise sizes that were each rounded up individually; they do not round an
+#'   average, and `boot_mean` is not itself a size a trial could be run at. The
+#'   slope carries no such rounding.
 #'
 #' @references
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
@@ -769,6 +819,42 @@ slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
 #' @noRd
 bca_interval <- function(theta, observed, frame, subject_index, refitter,
                          compute, probs) {
+  # `jack` is a promise, and `bca_from_jack()` forces it only after the bias
+  # correction has passed. So a degenerate correction still returns without
+  # refitting anything, exactly as it did when the loop lived in this function.
+  bca_from_jack(theta, observed,
+                jackknife_values(frame, subject_index, refitter, list(compute))[, 1L],
+                probs)
+}
+
+#' Leave-one-subject-out fits, read for several quantities at once
+#'
+#' The refit is the whole cost of a jackknife; reading a second number off one
+#' is free. Taking a list of accessors rather than a single `compute` is what
+#' lets the sample size and the replicate slopes have BCa intervals apiece for
+#' the price of one pass, which is what the printed table needs.
+#'
+#' A subject whose refit fails leaves a row of `NA`, so each column can be
+#' cleaned independently -- one quantity failing to be computable off a fit does
+#' not cost the others that subject.
+#' @noRd
+jackknife_values <- function(frame, subject_index, refitter, computes) {
+  jack <- matrix(NA_real_, nrow = length(subject_index), ncol = length(computes))
+  suppressWarnings(for (i in seq_along(subject_index)) {
+    p <- tryCatch(refitter(frame[-subject_index[[i]], , drop = FALSE]),
+                  error = function(e) NULL)
+    if (!is.null(p)) {
+      jack[i, ] <- vapply(computes,
+                          function(f) tryCatch(f(p), error = function(e) NA_real_),
+                          numeric(1L))
+    }
+  })
+  jack
+}
+
+#' The BCa endpoints, given a jackknife already taken
+#' @noRd
+bca_from_jack <- function(theta, observed, jack, probs) {
   prop <- (sum(theta < observed) + sum(theta == observed) / 2) / length(theta)
   if (prop <= 0 || prop >= 1) {
     return(paste("the bias correction could not be computed (every replicate",
@@ -776,12 +862,6 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
   }
   z0 <- stats::qnorm(prop)
 
-  jack <- rep(NA_real_, length(subject_index))
-  suppressWarnings(for (i in seq_along(subject_index)) {
-    drop_rows <- subject_index[[i]]
-    jack[i] <- tryCatch(compute(refitter(frame[-drop_rows, , drop = FALSE])),
-                        error = function(e) NA_real_)
-  })
   jack <- jack[!is.na(jack)]
   if (length(jack) < 3L) {
     return(paste("the acceleration could not be computed (under three",
@@ -800,6 +880,144 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
   stats::quantile(theta, adj, names = FALSE, type = 7)
 }
 
+#' Lay out one row of the sample-size table
+#'
+#' `align` is per column: "l" pads on the right, anything else on the left.
+#' @noRd
+boot_table_row <- function(cells, widths, align) {
+  w <- ifelse(align == "l", -widths, widths)
+  paste0("  | ",
+         paste(mapply(formatC, as.character(cells), width = w, USE.NAMES = FALSE),
+               collapse = " | "),
+         " |")
+}
+
+#' Join a pair of interval endpoints, digits stacked over digits
+#'
+#' Padding the two sides against each other before the "to" is what makes
+#' "269 to  562" and "538 to 1124" line up as a column rather than as two ragged
+#' numbers either side of a fixed word.
+#' @noRd
+boot_ci_cells <- function(los, his) {
+  paste(formatC(los, width = max(nchar(los))), "to",
+        formatC(his, width = max(nchar(his))))
+}
+
+#' Render a bootstrapped sample size as a table
+#'
+#' A sample size is the one bootstrapped statistic that comes in two units --
+#' participants in total and participants per arm -- and a reader has a use for
+#' both: the total is what the trial costs, the per-arm figure is what each site
+#' recruits to. Printed as lines, saying each of them twice over took six lines
+#' whose shared structure the reader had to reconstruct. As a table the units
+#' are rows and the quantities are columns, and the halving is visible rather
+#' than asserted.
+#'
+#' The slope sits above them because it is what the resampling actually
+#' perturbs; every sample size here is a function of it. An interval two-thirds
+#' wider than its point estimate means one thing when the slope barely moved and
+#' quite another when the slope moved with it, and only the two rows together
+#' say which.
+#'
+#' Every per-arm entry is exactly half its total, in the arithmetic and not only
+#' in the display. `solve_slope()` builds `n` as `2 * n_per_arm` and
+#' `widen_to_lattice()` moves both interval endpoints out to even sizes, so no
+#' half here is rounded; the mean halves because it is linear.
+#'
+#' Column widths come from the formatted values rather than from constants, so a
+#' three-digit trial and a six-digit one both line up, and the span header stays
+#' flush over its two columns however it is labelled.
+#' @noRd
+boot_n_table <- function(x) {
+  # Each row group is formatted against itself: a slope near 1 and a sample size
+  # near 100000 share a column, and a decimal count chosen to suit both would
+  # flatter neither.
+  fmt <- function(v) format(v, digits = 6, trim = TRUE)
+  # c(per arm, total), so the halving happens once, in one place.
+  halves <- function(v) fmt(c(v / 2, v))
+
+  calc <- c(fmt(x$slope_observed), halves(x$observed))
+  means <- c(fmt(x$slope_mean), halves(x$boot_mean))
+  # The SD halves for the same reason the mean does: every per-arm replicate is
+  # exactly half its total, and both are linear in the replicates.
+  sds <- c(fmt(x$slope_sd), halves(x$boot_sd))
+  ci <- c(boot_ci_cells(fmt(x$slope_ci[1L]), fmt(x$slope_ci[2L])),
+          boot_ci_cells(halves(x$ci[1L]), halves(x$ci[2L])))
+
+  # A footnote rather than a second method in the header: the two intervals
+  # agree except when one of them could not be built, and the common case must
+  # not pay for the rare one in width. The warning at build time already said
+  # what failed; this is so the printed table cannot be read as claiming a
+  # method it did not use.
+  mixed <- !identical(x$slope_type, x$type)
+  if (mixed) ci[1L] <- paste0(ci[1L], " *")
+
+  labels <- c("Slope", "Sample size", "")
+  sublabels <- c("", "Per arm", "Total")
+  ci_head <- sprintf("%.0f%% CI", 100 * x$level)
+  span <- sprintf("Bootstrapped (%s, R = %d%s)",
+                  if (identical(x$type, "bca")) "BCa" else "percentile", x$R,
+                  if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else "")
+
+  w <- c(max(nchar(labels)), max(nchar(sublabels)),
+         max(nchar(c("Calculated", calc))),
+         max(nchar(c("Mean", means))),
+         max(nchar(c("SD", sds))),
+         max(nchar(c(ci_head, ci))))
+
+  # The span sits over the last three columns and the two " | " between them. If
+  # its label is the wider, the slack goes to the interval, the only one of the
+  # three whose contents are not a single number.
+  span_w <- sum(w[4:6]) + 6L
+  if (nchar(span) > span_w) {
+    w[6L] <- w[6L] + nchar(span) - span_w
+    span_w <- nchar(span)
+  }
+
+  rule <- paste0("  |", paste(vapply(w + 2L, strrep, character(1L), x = "-"),
+                              collapse = "|"), "|")
+  align <- c("l", "l", "r", "r", "r", "r")
+  row <- function(i) {
+    boot_table_row(c(labels[i], sublabels[i], calc[i], means[i], sds[i], ci[i]),
+                   w, align)
+  }
+
+  c(boot_table_row(c("", "", "Calculated", span), c(w[1:3], span_w),
+                   c("l", "l", "r", "l")),
+    # Headers align with the column beneath them, so a header never overhangs
+    # its own digits.
+    boot_table_row(c("", "", "", "Mean", "SD", ci_head), w,
+                   c("l", "l", "l", "r", "r", "r")),
+    rule, row(1L), rule, row(2L), row(3L),
+    if (mixed) {
+      sprintf("  * %s interval; the other could not be built for the slope.",
+              x$slope_type)
+    })
+}
+
+#' A labelled note, wrapped with a hanging indent
+#'
+#' The straddle note ran to 105 characters on one line and wrapped raggedly in
+#' an 80-column terminal, which is where these are read. Wrapping here keeps the
+#' label column of the notes lined up with each other and with the block above
+#' them, whichever layout printed it.
+#' @noRd
+boot_note <- function(label, text, width = 78L) {
+  lead <- formatC(paste0("  ", label, ":"), width = -15L)
+  strwrap(text, width = width, initial = lead, prefix = strrep(" ", 15L))
+}
+
+#' The replicate count, and the failures only when there were some
+#'
+#' Used by the layout that has no span header to put them in. A clean run must
+#' not read as though something went wrong, so the failures appear only when
+#' there are any.
+#' @noRd
+boot_replicate_line <- function(x) {
+  sprintf("  Replicates:  %d used%s\n", length(x$replicates),
+          if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else "")
+}
+
 #' @describeIn slope_bootstrap Print a bootstrap result.
 # No `@param x` here: this block and the generic share one help topic, and the
 # later of the two wins. Documenting `x` as a `slope_bootstrap` object silently
@@ -808,22 +1026,62 @@ bca_interval <- function(theta, observed, frame, subject_index, refitter,
 #' @export
 print.slope_bootstrap <- function(x, ...) {
   cat("<slope_bootstrap>\n")
-  cat(sprintf("  Statistic:   %s\n", x$statistic))
-  cat(sprintf("  Observed:    %s\n", format(x$observed, digits = 6)))
-  cat(sprintf("  Bootstrap:   mean %s, SD %s\n",
-              format(x$boot_mean, digits = 6), format(x$boot_sd, digits = 6)))
-  cat(sprintf("  Replicates:  %d used%s\n", length(x$replicates),
-              if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else ""))
-  cat(sprintf("  %.0f%% %s CI: [%s, %s]\n", 100 * x$level,
-              if (identical(x$type, "bca")) "BCa" else "percentile",
-              format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
-  # Printed unconditionally, including the 0.0% case. This is the measured form
+
+  # Two layouts, because `n` is the one statistic with arms to divide by. A
+  # slope, a power or an effect size has a single value per row, so a table of
+  # it would be one row of five columns -- the lines say the same thing in less
+  # space. Only the sample size earns the table.
+  if (identical(x$statistic, "n")) {
+    # No `Replicates:` line: the count and any failures ride in the table's span
+    # header, beside the method they qualify.
+    cat("\n")
+    # `cat(sep = )` appends after the last element too, so the rows already end
+    # in a newline and this is the blank line, not the row's own terminator.
+    cat(boot_n_table(x), sep = "\n")
+    cat("\n")
+  } else {
+    cat(sprintf("  Statistic:   %s\n", x$statistic))
+    cat(sprintf("  Observed:    %s\n", format(x$observed, digits = 6)))
+    cat(sprintf("  Bootstrap:   mean %s, SD %s\n",
+                format(x$boot_mean, digits = 6), format(x$boot_sd, digits = 6)))
+    cat(boot_replicate_line(x))
+    cat(sprintf("  %.0f%% %s CI: [%s, %s]\n", 100 * x$level,
+                if (identical(x$type, "bca")) "BCa" else "percentile",
+                format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
+  }
+
+  # Printed unconditionally, including the 0/R case. This is the measured form
   # of the section 2.6 hazard, and a reader checking whether the interval means
   # anything needs to see that it was checked -- an absent line is indis-
   # tinguishable from a version of the package that never looked. Suppressing it
   # at zero also made the one number worth reporting visible only when it was
   # already bad news.
-  cat(sprintf(paste0("  Note:        %.1f%% of replicates refit a slope on the opposite ",
-                     "side of zero from the fitted one.\n"), 100 * x$straddle))
+  #
+  # The count is shown beside the percentage because the percentage alone hides
+  # its own precision: "2.5%" off 40 replicates is one replicate, and a reader
+  # deciding whether to worry needs to know it was one. Recovered by rounding
+  # rather than stored, since `straddle` is a count over the replicates kept and
+  # so the product is that count to within floating point.
+  n_used <- length(x$replicates)
+  cat(boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a slope on ",
+                                       "the opposite side of zero from the fitted one."),
+                                round(x$straddle * n_used), n_used,
+                                100 * x$straddle)),
+      sep = "\n")
+
+  # Where the rounding happens, and what follows from it. "mean 357.855" invites
+  # the reading that 357.855 is the size the bootstrap recommends and that a
+  # reader may round it back down to 356; it is an average of several hundred
+  # trials each already rounded up, and rounding it again would be a third
+  # rounding of one number. Two lines because this prints on every call --- the
+  # full account, including which replicates are summarised and why the slope is
+  # exempt, is in the `@return` section of ?slope_bootstrap.
+  if (identical(x$statistic, "n")) {
+    cat(boot_note("Mean, SD", paste(
+      "each replicate is rounded up to a whole participant per arm before",
+      "averaging, so the mean is not a runnable trial size.")),
+        sep = "\n")
+  }
+
   invisible(x)
 }

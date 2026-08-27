@@ -541,17 +541,234 @@ test_that("print.slope_bootstrap() always reports the bootstrap mean and SD", {
                         out, fixed = TRUE)))
 })
 
+# Splits one row of the printed table into its trimmed cells. The leading
+# element is the indent before the first "|"; strsplit() drops the empty one
+# after the last.
+# The label may sit in either of the two label columns -- "Slope" spans them,
+# "Per arm" and "Total" hang under "Sample size" in the second.
+table_cells <- function(out, label) {
+  rows <- out[startsWith(out, "  |")]
+  row <- rows[grepl(paste0("| ", label, " "), rows, fixed = TRUE)]
+  expect_length(row, 1L)
+  trimws(strsplit(row, "|", fixed = TRUE)[[1L]][-1L])
+}
+
+ci_of <- function(cells) {
+  as.numeric(strsplit(cells[6L], " to ", fixed = TRUE)[[1L]])
+}
+
+test_that("print.slope_bootstrap() tabulates a sample size per arm and in total", {
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
+  out <- capture.output(print(b))
+
+  per <- table_cells(out, "Per arm")
+  tot <- table_cells(out, "Total")
+  expect_length(per, 6L)
+
+  # The calculated column is the object's own two figures, not a re-derivation.
+  expect_equal(as.numeric(tot[3L]), ss$n)
+  expect_equal(as.numeric(per[3L]), ss$n_per_arm)
+  expect_equal(2 * as.numeric(per[3L]), as.numeric(tot[3L]))
+
+  # Both interval endpoints halve exactly: widen_to_lattice() has already moved
+  # them out to even sizes, so a per-arm endpoint is a whole participant.
+  expect_equal(ci_of(tot), b$ci)
+  expect_equal(2 * ci_of(per), b$ci)
+  expect_true(all(b$ci %% 2 == 0))
+
+  # The mean and SD halve in the arithmetic; on the page the two are rounded to
+  # six significant figures independently, so it is the formatting that is
+  # pinned here and the exact halving that is checked on the numbers themselves.
+  expect_equal(c(per[4L], tot[4L]), format(c(b$boot_mean / 2, b$boot_mean),
+                                           digits = 6, trim = TRUE))
+  expect_equal(c(per[5L], tot[5L]), format(c(b$boot_sd / 2, b$boot_sd),
+                                           digits = 6, trim = TRUE))
+})
+
+test_that("print.slope_bootstrap() puts the resampled slope above the sizes", {
+  # The row the others are derived from: every replicate sample size is a
+  # function of the slope that replicate refit.
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
+  out <- capture.output(print(b))
+
+  slope <- table_cells(out, "Slope")
+  expect_equal(as.numeric(slope[3L]), ss$params$slope)
+  expect_equal(slope[4L], format(b$slope_mean, digits = 6, trim = TRUE))
+  expect_equal(slope[5L], format(b$slope_sd, digits = 6, trim = TRUE))
+  expect_equal(ci_of(slope), b$slope_ci, tolerance = 1e-5)
+
+  # Above the sample-size rows, and its own second-column cell left empty --
+  # a slope has no arms to split between.
+  rows <- which(startsWith(out, "  | "))
+  expect_lt(grep("| Slope", out, fixed = TRUE), grep("| Sample size", out, fixed = TRUE))
+  expect_equal(slope[2L], "")
+})
+
+test_that("the slope's summary is the replicates the straddle is measured on", {
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 8, seed = 5))
+
+  expect_length(b$slope_replicates, length(b$replicates))
+  expect_equal(b$slope_observed, ss$params$slope)
+  expect_equal(b$slope_mean, mean(b$slope_replicates))
+  expect_equal(b$slope_sd, sd(b$slope_replicates))
+  expect_equal(b$straddle,
+               mean(sign(b$slope_replicates) != sign(b$slope_observed)))
+
+  # For statistic = "slope" the two summaries are one computation, reused rather
+  # than repeated -- a second pass would warn twice about a single failure.
+  sb <- suppressWarnings(slope_bootstrap(ss$params, R = 8, seed = 5))
+  expect_equal(sb$slope_ci, sb$ci)
+  expect_equal(sb$slope_replicates, sb$replicates)
+  expect_equal(sb$slope_type, sb$type)
+})
+
+test_that("print.slope_bootstrap() names the method and replicate count once", {
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  for (type in c("bca", "percentile")) {
+    b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5, type = type))
+    out <- capture.output(print(b))
+    label <- if (identical(b$type, "bca")) "BCa" else "percentile"
+    expect_true(any(grepl(sprintf("Bootstrapped (%s, R = 6)", label),
+                          out, fixed = TRUE)))
+    # The count moved into the span header, so the standalone line is gone.
+    expect_false(any(grepl("Replicates:", out, fixed = TRUE)))
+
+    # Every row of the table is the same width and breaks at the same columns:
+    # the widths come from the formatted values, and the longer "percentile"
+    # span must not push its own columns out of line with the rows beneath.
+    rows <- out[startsWith(out, "  |")]
+    expect_length(rows, 7L)
+    expect_equal(length(unique(nchar(rows))), 1L)
+    bars <- lapply(rows[-1L], function(r) which(strsplit(r, "")[[1L]] == "|"))
+    expect_true(all(vapply(bars, identical, logical(1L), bars[[1L]])))
+  }
+})
+
+test_that("print.slope_bootstrap() puts failed replicates in the span header", {
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
+  b$n_failed <- 2L
+  expect_true(any(grepl("R = 6, 2 failed", capture.output(print(b)), fixed = TRUE)))
+})
+
+test_that("print.slope_bootstrap() footnotes an interval it could not match", {
+  # The header names one method for the whole table, so when the slope had to
+  # fall back and the statistic did not, the table must say which row is the
+  # exception rather than let the header speak for it.
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
+  expect_equal(b$slope_type, b$type)
+  expect_false(any(grepl("*", capture.output(print(b)), fixed = TRUE)))
+
+  b$slope_type <- "percentile"
+  b$type <- "bca"
+  out <- capture.output(print(b))
+  expect_true(any(grepl("Bootstrapped (BCa,", out, fixed = TRUE)))
+  expect_match(table_cells(out, "Slope")[6L], "*", fixed = TRUE)
+  expect_true(any(grepl("* percentile interval; the other could not be built",
+                        out, fixed = TRUE)))
+})
+
+test_that("the printed note describes what boot_mean is actually a mean of", {
+  # The note claims each replicate is a whole trial, rounded up to a whole
+  # participant per arm and doubled, and that the mean averages those already
+  # rounded sizes. Each clause is checked here, so the wording cannot drift away
+  # from solve_slope() without a test failing.
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 20, seed = 5))
+
+  # "rounds up to a whole participant per arm, the total being twice that":
+  # every replicate is an even integer, which only 2 * ceiling(...) can be.
+  expect_true(all(b$replicates == round(b$replicates)))
+  expect_true(all(b$replicates %% 2 == 0))
+
+  # "over the retained replicates" -- the failures are discarded, not imputed.
+  expect_equal(length(b$replicates), b$R - b$n_failed)
+
+  # "summarise sizes already rounded individually rather than rounding a
+  # summary": the mean is of the rounded values, and is not itself rounded.
+  expect_equal(b$boot_mean, mean(b$replicates))
+  expect_equal(b$boot_sd, sd(b$replicates))
+
+  # "not itself a size a trial could be run at": with a spread of replicates the
+  # average lands off the lattice they live on.
+  expect_gt(b$boot_sd, 0)
+  expect_false(b$boot_mean %% 2 == 0)
+
+  # And the slope, which the note exempts, carries no rounding.
+  expect_false(all(b$slope_replicates == round(b$slope_replicates)))
+
+  # The printed note is the short form; the full account lives in the help page,
+  # so what is pinned here is that the printed one stays two lines and that each
+  # of its two claims is the one checked above.
+  out <- capture.output(print(b))
+  note <- out[seq(grep("Mean, SD:", out, fixed = TRUE), length(out))]
+  expect_length(note, 2L)
+  # Matched within a line: the note is wrapped, so a phrase spanning the break
+  # would be pinning where the wrap falls rather than what the note says.
+  expect_true(any(grepl("rounded up to a whole participant per arm",
+                        note, fixed = TRUE)))
+  expect_true(any(grepl("the mean is not a runnable trial size", note, fixed = TRUE)))
+  # Only the sample size rounds, so only it gets the note.
+  expect_false(any(grepl("Mean, SD:", capture.output(print(boot_bca)), fixed = TRUE)))
+})
+
+test_that("print.slope_bootstrap() wraps its notes to a readable width", {
+  # These are read in an 80-column terminal; the straddle note alone ran to 105
+  # characters and wrapped raggedly.
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  out <- capture.output(print(suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))))
+  notes <- out[seq(grep("Note:", out, fixed = TRUE), length(out))]
+  expect_true(all(nchar(notes) <= 78L))
+  # Continuation lines land in the value column, under the note's first word.
+  continued <- notes[!grepl(":", notes, fixed = TRUE)]
+  expect_gt(length(continued), 0L)
+  expect_true(all(startsWith(continued, strrep(" ", 15L))))
+  expect_false(any(startsWith(continued, strrep(" ", 16L))))
+})
+
+test_that("print.slope_bootstrap() tabulates only the sample size", {
+  # The table's rows are arms. A slope, a power or an effect size has none to
+  # divide by, so those keep the one-value-per-line layout.
+  for (b in list(boot_bca,
+                 suppressWarnings(slope_bootstrap(
+                   slope_power(paper_fit("slpower1"), c(0, 1, 2), n = 712,
+                               effectiveness = 0.33), R = 6, seed = 5)))) {
+    out <- capture.output(print(b))
+    expect_false(any(startsWith(out, "  |")))
+    expect_true(any(grepl(sprintf("Statistic:   %s", b$statistic), out, fixed = TRUE)))
+    expect_true(any(grepl("Observed:", out, fixed = TRUE)))
+    expect_true(any(grepl("Replicates:", out, fixed = TRUE)))
+  }
+})
+
 test_that("print.slope_bootstrap() always reports the straddle, zero included", {
-  # The 0.0% case is the point: a reader has to be able to tell "checked, and
+  # The 0/R case is the point: a reader has to be able to tell "checked, and
   # nothing crossed zero" from a print method that never checked at all.
   expect_equal(boot_bca$straddle, 0)
-  expect_true(any(grepl("0.0% of replicates refit a slope on the opposite",
+  expect_true(any(grepl(sprintf("Note:        0/%d (0.0%%) of replicates refit a slope",
+                                length(boot_bca$replicates)),
                         capture.output(print(boot_bca)), fixed = TRUE)))
 
   b <- suppressWarnings(slope_bootstrap(flat_fit(), R = 30, seed = 1))
   expect_gt(b$straddle, 0)
   out <- capture.output(print(b))
-  expect_true(any(grepl(sprintf("%.1f%% of replicates", 100 * b$straddle),
+  # The count is printed beside the percentage because the percentage alone
+  # hides how few replicates it can stand for.
+  n_used <- length(b$replicates)
+  expect_true(any(grepl(sprintf("%d/%d (%.1f%%) of replicates",
+                                round(b$straddle * n_used), n_used, 100 * b$straddle),
                         out, fixed = TRUE)))
 })
 
