@@ -491,17 +491,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  # maybe_add_effectiveness() decides whether `effectiveness` belongs in the
-  # call at all -- it must not be passed under target = "observed" -- which here
-  # is the same question as whether it is an axis of the grid.
-  scalars <- maybe_add_effectiveness(list(n = n), effectiveness, target)
-  scalars$alpha <- alpha
-
-  grid_impl(visits, dropout, scalars,
-            function(des, args) do.call(slope_power,
-                                        c(list(params = params, design = des, target = target),
-                                          args)),
-            context)
+  grid_stage_two(params, visits, dropout, "n", n, effectiveness, target, alpha,
+                 slope_power, context)
 }
 
 #' Compare the sample size many candidate trial designs need
@@ -602,12 +593,35 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  # See the note on the same line in slope_power_grid().
-  scalars <- maybe_add_effectiveness(list(power = power), effectiveness, target)
+  grid_stage_two(params, visits, dropout, "power", power, effectiveness, target, alpha,
+                 slope_sample_size, context)
+}
+
+#' Shared body of the two grid functions
+#'
+#' [slope_power_grid()] and [slope_sample_size_grid()] differ only in which
+#' argument holds the value they hold fixed across the grid (`n` vs `power`)
+#' and which stage-two function is re-solved per cell; everything else --
+#' deciding whether `effectiveness` is an axis, and the call to `grid_impl()`
+#' -- is identical, so both call through here. The same shape as
+#' `bootstrap_stage_two()` in bootstrap.R, for the same reason.
+#'
+#' `fixed_name`/`fixed_value` rather than a pre-built one-element list: the
+#' name comes from a literal at each call site, so `stats::setNames()` here
+#' keeps that pairing in one place rather than repeating `list(n = n)` and
+#' `list(power = power)` beside two otherwise-identical blocks.
+#' @noRd
+grid_stage_two <- function(params, visits, dropout, fixed_name, fixed_value,
+                           effectiveness, target, alpha, fn, context) {
+  # maybe_add_effectiveness() decides whether `effectiveness` belongs in the
+  # call at all -- it must not be passed under target = "observed" -- which here
+  # is the same question as whether it is an axis of the grid.
+  scalars <- maybe_add_effectiveness(stats::setNames(list(fixed_value), fixed_name),
+                                     effectiveness, target)
   scalars$alpha <- alpha
 
   grid_impl(visits, dropout, scalars,
-            function(des, args) do.call(slope_sample_size,
+            function(des, args) do.call(fn,
                                         c(list(params = params, design = des, target = target),
                                           args)),
             context)

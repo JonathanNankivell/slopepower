@@ -432,7 +432,13 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # No NAs to guard against: `slopes[b]` is filled whenever the refit that
   # `replicates[b]` also depends on succeeded, and new_slope_params() admits
   # only a finite slope.
-  good_slopes <- slopes[!failed]
+  #
+  # Under `statistic == "slope"`, `compute` above is `function(p) p$slope` --
+  # the same read as `slopes[b] <- p$slope` -- so `good` and `slopes[!failed]`
+  # are the same values under two names. Aliased here, and in the summary
+  # statistics built from it below, rather than recomputed independently, so
+  # the two can never drift apart the way two separately-taken means could.
+  good_slopes <- if (identical(statistic, "slope")) good else slopes[!failed]
   if (length(good) < 2L) {
     stop(sprintf("%s: %d of %d replicates failed; not enough succeeded to form an interval.",
                  context, n_failed, R), call. = FALSE)
@@ -456,9 +462,16 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     jack[, k]
   }
 
+  # The percentile quantile is computed only where it is actually used: as the
+  # answer itself under `type = "percentile"`, or as the fallback when a BCa
+  # interval could not be built. A successful BCa interval never touches it, so
+  # it is no longer computed -- and immediately discarded -- on every such call.
+  percentile <- function(theta) {
+    list(ci = stats::quantile(theta, probs, names = FALSE, type = 7),
+        type = "percentile")
+  }
   interval <- function(theta, obs, k, what) {
-    ci <- stats::quantile(theta, probs, names = FALSE, type = 7)
-    if (!identical(type, "bca")) return(list(ci = ci, type = "percentile"))
+    if (!identical(type, "bca")) return(percentile(theta))
     bca <- bca_from_jack(theta, obs, jack_column(k), probs)
     # A character return is the reason it could not be built. Previously either
     # failure was reported as "every replicate falls on one side of the observed
@@ -468,7 +481,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     if (is.character(bca)) {
       warning(sprintf("%s: %s%s; reporting a percentile interval instead.",
                       context, bca, what), call. = FALSE)
-      return(list(ci = ci, type = "percentile"))
+      return(percentile(theta))
     }
     list(ci = bca, type = "bca")
   }
@@ -492,6 +505,12 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # which statistic needs it. The slope is continuous and needs none of this.
   ci <- widen_to_lattice(main$ci, statistic)
   used_type <- main$type
+  # Decided once, here, and carried on the object as `lattice` rather than
+  # re-tested against `statistic` wherever the choice matters again -- print
+  # methods included. A discrete statistic added later, or a print-side
+  # refactor that misses one of several such tests, cannot silently disagree
+  # with the widening this function already did.
+  lattice <- identical(statistic, "n")
 
   # Sign-straddling is what section 2.6's pre-check (above, on the analytic
   # standard error) is a proxy for; this is the thing itself, measured on the
@@ -510,13 +529,20 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # `statistic = "slope"`, where the two are the same comparison.
   straddle <- mean(sign(good_slopes) != sign(params$slope))
 
+  # As with `good_slopes` above, these are aliased rather than recomputed when
+  # the two are the same computation under `statistic == "slope"`.
+  boot_mean <- mean(good)
+  boot_sd <- stats::sd(good)
+  same_stat <- identical(statistic, "slope")
+
   structure(list(observed = observed, replicates = good, ci = ci,
                  type = used_type, statistic = statistic, R = R,
                  n_failed = n_failed, level = level, se = se,
-                 boot_mean = mean(good), boot_sd = stats::sd(good),
-                 straddle = straddle,
+                 boot_mean = boot_mean, boot_sd = boot_sd,
+                 straddle = straddle, lattice = lattice,
                  slope_observed = params$slope, slope_replicates = good_slopes,
-                 slope_mean = mean(good_slopes), slope_sd = stats::sd(good_slopes),
+                 slope_mean = if (same_stat) boot_mean else mean(good_slopes),
+                 slope_sd = if (same_stat) boot_sd else stats::sd(good_slopes),
                  slope_ci = slope_int$ci, slope_type = slope_int$type),
             class = "slope_bootstrap")
 }
@@ -606,10 +632,12 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #'
 #' @return An object of class `slope_bootstrap`, with elements `observed`, `replicates`,
 #'   `ci`, `type`, `statistic`, `R`, `n_failed`, `level`, `se`, `boot_mean` and
-#'   `boot_sd` (the mean and SD of `replicates`), and `straddle` (the proportion
+#'   `boot_sd` (the mean and SD of `replicates`), `straddle` (the proportion
 #'   of retained replicates whose *refitted slope* has a different sign from the
 #'   fitted slope, whatever `statistic` was asked for --- the section 2.6 hazard
-#'   itself, rather than the analytic proxy for it in `se`).
+#'   itself, rather than the analytic proxy for it in `se`), and `lattice`
+#'   (whether `statistic` is `"n"`, decided once here and read by the print
+#'   method rather than re-tested there).
 #'
 #'   The refitted slopes are summarised alongside, whatever `statistic` was
 #'   asked for, in `slope_observed` (the fitted slope), `slope_replicates`,
@@ -788,45 +816,6 @@ slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
     paste(sQuote(class(x)), collapse = "/")), call. = FALSE)
 }
 
-#' Bias-corrected and accelerated interval
-#'
-#' The acceleration comes from a leave-one-subject-out jackknife, matching the
-#' clustering used for the bootstrap itself.
-#'
-#' Returns the interval, or a single string saying why it could not be built --
-#' the two reasons being different enough that the caller's warning has to tell
-#' them apart.
-#'
-#' The bias correction counts a replicate tied with the observed value as half
-#' below rather than not below at all:
-#' \eqn{z_0 = \Phi^{-1}((\#\{\theta^* < \hat\theta\} +
-#' \#\{\theta^* = \hat\theta\}/2) / B)}. The textbook form counts only
-#' those strictly below, which assumes a continuous statistic, where exact ties
-#' have probability zero and the two agree. `n` is not continuous -- it lands on
-#' the even integers -- and ties are ordinary: at an observed 96, 11 of 200
-#' replicates came back exactly 96. Counting every one of them as "below" pushes
-#' `z0` down and carries the whole interval with it, by more the smaller the
-#' sample size, since smaller sizes collide on the lattice more often.
-#'
-#' Two things fall out of the half-count. A bootstrap distribution symmetric
-#' about the observed value gives `z0 = 0` whether or not it has an atom there,
-#' which is what "no bias to correct" ought to mean. And the degenerate branch
-#' is no longer reachable by a pile of ties: with every replicate equal to the
-#' observed value the proportion is 1/2, not 0, so BCa returns an interval
-#' instead of falling back and blaming a one-sided distribution that was in fact
-#' centred. What remains in that branch really is one-sided, which is what its
-#' message now says.
-#' @noRd
-bca_interval <- function(theta, observed, frame, subject_index, refitter,
-                         compute, probs) {
-  # `jack` is a promise, and `bca_from_jack()` forces it only after the bias
-  # correction has passed. So a degenerate correction still returns without
-  # refitting anything, exactly as it did when the loop lived in this function.
-  bca_from_jack(theta, observed,
-                jackknife_values(frame, subject_index, refitter, list(compute))[, 1L],
-                probs)
-}
-
 #' Leave-one-subject-out fits, read for several quantities at once
 #'
 #' The refit is the whole cost of a jackknife; reading a second number off one
@@ -852,7 +841,35 @@ jackknife_values <- function(frame, subject_index, refitter, computes) {
   jack
 }
 
-#' The BCa endpoints, given a jackknife already taken
+#' Bias-corrected and accelerated interval, given a jackknife already taken
+#'
+#' The acceleration comes from a leave-one-subject-out jackknife, matching the
+#' clustering used for the bootstrap itself; `jack` is that jackknife's values
+#' for the one quantity this interval is for, taken by [jackknife_values()].
+#'
+#' Returns the interval, or a single string saying why it could not be built --
+#' the two reasons being different enough that the caller's warning has to tell
+#' them apart.
+#'
+#' The bias correction counts a replicate tied with the observed value as half
+#' below rather than not below at all:
+#' \eqn{z_0 = \Phi^{-1}((\#\{\theta^* < \hat\theta\} +
+#' \#\{\theta^* = \hat\theta\}/2) / B)}. The textbook form counts only
+#' those strictly below, which assumes a continuous statistic, where exact ties
+#' have probability zero and the two agree. `n` is not continuous -- it lands on
+#' the even integers -- and ties are ordinary: at an observed 96, 11 of 200
+#' replicates came back exactly 96. Counting every one of them as "below" pushes
+#' `z0` down and carries the whole interval with it, by more the smaller the
+#' sample size, since smaller sizes collide on the lattice more often.
+#'
+#' Two things fall out of the half-count. A bootstrap distribution symmetric
+#' about the observed value gives `z0 = 0` whether or not it has an atom there,
+#' which is what "no bias to correct" ought to mean. And the degenerate branch
+#' is no longer reachable by a pile of ties: with every replicate equal to the
+#' observed value the proportion is 1/2, not 0, so BCa returns an interval
+#' instead of falling back and blaming a one-sided distribution that was in fact
+#' centred. What remains in that branch really is one-sided, which is what its
+#' message now says.
 #' @noRd
 bca_from_jack <- function(theta, observed, jack, probs) {
   prop <- (sum(theta < observed) + sum(theta == observed) / 2) / length(theta)
@@ -931,8 +948,14 @@ boot_ci_cells <- function(los, his) {
 boot_n_table <- function(x) {
   # Each row group is formatted against itself: a slope near 1 and a sample size
   # near 100000 share a column, and a decimal count chosen to suit both would
-  # flatter neither.
-  fmt <- function(v) format(v, digits = 6, trim = TRUE)
+  # flatter neither. Not fmt_num(): that formats each element on its own, but
+  # `halves()` below needs the opposite -- a per-arm figure and its total
+  # padded to the *same* number of decimal places, via one format() call on
+  # the pair, so the column lines up digit-for-digit rather than each side
+  # independently hitting six significant figures at whatever decimal count
+  # that takes. `drop0trailing` still matches fmt_num()'s own convention, so a
+  # whole number here (a sample size, say) prints as "753" and not "753.0".
+  fmt <- function(v) format(v, digits = 6, trim = TRUE, drop0trailing = TRUE)
   # c(per arm, total), so the halving happens once, in one place.
   halves <- function(v) fmt(c(v / 2, v))
 
@@ -1031,7 +1054,7 @@ print.slope_bootstrap <- function(x, ...) {
   # slope, a power or an effect size has a single value per row, so a table of
   # it would be one row of five columns -- the lines say the same thing in less
   # space. Only the sample size earns the table.
-  if (identical(x$statistic, "n")) {
+  if (x$lattice) {
     # No `Replicates:` line: the count and any failures ride in the table's span
     # header, beside the method they qualify.
     cat("\n")
@@ -1076,7 +1099,7 @@ print.slope_bootstrap <- function(x, ...) {
   # rounding of one number. Two lines because this prints on every call --- the
   # full account, including which replicates are summarised and why the slope is
   # exempt, is in the `@return` section of ?slope_bootstrap.
-  if (identical(x$statistic, "n")) {
+  if (x$lattice) {
     cat(boot_note("Mean, SD", paste(
       "each replicate is rounded up to a whole participant per arm before",
       "averaging, so the mean is not a runnable trial size.")),

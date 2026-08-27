@@ -335,14 +335,15 @@ test_that("slope_bootstrap(progress = TRUE) ticks every max(1, R/10) replicates"
     slope_bootstrap(boot_tiny_fit, R = 5, seed = 1, type = "percentile")))
 })
 
-# --- bca_interval() and its fallbacks -----------------------------------
+# --- bca_from_jack() and its fallbacks -----------------------------------
 # The acceleration needs a leave-one-subject-out jackknife, matching the
 # clustering of the bootstrap itself, and there are fits for which it cannot be
-# had. bca_interval() answers with a string saying which in each such case and
+# had. bca_from_jack() answers with a string saying which in each such case and
 # run_bootstrap() keeps the percentile interval it has already computed, so the
 # observable consequence of every fallback is the same -- `type = "bca"` in,
 # `$type == "percentile"` out -- while the warning distinguishes them.
-bca_interval <- slopepower:::bca_interval
+bca_from_jack <- slopepower:::bca_from_jack
+jackknife_values <- slopepower:::jackknife_values
 
 # Two subjects is the fewest slope_params() will fit. Leaving one out leaves
 # one, which it refuses outright -- 2 participants with repeat visits are
@@ -356,39 +357,41 @@ boot_pair_fit <- local({
   slope_params(y ~ visit | id, d)
 })
 
-test_that("bca_interval() falls back when under three jackknife values survive", {
-  frame <- slopepower:::boot_frame(boot_pair_fit, "test")
-  subject_index <- split(seq_len(nrow(frame)), frame$subject)
-  expect_length(subject_index, 2L)
+# The jackknife taken once here and reused across both tests below, exactly as
+# run_bootstrap() takes it once per bootstrap and passes the same column to
+# every interval() call that needs it: with only two subjects, one left out at
+# a time, it can never reach the three values bca_from_jack() requires,
+# whatever `theta` and `observed` are being tested.
+boot_pair_frame <- slopepower:::boot_frame(boot_pair_fit, "test")
+boot_pair_jack <- jackknife_values(
+  boot_pair_frame, split(seq_len(nrow(boot_pair_frame)), boot_pair_frame$subject),
+  slopepower:::make_refitter(boot_pair_fit), list(function(p) p$slope))[, 1L]
+
+test_that("bca_from_jack() falls back when under three jackknife values survive", {
+  expect_length(boot_pair_jack, 2L)
 
   # `theta` straddles `observed` -- two below, one tied, two above, so the
   # half-counted proportion is 0.5 and z0 is perfectly computable. What fails
   # below is the jackknife, and the returned reason has to say so rather than
   # blaming the bias correction.
-  expect_match(bca_interval(theta = c(1, 2, 3, 4, 5), observed = 3,
-                            frame = frame, subject_index = subject_index,
-                            refitter = slopepower:::make_refitter(boot_pair_fit),
-                            compute = function(p) p$slope,
-                            probs = c(0.025, 0.975)),
+  expect_match(bca_from_jack(theta = c(1, 2, 3, 4, 5), observed = 3,
+                             jack = boot_pair_jack, probs = c(0.025, 0.975)),
                "acceleration could not be computed")
 })
 
-test_that("bca_interval() half-counts replicates tied with the observed value", {
-  frame <- slopepower:::boot_frame(boot_pair_fit, "test")
-  subject_index <- split(seq_len(nrow(frame)), frame$subject)
-  args <- list(frame = frame, subject_index = subject_index,
-               refitter = slopepower:::make_refitter(boot_pair_fit),
-               compute = function(p) p$slope, probs = c(0.025, 0.975))
-
+test_that("bca_from_jack() half-counts replicates tied with the observed value", {
   # Every replicate tied with the observed value. Counting ties as "below"
   # makes the proportion 0 and qnorm(0) = -Inf, so this used to be rejected as
   # one-sided; half-counted it is 0.5, meaning no bias to correct, and the run
   # gets as far as the jackknife.
-  expect_match(do.call(bca_interval, c(list(theta = rep(3, 5), observed = 3), args)),
+  expect_match(bca_from_jack(theta = rep(3, 5), observed = 3,
+                             jack = boot_pair_jack, probs = c(0.025, 0.975)),
                "acceleration could not be computed")
 
-  # Genuinely one-sided is still rejected, and still named as such.
-  expect_match(do.call(bca_interval, c(list(theta = c(4, 5, 6), observed = 3), args)),
+  # Genuinely one-sided is still rejected, and still named as such -- before the
+  # jackknife (unused here, since this never reaches it) would even matter.
+  expect_match(bca_from_jack(theta = c(4, 5, 6), observed = 3,
+                             jack = boot_pair_jack, probs = c(0.025, 0.975)),
                "every replicate falls strictly on one side")
 })
 
@@ -582,9 +585,9 @@ test_that("print.slope_bootstrap() tabulates a sample size per arm and in total"
   # six significant figures independently, so it is the formatting that is
   # pinned here and the exact halving that is checked on the numbers themselves.
   expect_equal(c(per[4L], tot[4L]), format(c(b$boot_mean / 2, b$boot_mean),
-                                           digits = 6, trim = TRUE))
+                                           digits = 6, trim = TRUE, drop0trailing = TRUE))
   expect_equal(c(per[5L], tot[5L]), format(c(b$boot_sd / 2, b$boot_sd),
-                                           digits = 6, trim = TRUE))
+                                           digits = 6, trim = TRUE, drop0trailing = TRUE))
 })
 
 test_that("print.slope_bootstrap() puts the resampled slope above the sizes", {
@@ -597,8 +600,8 @@ test_that("print.slope_bootstrap() puts the resampled slope above the sizes", {
 
   slope <- table_cells(out, "Slope")
   expect_equal(as.numeric(slope[3L]), ss$params$slope)
-  expect_equal(slope[4L], format(b$slope_mean, digits = 6, trim = TRUE))
-  expect_equal(slope[5L], format(b$slope_sd, digits = 6, trim = TRUE))
+  expect_equal(slope[4L], format(b$slope_mean, digits = 6, trim = TRUE, drop0trailing = TRUE))
+  expect_equal(slope[5L], format(b$slope_sd, digits = 6, trim = TRUE, drop0trailing = TRUE))
   expect_equal(ci_of(slope), b$slope_ci, tolerance = 1e-5)
 
   # Above the sample-size rows, and its own second-column cell left empty --
