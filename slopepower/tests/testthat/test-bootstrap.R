@@ -732,7 +732,9 @@ test_that("print.slope_bootstrap() wraps its notes to a readable width", {
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
   out <- capture.output(print(suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))))
-  notes <- out[seq(grep("Note:", out, fixed = TRUE), length(out))]
+  # Two notes now share the label; the wrapping check wants all of them, from
+  # the first "Note:" line to the end.
+  notes <- out[seq(min(grep("Note:", out, fixed = TRUE)), length(out))]
   expect_true(all(nchar(notes) <= 78L))
   # Continuation lines land in the value column, under the note's first word.
   continued <- notes[!grepl(":", notes, fixed = TRUE)]
@@ -772,6 +774,24 @@ test_that("print.slope_bootstrap() always reports the straddle, zero included", 
   n_used <- length(b$replicates)
   expect_true(any(grepl(sprintf("%d/%d (%.1f%%) of replicates",
                                 round(b$straddle * n_used), n_used, 100 * b$straddle),
+                        out, fixed = TRUE)))
+})
+
+test_that("print.slope_bootstrap() always reports the convergence failures, zero included", {
+  # Same rationale as the straddle note: "0 failed" and "never checked" must
+  # not look the same on the page.
+  expect_equal(boot_bca$n_failed, 0)
+  expect_true(any(grepl(sprintf("Note:        0/%d (0.0%%) bootstrap samples failed to converge.",
+                                boot_bca$R),
+                        capture.output(print(boot_bca)), fixed = TRUE)))
+
+  ss <- suppressWarnings(
+    slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
+  b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
+  b$n_failed <- 2L
+  out <- capture.output(print(b))
+  expect_true(any(grepl(sprintf("2/%d (%.1f%%) bootstrap samples failed to converge.",
+                                b$R, 100 * 2 / b$R),
                         out, fixed = TRUE)))
 })
 
