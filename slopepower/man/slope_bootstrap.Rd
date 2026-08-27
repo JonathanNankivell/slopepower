@@ -101,6 +101,28 @@ An object of class \code{slope_bootstrap}, with elements \code{observed}, \code{
 of retained replicates whose \emph{refitted slope} has a different sign from the
 fitted slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
 itself, rather than the analytic proxy for it in \code{se}).
+
+The refitted slopes are summarised alongside, whatever \code{statistic} was
+asked for, in \code{slope_observed} (the fitted slope), \code{slope_replicates},
+\code{slope_mean}, \code{slope_sd}, \code{slope_ci} and \code{slope_type}. They are what the resampling
+actually perturbs --- every replicate of every other statistic is a
+function of them --- so an interval on the statistic is only as meaningful
+as the one on the slope beneath it. \code{slope_ci} is built the same way as
+\code{ci} and from the same jackknife, so it costs no extra model fits, but the
+two can fall back independently: compare \code{slope_type} with \code{type}. Under
+\code{statistic = "slope"} they are one calculation and agree by construction.
+
+Every summary is over the retained replicates --- the ones whose refit and
+whose statistic both succeeded; \code{n_failed} counts the rest, which are
+discarded rather than imputed.
+
+For \code{statistic = "n"} each replicate is a whole trial: \code{\link[=slope_sample_size]{slope_sample_size()}}
+is re-solved on that replicate's refitted parameters, and it rounds \emph{up} to
+a whole participant per arm before doubling for the total, so every value in
+\code{replicates} is an even integer. \code{boot_mean} and \code{boot_sd} therefore
+summarise sizes that were each rounded up individually; they do not round an
+average, and \code{boot_mean} is not itself a size a trial could be run at. The
+slope carries no such rounding.
 }
 \description{
 Resamples subjects with replacement, refits the stage-one mixed model on each
