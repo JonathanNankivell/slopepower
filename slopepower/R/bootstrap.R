@@ -1073,6 +1073,17 @@ print.slope_bootstrap <- function(x, ...) {
                 format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
   }
 
+  # Printed unconditionally, including the 0/R case, for the same reason as the
+  # straddle note below: a clean run and a version of the package that never
+  # checked must not look identical on the page. `n_failed` is already counted
+  # out of `R` -- not out of the replicates that succeeded -- so the denominator
+  # here is the number requested, matching what a reader asked for and what the
+  # warning above (when there were any failures) already reported.
+  cat(boot_note("Note", sprintf(
+    "%d/%d (%.1f%%) bootstrap samples failed to converge.",
+    x$n_failed, x$R, 100 * x$n_failed / x$R)),
+      sep = "\n")
+
   # Printed unconditionally, including the 0/R case. This is the measured form
   # of the section 2.6 hazard, and a reader checking whether the interval means
   # anything needs to see that it was checked -- an absent line is indis-
