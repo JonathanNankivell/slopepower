@@ -202,7 +202,10 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'   `slope_mean`, `slope_sd`, `slope_ci`, `slope_type`, `slope_replicates` --
 #'   the same summary of the refitted slopes a single [slope_bootstrap()]
 #'   result carries, since the slope is what the resampling actually
-#'   perturbs and every cell's interval is a function of it. Base
+#'   perturbs and every cell's interval is a function of it. The printed
+#'   table does not show them --- it reports the cells and, beneath them,
+#'   `straddle` --- so these six attributes are where a reader who wants the
+#'   slope's own interval finds it. Base
 #'   `[.data.frame` drops attributes it does not know, so `x[1:3, ]` keeps
 #'   the class but not these; [print.slope_sample_size_grid_boot()] falls
 #'   back to a plain data-frame print when they are absent.
@@ -387,53 +390,56 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
 # printing
 # ---------------------------------------------------------------------------
 
-#' A width-driven table of one statistic across a labelled set of rows
+#' The ten columns [slope_sample_size_grid_boot()] adds to a plain grid
 #'
-#' Shared by both tables [print.slope_sample_size_grid_boot()] prints -- the
-#' sample size (with the shared slope row prepended) and, when it varies, the
-#' target treatment effect -- so the column-width and span-header arithmetic
-#' `boot_n_table()` (bootstrap.R) already worked out for a fixed three rows is
-#' written once here for however many `labels` names, rather than twice.
-#'
-#' `sep_after`, if given, draws a second rule after that row -- used to set
-#' the shared slope row apart from the per-cell rows beneath it, the same
-#' break `boot_n_table()` draws between "Slope" and "Sample size".
+#' Named once, here, so that the printed frame can be defined by *subtraction*
+#' -- whatever `slope_sample_size_grid()` itself produced is everything else --
+#' rather than by a second list of grid columns that would have to be updated
+#' alongside `grid_axes()` and `grid_evaluate()` (grid.R) every time the grid
+#' gains one. It has gained two since this file was written.
 #' @noRd
-boot_grid_stat_table <- function(labels, calc, means, sds, cis, ci_head, span, sep_after = NULL) {
-  w <- c(max(nchar(labels)),
-        max(nchar(c("Calculated", calc))),
-        max(nchar(c("Mean", means))),
-        max(nchar(c("SD", sds))),
-        max(nchar(c(ci_head, cis))))
+grid_boot_added_cols <- c("n_mean", "n_sd", "n_lower", "n_upper",
+                          "tte_mean", "tte_sd", "tte_lower", "tte_upper",
+                          "ci_type", "n_failed")
 
-  span_w <- sum(w[3:5]) + 6L
-  if (nchar(span) > span_w) {
-    w[5L] <- w[5L] + nchar(span) - span_w
-    span_w <- nchar(span)
+#' One statistic's interval as a single printed column
+#'
+#' `lower`/`upper` joined by `boot_interval_col()` (bootstrap.R) into the
+#' character column a data frame can hold, with the two markers the hand-drawn
+#' table used to carry in its own cells:
+#'
+#' * `"--"` where the cell had fewer than two surviving replicates, so there is
+#'   no interval to show. Not `NA`: the note below the table names `"--"`, and
+#'   a reader should find in the table the thing the note pointed at.
+#' * `" *"` where the interval that could be built is not the one asked for.
+#'   `used` is the per-cell `ci_type`; `asked` the grid-wide `type`.
+#'
+#' @noRd
+grid_boot_ci_col <- function(lower, upper, used = NULL, asked = NULL) {
+  out <- boot_interval_col(lower, upper)
+  if (!is.null(used)) {
+    mixed <- !is.na(used) & used != asked
+    out[mixed] <- paste0(out[mixed], " *")
   }
-
-  rule <- paste0("  |", paste(vapply(w + 2L, strrep, character(1L), x = "-"), collapse = "|"), "|")
-  align <- c("l", "r", "r", "r", "r")
-  row <- function(i) boot_table_row(c(labels[i], calc[i], means[i], sds[i], cis[i]), w, align)
-
-  body <- character(0L)
-  for (i in seq_along(labels)) {
-    body <- c(body, row(i))
-    if (identical(sep_after, i)) body <- c(body, rule)
-  }
-
-  c(boot_table_row(c("", "Calculated", span), c(w[1:2], span_w), c("l", "r", "l")),
-    boot_table_row(c("", "", "Mean", "SD", ci_head), w, c("l", "l", "r", "r", "r")),
-    rule, body)
+  ifelse(is.na(lower), "--", out)
 }
 
 #' @describeIn slope_sample_size_grid_boot Print a bootstrapped sample-size grid.
 #'
-#' Reuses `boot_table_row()`, `boot_ci_cells()` and `boot_note()`
-#' (bootstrap.R) -- all three already width-driven and statistic-agnostic --
-#' via `boot_grid_stat_table()`, so a table with several rows costs no new
-#' formatting machinery beyond generalising `boot_n_table()`'s own fixed
-#' three rows to however many the grid has.
+#' Printed as data frames, by R itself, rather than as a hand-drawn table: a
+#' grid *is* a data frame, [slope_sample_size_grid()] prints as one, and this
+#' shows exactly that table plus three columns --- `n_mean`, `n_sd`, and the
+#' interval as one `n_ci` column reading "924 to 1704". A second frame follows
+#' it for the target treatment effect when `effectiveness` varies, since that
+#' is the only axis it depends on. Everything shared by every cell --- the
+#' method, the replicate count, the interval level, and the failure and
+#' sign-straddling counts --- is reported in the notes beneath, which print on
+#' every call whether or not anything went wrong.
+#'
+#' The resampled slope is not shown. It is still on the object, in the
+#' `slope_observed` attribute and the five beside it, and the straddle note
+#' still reports the one thing about it that bears on whether these intervals
+#' mean anything.
 #'
 #' Falls back to `print.data.frame()` when the bootstrap attributes are
 #' missing -- as they are after e.g. `x[1:3, ]`, since base `[.data.frame`
@@ -448,6 +454,9 @@ boot_grid_stat_table <- function(labels, calc, means, sds, cis, ci_head, span, s
 #'   both share this help topic and both happen to have a parameter of the
 #'   same name.
 #' @param ... Not used.
+# The grid columns are recovered by dropping `grid_boot_added_cols` rather than
+# by listing them, through this class's own `[` method, which already returns a
+# plain data frame stripped of the grid-wide summary.
 #' @export
 print.slope_sample_size_grid_boot <- function(x, ...) {
   if (is.null(attr(x, "R"))) {
@@ -459,53 +468,39 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
   level <- attr(x, "level")
   R <- attr(x, "R")
   n_refit_failed <- attr(x, "n_refit_failed")
-  row_labels <- attr(x, "row_labels")
   named <- attr(x, "named")
 
-  fmt <- function(v) format(v, digits = 6, trim = TRUE, drop0trailing = TRUE)
-  dash_if_na <- function(v, s) ifelse(is.na(v), "--", s)
-
-  ci_head <- sprintf("%.0f%% CI", 100 * level)
-  method <- if (identical(type, "bca")) "BCa" else "percentile"
-  span <- sprintf("Bootstrapped (%s, R = %d%s)", method, R,
-                  if (n_refit_failed > 0L) sprintf(", %d refit failed", n_refit_failed) else "")
-
-  slope_ci <- attr(x, "slope_ci")
-  slope_mixed <- !identical(attr(x, "slope_type"), type)
-  slope_ci_str <- boot_ci_cells(fmt(slope_ci[1L]), fmt(slope_ci[2L]))
-  if (slope_mixed) slope_ci_str <- paste0(slope_ci_str, " *")
-
-  n_mixed <- !is.na(x$ci_type) & x$ci_type != type
-  n_ci_str <- boot_ci_cells(fmt(x$n_lower), fmt(x$n_upper))
-  n_ci_str[n_mixed] <- paste0(n_ci_str[n_mixed], " *")
-  n_ci_str <- dash_if_na(x$n_lower, n_ci_str)
+  # `[` on this class strips the class and every grid-wide attribute, so this
+  # is already the plain data frame print.data.frame() should be handed --
+  # no unclass() here, and no second place that knows which attributes exist.
+  cells <- x[, setdiff(names(x), grid_boot_added_cols), drop = FALSE]
+  cells$n_mean <- x$n_mean
+  cells$n_sd <- x$n_sd
+  cells$n_ci <- grid_boot_ci_col(x$n_lower, x$n_upper, x$ci_type, type)
 
   cat("<slope_sample_size_grid_boot>\n\n")
-  cat(boot_grid_stat_table(
-    labels = c("Slope", row_labels),
-    calc = c(fmt(attr(x, "slope_observed")), fmt(x$n)),
-    means = c(fmt(attr(x, "slope_mean")), dash_if_na(x$n_mean, fmt(x$n_mean))),
-    sds = c(fmt(attr(x, "slope_sd")), dash_if_na(x$n_sd, fmt(x$n_sd))),
-    cis = c(slope_ci_str, n_ci_str),
-    ci_head = ci_head, span = span, sep_after = 1L), sep = "\n")
+  print.data.frame(cells)
   cat("\n")
 
   # The target treatment effect does not depend on the design, only on
   # `effectiveness` -- see slope_sample_size_grid_boot()'s @return -- so a
-  # second table for it earns its place only when that axis actually varies;
+  # second frame for it earns its place only when that axis actually varies;
   # otherwise every row would repeat the same interval.
-  show_tte <- isTRUE(named[["effectiveness"]])
-  if (show_tte) {
-    tte_ci_str <- dash_if_na(x$tte_lower, boot_ci_cells(fmt(x$tte_lower), fmt(x$tte_upper)))
-    cat(boot_grid_stat_table(
-      labels = row_labels, calc = fmt(x$tte),
-      means = dash_if_na(x$tte_mean, fmt(x$tte_mean)),
-      sds = dash_if_na(x$tte_sd, fmt(x$tte_sd)),
-      cis = tte_ci_str, ci_head = ci_head,
-      span = sprintf("Target treatment effect, bootstrapped (%s, R = %d)", method, R)),
-        sep = "\n")
+  if (isTRUE(named[["effectiveness"]])) {
+    # The axis columns, in the order the first frame shows them, so a row can
+    # be matched between the two by eye. intersect() rather than a literal
+    # trio: `effectiveness` is absent from a grid solved for `target =
+    # "observed"`, though such a grid cannot reach this branch today.
+    keys <- intersect(c("design", "dropout", "effectiveness"), names(x))
+    tte <- x[, c(keys, "tte"), drop = FALSE]
+    tte$tte_mean <- x$tte_mean
+    tte$tte_sd <- x$tte_sd
+    tte$tte_ci <- grid_boot_ci_col(x$tte_lower, x$tte_upper)
+    print.data.frame(tte)
     cat("\n")
   }
+
+  cat(boot_method_note(type, R, level), sep = "\n")
 
   cat(boot_note("Note", sprintf(paste0(
     "%d/%d (%.1f%%) bootstrap replicates failed to refit the stage-one model, and were ",
@@ -533,7 +528,7 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
     "each replicate of `n` is rounded up to a whole participant per arm before averaging,",
     "so its mean is not a runnable trial size.")), sep = "\n")
 
-  if (slope_mixed || any(n_mixed)) {
+  if (any(grepl("*", cells$n_ci, fixed = TRUE))) {
     cat("  * percentile interval; BCa could not be built there.\n")
   }
 
