@@ -5,17 +5,23 @@
 \alias{print.dropout_rate}
 \title{A constant dropout rate per unit of time}
 \usage{
-dropout_rate(rate, per = 1)
+dropout_rate(rate, per = 1, type = c("linear", "cumulative"))
 
 \method{print}{dropout_rate}(x, ...)
 }
 \arguments{
-\item{rate}{Expected proportion of the randomised sample withdrawing per \code{per}
-units of time. Must be non-negative.}
+\item{rate}{Expected proportion withdrawing per \code{per} units of time. For
+\code{type = "linear"}, a proportion of the original randomised sample and so
+non-negative with no upper bound of its own (the total across all visits
+is what is capped at 1). For \code{type = "cumulative"}, a proportion of
+whoever remains and so restricted to \verb{[0, 1]}.}
 
 \item{per}{Length of time \code{rate} refers to, in the units of the \code{time} variable
 used to estimate the slope parameters. Defaults to 1, i.e. \code{rate} is a
 per-unit-time rate.}
+
+\item{type}{Which withdrawal pattern \code{rate} describes: \code{"linear"} (the
+default) or \code{"cumulative"}. See Details.}
 
 \item{x}{A \code{dropout_rate} object.}
 
@@ -35,15 +41,33 @@ which is what makes it useful to the grid functions, where one object drives
 every row of a table of competing schedules.
 }
 \details{
-The expansion is linear in elapsed time, matching the way the worked example in
-section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
-visit is \code{visits[j]} is \code{rate * (visits[j + 1] - visits[j])}. Every dropout is
-expressed as a fraction of the randomised cohort, not of those still in
-follow-up, so the increments sum to \code{rate * total_duration}.
+\code{type} chooses which of two withdrawal patterns \code{rate} describes:
+\itemize{
+\item \code{"linear"} (the default) applies \code{rate} to the \emph{original randomised
+cohort}, matching the worked example in section 4.2 of Nash et al. (2021):
+the proportion whose last attended visit is \code{visits[j]} is
+\code{rate * (visits[j + 1] - visits[j]) / per}. The same number withdraw in
+every equal-length interval regardless of how many have already left, and
+the increments sum to \code{rate * total_duration / per}.
+\item \code{"cumulative"} applies \code{rate} as the proportion of \emph{whoever is still in
+follow-up} who withdraws per \code{per} units of time, so the same proportion
+of the remaining participants drops out at every visit rather than the
+same proportion of the original cohort. The fraction still being followed
+at time \code{t} is \code{(1 - rate) ^ (t / per)}, decaying geometrically, and the
+proportion whose last attended visit is \code{visits[j]} is the drop in that
+fraction over the interval:
+\code{(1 - rate) ^ (visits[j] / per) - (1 - rate) ^ (visits[j + 1] / per)}.
+Because the survival fraction approaches but never passes zero, the total
+never exceeds 1 however long the trial runs, and \code{rate} --- itself a
+proportion of the remaining sample --- is restricted to \verb{[0, 1]}.
+}
 
-Because the expansion produces incremental proportions by construction, a
+Because both expansions produce incremental proportions by construction, a
 \code{dropout_rate} cannot be combined with \code{dropout_type = "cumulative"}; see
-\code{\link[=trial_design]{trial_design()}}.
+\code{\link[=trial_design]{trial_design()}}. That argument is a different, unrelated choice --- how the
+\emph{vector itself} was written down --- from this object's \code{type}, which
+describes how withdrawal behaves over time; the shared word is coincidence,
+not the same idea twice.
 
 This object only produces the per-visit proportions. What the calculation then
 does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
@@ -56,8 +80,9 @@ what it assumes about why people withdraw --- is described in
 
 }}
 \examples{
-dropout_rate(0.05)              # 5\% per unit time
+dropout_rate(0.05)              # 5\% of the original cohort per unit time
 dropout_rate(0.10, per = 12)    # 10\% per 12 months, if time is in months
+dropout_rate(0.05, type = "cumulative")  # 5\% of those remaining, per unit time
 
 # The same rate, expanded for two different schedules
 trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05))$dropout

@@ -263,6 +263,15 @@ test_that("a bare dropout vector or dropout_rate() is labelled by its contents",
     n = 450, effectiveness = 0.33))
   expect_identical(per$dropout, "0.1 per 12")
   expect_equal(per$dropout_total, 0.025)
+
+  # `type` is carried into the label only when it is not the default: a linear
+  # rate keeps the label above unchanged, but a cumulative one at the same
+  # rate and per is a different assumption and would otherwise key the same
+  # row.
+  cum <- suppressWarnings(slope_power_grid(
+    p, visits = list(annual = 0:3), dropout = dropout_rate(0.05, type = "cumulative"),
+    n = 450, effectiveness = 0.33))
+  expect_identical(unique(cum$dropout), "0.05 per 1, cumulative")
 })
 
 test_that("a wholly unnamed list is labelled element by element and deduped", {

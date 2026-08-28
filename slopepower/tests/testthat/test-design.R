@@ -124,6 +124,56 @@ test_that("a dropout_rate() cannot be combined with dropout_type = cumulative", 
   expect_match(conditionMessage(err), "already incremental")
 })
 
+# --- dropout_rate(type = "cumulative") ---------------------------------------
+#
+# The alternative to the default "linear" model: `rate` is the proportion of
+# whoever is still in follow-up who withdraws per unit time, compounding
+# geometrically, rather than a proportion of the original cohort.
+
+test_that("a cumulative rate applies to whoever remains, not the original cohort", {
+  d <- suppressWarnings(trial_design(c(0, 1, 2, 3),
+                                     dropout = dropout_rate(0.05, type = "cumulative")))
+  # 5% of 1, then 5% of the 0.95 remaining, then 5% of the 0.9025 remaining.
+  expect_equal(d$dropout, c(0.05, 0.05 * 0.95, 0.05 * 0.95^2))
+  # Each interval's survivors are 95% of the last, so the total is strictly
+  # less than a linear rate at the same `rate` and `per` would give.
+  linear <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05)))
+  expect_lt(sum(d$dropout), sum(linear$dropout))
+})
+
+test_that("a cumulative rate of 1 drops everyone after the first interval", {
+  d <- suppressWarnings(trial_design(c(0, 1, 2, 3),
+                                     dropout = dropout_rate(1, type = "cumulative")))
+  expect_equal(d$dropout, c(1, 0, 0))
+})
+
+test_that("a cumulative rate above 1 is rejected as not a proportion of survivors", {
+  err <- expect_error(dropout_rate(1.5, type = "cumulative"), "must be in \\[0, 1\\]")
+  expect_match(conditionMessage(err), "1.5")
+})
+
+test_that("a cumulative rate's total never exceeds 1, however long the trial", {
+  # Unlike the linear model, geometric decay can approach but never pass zero
+  # survival, so there is no rate/duration combination for which this errors.
+  # (At extreme rate/duration combinations, survival underflows to exactly 0
+  # in double precision and the total lands on exactly 1 rather than below
+  # it -- still not over, which is the bound that matters.)
+  d <- suppressWarnings(trial_design(c(0, 100), dropout = dropout_rate(0.9, type = "cumulative")))
+  expect_lte(sum(d$dropout), 1)
+})
+
+test_that("`per` scales a cumulative rate the same way it scales a linear one", {
+  d <- suppressWarnings(trial_design(c(0, 6, 12, 24),
+                                     dropout = dropout_rate(0.10, per = 12, type = "cumulative")))
+  survival <- (1 - 0.10)^(c(0, 6, 12, 24) / 12)
+  expect_equal(d$dropout, -diff(survival))
+})
+
+test_that("print.dropout_rate() names the type", {
+  expect_output(print(dropout_rate(0.05)), "linear")
+  expect_output(print(dropout_rate(0.05, type = "cumulative")), "cumulative")
+})
+
 test_that("a rate and the vector it expands to give the same design", {
   rate <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05)))
   hand <- suppressWarnings(trial_design(c(0, 1, 2, 3), dropout = rep(0.05, 3)))
