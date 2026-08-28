@@ -172,7 +172,11 @@ test_that("too few refits succeeding aborts the whole grid, as it does for slope
 
 # --- printing ------------------------------------------------------------------
 
-test_that("print.slope_sample_size_grid_boot() prints a width-consistent table", {
+# The frames and nothing else: everything between the class header on the first
+# line and the first note.
+frame_block <- function(out) out[seq(2L, min(grep("Bootstrap:", out, fixed = TRUE)) - 1L)]
+
+test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plus three", {
   pars <- small_fit()
   out <- suppressWarnings(slope_sample_size_grid_boot(
     pars, power = 0.8, effectiveness = 0.33, R = 5, seed = 6,
@@ -181,15 +185,24 @@ test_that("print.slope_sample_size_grid_boot() prints a width-consistent table",
 
   lines <- capture.output(print(out))
   expect_true(any(grepl("<slope_sample_size_grid_boot>", lines, fixed = TRUE)))
-  expect_true(any(grepl("Slope", lines, fixed = TRUE)))
-  expect_true(any(grepl("a / none", lines, fixed = TRUE)))
 
-  # Every row of the table itself starts "  |" and, being built by the same
-  # boot_table_row() every column in it, is one consistent width -- the same
-  # invariant test-bootstrap.R pins for boot_n_table().
-  rows <- lines[startsWith(lines, "  |")]
-  expect_true(length(rows) > 1L)
-  expect_equal(length(unique(nchar(rows))), 1L)
+  # Nothing left of the pipe table: this prints as the plain grid does, with
+  # three columns added. R wraps a wide frame into blocks, each block headed by
+  # its own column names and followed by rows that begin with a row number, so
+  # the printed column set is read off the lines that are not rows.
+  expect_false(any(startsWith(lines, "  |")))
+  headers <- frame_block(lines)[!grepl("^[0-9]", frame_block(lines))]
+  printed <- Filter(nzchar, unlist(strsplit(trimws(headers), " +")))
+  added <- slopepower:::grid_boot_added_cols
+  expect_equal(printed, c(setdiff(names(out), added), "n_mean", "n_sd", "n_ci"))
+
+  # The three added columns are the object's own values, not a re-derivation.
+  expect_true(any(grepl(format(out$n_mean[1L], digits = 7), lines, fixed = TRUE)))
+
+  # The method, replicate count and level, which used to ride in the span
+  # header, lead the notes instead.
+  expect_true(any(grepl("Bootstrap:   R = 5 replicates; 95% BCa intervals.",
+                        lines, fixed = TRUE)))
 
   # A clean run (no refit failures, no starved cells) still reports both
   # notes, per the convention set for slope_bootstrap()'s own print method.
@@ -197,15 +210,69 @@ test_that("print.slope_sample_size_grid_boot() prints a width-consistent table",
   expect_true(any(grepl("of replicates refit a slope on the opposite side", lines)))
 })
 
-test_that("print.slope_sample_size_grid_boot() adds a target-effect table only when effectiveness varies", {
+test_that("print.slope_sample_size_grid_boot() no longer reports the resampled slope", {
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, power = 0.8, effectiveness = 0.33, R = 5, seed = 6,
+    visits = list(a = c(0, 1, 2, 3), b = c(0, 1, 2))))
+
+  frame <- frame_block(capture.output(print(out)))
+  expect_false(any(grepl("slope", frame, ignore.case = TRUE)))
+  expect_false(any(grepl(format(attr(out, "slope_mean"), digits = 6), frame, fixed = TRUE)))
+
+  # Still on the object, and the straddle note still reports the one thing
+  # about it that bears on whether these intervals mean anything.
+  expect_equal(attr(out, "slope_observed"), pars$slope)
+  expect_length(attr(out, "slope_ci"), 2L)
+})
+
+test_that("print.slope_sample_size_grid_boot() marks a starved cell and a fallen-back interval", {
+  # Both markers used to live in the cells of the hand-drawn table; they still
+  # do, in the one character column that holds the interval. Forced onto a
+  # finished grid rather than provoked, so the test does not depend on which
+  # resample happens to starve a cell.
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, power = 0.8, effectiveness = 0.33, R = 5, seed = 6,
+    visits = list(a = c(0, 1, 2, 3), b = c(0, 1, 2))))
+  out$n_lower[1L] <- NA_real_
+  out$n_upper[1L] <- NA_real_
+  out$ci_type[1L] <- NA_character_
+  out$ci_type[2L] <- "percentile"
+
+  # R wraps a wide frame into blocks; the interval is the last column of the
+  # last of them, so its rows are the two lines under the header that ends in
+  # "n_ci", and the cell is whatever follows the last run of padding spaces.
+  lines <- capture.output(print(out))
+  frame <- frame_block(lines)
+  header <- grep("n_ci$", frame)
+  expect_length(header, 1L)
+  ci <- sub(".*  +", "", frame[header + 1:2])
+  expect_equal(ci[1L], "--")
+  expect_match(ci[2L], "[*]$")
+
+  # And each marker is explained beneath, in a note that appears only when the
+  # thing it explains is on the page.
+  expect_true(any(grepl("cells marked \"--\" had fewer than two surviving", lines)))
+  expect_true(any(grepl("* percentile interval; BCa could not be built there.",
+                        lines, fixed = TRUE)))
+})
+
+test_that("print.slope_sample_size_grid_boot() adds a target-effect frame only when effectiveness varies", {
   pars <- small_fit()
   fixed <- suppressWarnings(slope_sample_size_grid_boot(
     pars, visits = c(0, 1, 2, 3), effectiveness = 0.33, R = 5, seed = 6))
   varying <- slope_sample_size_grid_boot(pars, visits = c(0, 1, 2, 3),
                                          effectiveness = c(0.25, 0.33), R = 5, seed = 6)
 
-  expect_false(any(grepl("Target treatment effect", capture.output(print(fixed)))))
-  expect_true(any(grepl("Target treatment effect", capture.output(print(varying)))))
+  expect_false(any(grepl("tte_mean", capture.output(print(fixed)), fixed = TRUE)))
+
+  lines <- capture.output(print(varying))
+  for (col in c("tte_mean", "tte_sd", "tte_ci")) {
+    expect_true(any(grepl(col, lines, fixed = TRUE)))
+  }
+  # Keyed by the axes the first frame leads with, so a row matches by eye.
+  expect_true(any(grepl("design dropout effectiveness", lines, fixed = TRUE)))
 })
 
 test_that("print.slope_sample_size_grid_boot() falls back to a plain print for a missing summary", {

@@ -113,6 +113,9 @@ as the one on the slope beneath it. \code{slope_ci} is built the same way as
 \code{ci} and from the same jackknife, so it costs no extra model fits, but the
 two can fall back independently: compare \code{slope_type} with \code{type}. Under
 \code{statistic = "slope"} they are one calculation and agree by construction.
+The print method does not show them --- it reports the statistic asked for,
+and \code{straddle} beneath it --- so these six fields are where a reader who
+wants the slope's own interval finds it.
 
 Every summary is over the retained replicates --- the ones whose refit and
 whose statistic both succeeded; \code{n_failed} counts the rest, which are
@@ -206,6 +209,18 @@ accepted.
 \section{Methods (by generic)}{
 \itemize{
 \item \code{print(slope_bootstrap)}: Print a bootstrap result.
+
+Printed as a data frame, by R itself: one row per unit the statistic comes
+in --- two for a sample size, which comes in totals and per-arm figures, one
+for anything else --- and columns for the calculated value, the bootstrap
+mean and SD, and the interval. The method, replicate count, interval level,
+and the failure and sign-straddling counts are reported in the notes
+beneath, which print on every call whether or not anything went wrong.
+
+The resampled slope is not shown. It is still on the object, in
+\code{slope_observed} and the five fields beside it (see \sQuote{Value}), and the
+straddle note still reports the one thing about it that bears on whether the
+interval means anything.
 
 }}
 \examples{

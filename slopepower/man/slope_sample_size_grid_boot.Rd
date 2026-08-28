@@ -97,7 +97,10 @@ per-cell solve is attempted), \code{straddle}, and \code{slope_observed},
 \code{slope_mean}, \code{slope_sd}, \code{slope_ci}, \code{slope_type}, \code{slope_replicates} --
 the same summary of the refitted slopes a single \code{\link[=slope_bootstrap]{slope_bootstrap()}}
 result carries, since the slope is what the resampling actually
-perturbs and every cell's interval is a function of it. Base
+perturbs and every cell's interval is a function of it. The printed
+table does not show them --- it reports the cells and, beneath them,
+\code{straddle} --- so these six attributes are where a reader who wants the
+slope's own interval finds it. Base
 \verb{[.data.frame} drops attributes it does not know, so \code{x[1:3, ]} keeps
 the class but not these; \code{\link[=print.slope_sample_size_grid_boot]{print.slope_sample_size_grid_boot()}} falls
 back to a plain data-frame print when they are absent.
@@ -139,11 +142,20 @@ stops if not a single cell could be bootstrapped at all.
 \itemize{
 \item \code{print(slope_sample_size_grid_boot)}: Print a bootstrapped sample-size grid.
 
-Reuses \code{boot_table_row()}, \code{boot_ci_cells()} and \code{boot_note()}
-(bootstrap.R) -- all three already width-driven and statistic-agnostic --
-via \code{boot_grid_stat_table()}, so a table with several rows costs no new
-formatting machinery beyond generalising \code{boot_n_table()}'s own fixed
-three rows to however many the grid has.
+Printed as data frames, by R itself, rather than as a hand-drawn table: a
+grid \emph{is} a data frame, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} prints as one, and this
+shows exactly that table plus three columns --- \code{n_mean}, \code{n_sd}, and the
+interval as one \code{n_ci} column reading "924 to 1704". A second frame follows
+it for the target treatment effect when \code{effectiveness} varies, since that
+is the only axis it depends on. Everything shared by every cell --- the
+method, the replicate count, the interval level, and the failure and
+sign-straddling counts --- is reported in the notes beneath, which print on
+every call whether or not anything went wrong.
+
+The resampled slope is not shown. It is still on the object, in the
+\code{slope_observed} attribute and the five beside it, and the straddle note
+still reports the one thing about it that bears on whether these intervals
+mean anything.
 
 Falls back to \code{print.data.frame()} when the bootstrap attributes are
 missing -- as they are after e.g. \code{x[1:3, ]}, since base \verb{[.data.frame}

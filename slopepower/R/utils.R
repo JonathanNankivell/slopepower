@@ -266,12 +266,12 @@ single_term_error <- function(context, rhs, complaint) {
 #'
 #' Formats every element independently: whatever precision each value needs on
 #' its own to reach the default number of significant digits, not a precision
-#' shared across the vector. [boot_n_table()] needs the opposite -- a pair of
-#' related figures (a per-arm value and its total) padded to a *common* number
-#' of decimal places so the two line up as a column -- which is what
-#' `format()`'s own vector-wide behaviour already gives it; reusing this
-#' function there was tried and reverted; see the note beside `fmt` in
-#' [boot_n_table()].
+#' shared across the vector. The bootstrap print methods need the opposite -- a
+#' pair of related figures (a per-arm value and its total, or two interval
+#' endpoints) padded to a *common* number of decimal places so the two line up
+#' as a column -- which is what `format()`'s own vector-wide behaviour already
+#' gives them; reusing this function there was tried and reverted. See
+#' [boot_fmt()] (bootstrap.R), which is that rule.
 #' @noRd
 fmt_num <- function(x) {
   vapply(x, function(v) format(v, trim = TRUE, drop0trailing = TRUE), character(1L))

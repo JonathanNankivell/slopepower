@@ -173,7 +173,7 @@ that column *names* are identical across classes is unaffected.
 ### 4.4 `slope_sample_size_grid_boot` (`R/grid_boot.R`)
 
 Not a `slope_result` subclass — a grid was always a data frame rather than a `slope_result`, and
-this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fourteen
+this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fifteen
 `slope_sample_size_grid()` columns, unchanged, plus ten more — `n_mean`, `n_sd`, `n_lower`,
 `n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `ci_type`, `n_failed`.
 

@@ -709,6 +709,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #'   `ci` and from the same jackknife, so it costs no extra model fits, but the
 #'   two can fall back independently: compare `slope_type` with `type`. Under
 #'   `statistic = "slope"` they are one calculation and agree by construction.
+#'   The print method does not show them --- it reports the statistic asked for,
+#'   and `straddle` beneath it --- so these six fields are where a reader who
+#'   wants the slope's own interval finds it.
 #'
 #'   Every summary is over the retained replicates --- the ones whose refit and
 #'   whose statistic both succeeded; `n_failed` counts the rest, which are
@@ -963,125 +966,37 @@ bca_from_jack <- function(theta, observed, jack, probs) {
   stats::quantile(theta, adj, names = FALSE, type = 7)
 }
 
-#' Lay out one row of the sample-size table
+#' Format a bootstrapped figure the way the printed columns are
 #'
-#' `align` is per column: "l" pads on the right, anything else on the left.
+#' `format()` rather than [fmt_num()]: a per-arm figure and its total, or a
+#' set of interval endpoints, must be padded to the *same* number of decimal
+#' places so the column lines up digit-for-digit, which is what `format()`'s
+#' vector-wide behaviour gives and what formatting each element on its own
+#' takes away. `drop0trailing` keeps [fmt_num()]'s own convention, so a whole
+#' number -- a sample size, say -- prints as "753" and not "753.0".
 #' @noRd
-boot_table_row <- function(cells, widths, align) {
-  w <- ifelse(align == "l", -widths, widths)
-  paste0("  | ",
-         paste(mapply(formatC, as.character(cells), width = w, USE.NAMES = FALSE),
-               collapse = " | "),
-         " |")
-}
+boot_fmt <- function(v) format(v, digits = 6, trim = TRUE, drop0trailing = TRUE)
 
-#' Join a pair of interval endpoints, digits stacked over digits
+#' An interval as one character column, digits stacked over digits
 #'
-#' Padding the two sides against each other before the "to" is what makes
-#' "269 to  562" and "538 to 1124" line up as a column rather than as two ragged
-#' numbers either side of a fixed word.
+#' Both endpoints of every row are formatted in one [boot_fmt()] call, so the
+#' whole column shares a decimal count, and then each side is padded against
+#' the other rows before the "to" -- which is what makes "269 to  562" and
+#' "538 to 1124" line up as a column rather than as two ragged numbers either
+#' side of a fixed word.
+#'
+#' The result is one character column of a printed data frame, and
+#' `print.data.frame()` right-justifies character columns, so the padding done
+#' here is what keeps the interval aligned within its cells while R keeps the
+#' cells themselves aligned.
 #' @noRd
-boot_ci_cells <- function(los, his) {
+boot_interval_col <- function(lower, upper) {
+  ends <- boot_fmt(c(lower, upper))
+  k <- length(lower)
+  los <- ends[seq_len(k)]
+  his <- ends[k + seq_len(k)]
   paste(formatC(los, width = max(nchar(los))), "to",
         formatC(his, width = max(nchar(his))))
-}
-
-#' Render a bootstrapped sample size as a table
-#'
-#' A sample size is the one bootstrapped statistic that comes in two units --
-#' participants in total and participants per arm -- and a reader has a use for
-#' both: the total is what the trial costs, the per-arm figure is what each site
-#' recruits to. Printed as lines, saying each of them twice over took six lines
-#' whose shared structure the reader had to reconstruct. As a table the units
-#' are rows and the quantities are columns, and the halving is visible rather
-#' than asserted.
-#'
-#' The slope sits above them because it is what the resampling actually
-#' perturbs; every sample size here is a function of it. An interval two-thirds
-#' wider than its point estimate means one thing when the slope barely moved and
-#' quite another when the slope moved with it, and only the two rows together
-#' say which.
-#'
-#' Every per-arm entry is exactly half its total, in the arithmetic and not only
-#' in the display. `solve_slope()` builds `n` as `2 * n_per_arm` and
-#' `widen_to_lattice()` moves both interval endpoints out to even sizes, so no
-#' half here is rounded; the mean halves because it is linear.
-#'
-#' Column widths come from the formatted values rather than from constants, so a
-#' three-digit trial and a six-digit one both line up, and the span header stays
-#' flush over its two columns however it is labelled.
-#' @noRd
-boot_n_table <- function(x) {
-  # Each row group is formatted against itself: a slope near 1 and a sample size
-  # near 100000 share a column, and a decimal count chosen to suit both would
-  # flatter neither. Not fmt_num(): that formats each element on its own, but
-  # `halves()` below needs the opposite -- a per-arm figure and its total
-  # padded to the *same* number of decimal places, via one format() call on
-  # the pair, so the column lines up digit-for-digit rather than each side
-  # independently hitting six significant figures at whatever decimal count
-  # that takes. `drop0trailing` still matches fmt_num()'s own convention, so a
-  # whole number here (a sample size, say) prints as "753" and not "753.0".
-  fmt <- function(v) format(v, digits = 6, trim = TRUE, drop0trailing = TRUE)
-  # c(per arm, total), so the halving happens once, in one place.
-  halves <- function(v) fmt(c(v / 2, v))
-
-  calc <- c(fmt(x$slope_observed), halves(x$observed))
-  means <- c(fmt(x$slope_mean), halves(x$boot_mean))
-  # The SD halves for the same reason the mean does: every per-arm replicate is
-  # exactly half its total, and both are linear in the replicates.
-  sds <- c(fmt(x$slope_sd), halves(x$boot_sd))
-  ci <- c(boot_ci_cells(fmt(x$slope_ci[1L]), fmt(x$slope_ci[2L])),
-          boot_ci_cells(halves(x$ci[1L]), halves(x$ci[2L])))
-
-  # A footnote rather than a second method in the header: the two intervals
-  # agree except when one of them could not be built, and the common case must
-  # not pay for the rare one in width. The warning at build time already said
-  # what failed; this is so the printed table cannot be read as claiming a
-  # method it did not use.
-  mixed <- !identical(x$slope_type, x$type)
-  if (mixed) ci[1L] <- paste0(ci[1L], " *")
-
-  labels <- c("Slope", "Sample size", "")
-  sublabels <- c("", "Per arm", "Total")
-  ci_head <- sprintf("%.0f%% CI", 100 * x$level)
-  span <- sprintf("Bootstrapped (%s, R = %d%s)",
-                  if (identical(x$type, "bca")) "BCa" else "percentile", x$R,
-                  if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else "")
-
-  w <- c(max(nchar(labels)), max(nchar(sublabels)),
-         max(nchar(c("Calculated", calc))),
-         max(nchar(c("Mean", means))),
-         max(nchar(c("SD", sds))),
-         max(nchar(c(ci_head, ci))))
-
-  # The span sits over the last three columns and the two " | " between them. If
-  # its label is the wider, the slack goes to the interval, the only one of the
-  # three whose contents are not a single number.
-  span_w <- sum(w[4:6]) + 6L
-  if (nchar(span) > span_w) {
-    w[6L] <- w[6L] + nchar(span) - span_w
-    span_w <- nchar(span)
-  }
-
-  rule <- paste0("  |", paste(vapply(w + 2L, strrep, character(1L), x = "-"),
-                              collapse = "|"), "|")
-  align <- c("l", "l", "r", "r", "r", "r")
-  row <- function(i) {
-    boot_table_row(c(labels[i], sublabels[i], calc[i], means[i], sds[i], ci[i]),
-                   w, align)
-  }
-
-  c(boot_table_row(c("", "", "Calculated", span), c(w[1:3], span_w),
-                   c("l", "l", "r", "l")),
-    # Headers align with the column beneath them, so a header never overhangs
-    # its own digits.
-    boot_table_row(c("", "", "", "Mean", "SD", ci_head), w,
-                   c("l", "l", "l", "r", "r", "r")),
-    rule, row(1L), rule, row(2L), row(3L),
-    if (mixed) {
-      sprintf("  * %s interval; the other could not be built for the slope.",
-              x$slope_type)
-    })
 }
 
 #' A labelled note, wrapped with a hanging indent
@@ -1096,48 +1011,85 @@ boot_note <- function(label, text, width = 78L) {
   strwrap(text, width = width, initial = lead, prefix = strrep(" ", 15L))
 }
 
-#' The replicate count, and the failures only when there were some
+#' The method, replicate count and interval level, as the first note
 #'
-#' Used by the layout that has no span header to put them in. A clean run must
-#' not read as though something went wrong, so the failures appear only when
-#' there are any.
+#' These three used to ride in the span header of the table both print methods
+#' drew. A data frame printed by R has no span header to put them in, and they
+#' are not per-row facts, so they belong with the notes rather than in a column
+#' repeating itself down the page. First of the notes because it says what the
+#' three bootstrap columns above it are.
 #' @noRd
-boot_replicate_line <- function(x) {
-  sprintf("  Replicates:  %d used%s\n", length(x$replicates),
-          if (x$n_failed > 0L) sprintf(", %d failed", x$n_failed) else "")
+boot_method_note <- function(type, R, level) {
+  boot_note("Bootstrap", sprintf("R = %d replicates; %.0f%% %s intervals.",
+                                 R, 100 * level,
+                                 if (identical(type, "bca")) "BCa" else "percentile"))
+}
+
+#' The printed frame: one row per unit the statistic comes in
+#'
+#' A sample size is the one bootstrapped statistic that comes in two units --
+#' participants in total and participants per arm -- and a reader has a use for
+#' both: the total is what the trial costs, the per-arm figure is what each site
+#' recruits to. So `statistic = "n"` gets two rows and every other statistic
+#' one, which is what `lattice` already records (`run_bootstrap()` decides it
+#' once, so the print side never re-tests it against `statistic`).
+#'
+#' Every per-arm entry is exactly half its total, in the arithmetic and not only
+#' in the display. `solve_slope()` builds `n` as `2 * n_per_arm` and
+#' `widen_to_lattice()` moves both interval endpoints out to even sizes, so no
+#' half here is rounded; the mean halves because it is linear.
+#' @noRd
+boot_summary_frame <- function(x) {
+  # c(total, per arm), so the halving happens once, in one place.
+  units <- function(v) if (x$lattice) c(v, v / 2) else v
+  data.frame(
+    statistic  = if (x$lattice) c("n", "n_per_arm") else x$statistic,
+    calculated = units(x$observed),
+    mean       = units(x$boot_mean),
+    sd         = units(x$boot_sd),
+    ci         = boot_interval_col(units(x$ci[1L]), units(x$ci[2L])),
+    stringsAsFactors = FALSE
+  )
 }
 
 #' @describeIn slope_bootstrap Print a bootstrap result.
+#'
+#' Printed as a data frame, by R itself: one row per unit the statistic comes
+#' in --- two for a sample size, which comes in totals and per-arm figures, one
+#' for anything else --- and columns for the calculated value, the bootstrap
+#' mean and SD, and the interval. The method, replicate count, interval level,
+#' and the failure and sign-straddling counts are reported in the notes
+#' beneath, which print on every call whether or not anything went wrong.
+#'
+#' The resampled slope is not shown. It is still on the object, in
+#' `slope_observed` and the five fields beside it (see \sQuote{Value}), and the
+#' straddle note still reports the one thing about it that bears on whether the
+#' interval means anything.
+#
+# The result is shown as a data frame, printed by R itself, rather than as a
+# hand-drawn table: every other tabular result in the package --
+# slope_sample_size_grid() and slope_power_grid() -- is a plain data frame, and
+# a reader who can read one of those can read this without learning a second
+# layout. What the hand-drawn table had that a data frame does not -- a span
+# header naming the method, the replicate count and the interval level -- moves
+# into the notes below it, via boot_method_note().
+#
+# The resampled slope is not shown. It is still on the object, in
+# `slope_observed` and the four fields beside it, and the straddle note below
+# still reports the one thing about it that bears on whether the interval means
+# anything.
+#
 # No `@param x` here: this block and the generic share one help topic, and the
 # later of the two wins. Documenting `x` as a `slope_bootstrap` object silently
 # replaced the generic's description with the one class slope_bootstrap.default()
 # refuses, so the help page told the reader to pass exactly the wrong thing.
 #' @export
 print.slope_bootstrap <- function(x, ...) {
-  cat("<slope_bootstrap>\n")
+  cat("<slope_bootstrap>\n\n")
+  print.data.frame(boot_summary_frame(x))
+  cat("\n")
 
-  # Two layouts, because `n` is the one statistic with arms to divide by. A
-  # slope, a power or an effect size has a single value per row, so a table of
-  # it would be one row of five columns -- the lines say the same thing in less
-  # space. Only the sample size earns the table.
-  if (x$lattice) {
-    # No `Replicates:` line: the count and any failures ride in the table's span
-    # header, beside the method they qualify.
-    cat("\n")
-    # `cat(sep = )` appends after the last element too, so the rows already end
-    # in a newline and this is the blank line, not the row's own terminator.
-    cat(boot_n_table(x), sep = "\n")
-    cat("\n")
-  } else {
-    cat(sprintf("  Statistic:   %s\n", x$statistic))
-    cat(sprintf("  Observed:    %s\n", format(x$observed, digits = 6)))
-    cat(sprintf("  Bootstrap:   mean %s, SD %s\n",
-                format(x$boot_mean, digits = 6), format(x$boot_sd, digits = 6)))
-    cat(boot_replicate_line(x))
-    cat(sprintf("  %.0f%% %s CI: [%s, %s]\n", 100 * x$level,
-                if (identical(x$type, "bca")) "BCa" else "percentile",
-                format(x$ci[1L], digits = 6), format(x$ci[2L], digits = 6)))
-  }
+  cat(boot_method_note(x$type, x$R, x$level), sep = "\n")
 
   # Printed unconditionally, including the 0/R case, for the same reason as the
   # straddle note below: a clean run and a version of the package that never
