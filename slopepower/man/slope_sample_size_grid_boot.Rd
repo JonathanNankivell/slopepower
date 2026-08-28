@@ -69,7 +69,7 @@ same name.}
 \item{...}{Not used.}
 }
 \value{
-A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")}, one row per cell, with the fourteen columns
+A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")}, one row per cell, with the fifteen columns
 \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports plus:
 \describe{
 \item{\code{n_mean}, \code{n_sd}, \code{n_lower}, \code{n_upper}}{The bootstrap mean, SD
