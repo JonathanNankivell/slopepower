@@ -128,6 +128,32 @@ test_that("slope_sample_size_grid() reports the N each design needs", {
   expect_equal(out$power, 0.8)
 })
 
+test_that("visits_total and visits_per_arm account for dropout", {
+  # No dropout: every participant is a completer, so the anticipated visit
+  # count is exactly n times the number of visits scheduled.
+  p <- paper_fit("slpower1")
+  out <- suppressWarnings(slope_sample_size_grid(
+    p, visits = list(annual = c(0, 1, 2)), dropout = list(none = NULL),
+    power = 0.8, effectiveness = 0.33))
+  expect_false("n_follow_up" %in% names(out))
+  expect_equal(out$scheduled_visits, 3L)
+  expect_equal(out$visits_total, out$n * out$scheduled_visits)
+  expect_equal(out$visits_per_arm, out$n_per_arm * out$scheduled_visits)
+  expect_equal(out$visits_total, 2L * out$visits_per_arm)
+
+  # With dropout, a withdrawing participant still contributes the visits
+  # attended before doing so (trial_design()'s pattern mixture), so the
+  # anticipated total sits strictly below n * scheduled_visits.
+  out2 <- suppressWarnings(slope_sample_size_grid(
+    p, visits = list(extended = c(0, 1, 2, 5)),
+    dropout = list(tenpc_final = c(0, 0, 0.1)),
+    power = 0.8, effectiveness = 0.33))
+  expected_pp <- 0 * 1 + 0 * 2 + 0.1 * 3 + (1 - 0.1) * 4
+  expect_equal(out2$visits_total, out2$n * expected_pp)
+  expect_equal(out2$visits_per_arm, out2$n_per_arm * expected_pp)
+  expect_lt(out2$visits_total, out2$n * out2$scheduled_visits)
+})
+
 test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
   out <- suppressWarnings(slope_sample_size_grid(
     paper_fit("slpower1"),
@@ -283,7 +309,7 @@ test_that("a wholly unnamed list is labelled element by element and deduped", {
   # The repeated schedule generates a repeated label, and make.unique() suffixes
   # it rather than emitting two rows the caller cannot tell apart.
   expect_identical(out$design, c("0, 3", "0, 1, 2, 3", "0, 3_1"))
-  expect_equal(out$n_visits, c(2L, 4L, 2L))
+  expect_equal(out$scheduled_visits, c(2L, 4L, 2L))
   # the suffixed row is genuinely the same design, evaluated a second time
   expect_equal(out$power[3], out$power[1])
   # first two rows of the `none` column of Table 1, p.595
@@ -306,7 +332,7 @@ test_that("labels fill in only the blanks of a partly named list", {
   expect_identical(out$dropout, rep(c("none", "5pc"), 2))
   expect_equal(out$dropout_total, c(0, 0.15, 0, 0.15))
   # visits varies slowest, dropout fastest -- the order the Table 1 tests rely on
-  expect_equal(out$n_visits, c(2L, 2L, 4L, 4L))
+  expect_equal(out$scheduled_visits, c(2L, 2L, 4L, 4L))
 })
 
 test_that("duplicate names supplied by the caller are deduped too", {
@@ -316,7 +342,7 @@ test_that("duplicate names supplied by the caller are deduped too", {
   out <- slope_power_grid(p, visits = list(sparse = c(0, 3), sparse = 0:3),
                           n = 450, effectiveness = 0.33)
   expect_identical(out$design, c("sparse", "sparse_1"))
-  expect_equal(out$n_visits, c(2L, 4L))
+  expect_equal(out$scheduled_visits, c(2L, 4L))
 })
 
 test_that("visits and dropout must be of a shape the grid can normalise", {

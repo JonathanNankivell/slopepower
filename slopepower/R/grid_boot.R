@@ -174,7 +174,7 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #' @inheritParams slope_bootstrap
 #'
 #' @return A data frame of class `c("slope_sample_size_grid_boot",
-#'   "data.frame")`, one row per cell, with the fourteen columns
+#'   "data.frame")`, one row per cell, with the fifteen columns
 #'   [slope_sample_size_grid()] reports plus:
 #'   \describe{
 #'     \item{`n_mean`, `n_sd`, `n_lower`, `n_upper`}{The bootstrap mean, SD

@@ -293,14 +293,13 @@ grid_axes <- function(visits, dropout, scalars, context) {
   n_visits <- unname(lengths(visit_list))
 
   out <- list(
-    design        = names(visit_list)[di],
-    dropout       = names(drop_list)[dj],
-    n_visits      = n_visits[di],
-    n_follow_up   = n_visits[di] - 1L,
-    last_visit    = vapply(visit_list, function(v) v[length(v)], numeric(1L),
-                           USE.NAMES = FALSE)[di],
-    dropout_total = vapply(designs, function(d) sum(d$dropout), numeric(1L),
-                           USE.NAMES = FALSE)[design_of]
+    design           = names(visit_list)[di],
+    dropout          = names(drop_list)[dj],
+    scheduled_visits = n_visits[di],
+    last_visit       = vapply(visit_list, function(v) v[length(v)], numeric(1L),
+                              USE.NAMES = FALSE)[di],
+    dropout_total    = vapply(designs, function(d) sum(d$dropout), numeric(1L),
+                              USE.NAMES = FALSE)[design_of]
   )
 
   # The scalar axes' values for one cell, as an index into each axis rather
@@ -312,6 +311,23 @@ grid_axes <- function(visits, dropout, scalars, context) {
       designs = designs, design_of = design_of, n_cells = n_cells,
       axes = axes, named = named, labels_at = labels_at, scalar_idx = scalar_idx,
       out = out)
+}
+
+#' The expected number of visits one participant attends under a design
+#'
+#' Stratum `j` of the Dawson-Lagakos pattern mixture (see [trial_design()])
+#' attends `visits[1:j]` and nothing after -- `j` visits -- and the
+#' completers, a proportion `1 - sum(dropout)`, attend all `length(visits)`.
+#' The expectation over strata is therefore a dropout-weighted mean of visit
+#' counts, which collapses to `length(visits)` itself when `dropout` is all
+#' zero -- every participant is a completer.
+#' @param design A `trial_design`.
+#' @return A single number, generally not a whole one: an expectation, not a
+#'   count any one participant can attend.
+#' @noRd
+expected_visits <- function(design) {
+  sum(design$dropout * seq_along(design$dropout)) +
+    (1 - sum(design$dropout)) * length(design$visits)
 }
 
 #' Walk the cross product of a normalised grid, evaluating one design per cell
@@ -394,6 +410,14 @@ grid_evaluate <- function(g, evaluate, context) {
                           "The comparator slope is further from zero than the group being ",
                           "treated; check that `slope_comparator` is the intended target."))
 
+  # The anticipated visit burden: `n`/`n_per_arm` times the design's own
+  # expected_visits(), one vectorised pass off each cell's design rather than
+  # a row at a time in the loop above -- the same reason dropout_total is
+  # computed that way in grid_axes().
+  visits_pp <- vapply(g$designs, expected_visits, numeric(1L))[g$design_of]
+  res_cols$visits_total   <- res_cols$n * visits_pp
+  res_cols$visits_per_arm <- res_cols$n_per_arm * visits_pp
+
   res_cols
 }
 
@@ -451,12 +475,17 @@ report_collected <- function(context, cells, k, tail) {
 #' @param target Passed to [slope_power()] and held constant across the grid.
 #'
 #' @return A data frame with one row per combination of the axes supplied, with
-#'   columns `design`, `dropout`, `n_visits`, `n_follow_up`, `last_visit`,
+#'   columns `design`, `dropout`, `scheduled_visits`, `last_visit`,
 #'   `dropout_total`, `n`, `n_per_arm`, `power`, `alpha`, `effectiveness`,
-#'   `tte`, `var_tte` and `effect_size`. `power` is what varies; `n` is constant
-#'   unless it was itself given several values. Cells are listed with `design`
-#'   varying slowest, then `dropout`, then any further axes in the order the
-#'   arguments are declared above.
+#'   `tte`, `var_tte`, `effect_size`, `visits_total` and `visits_per_arm`.
+#'   `power` is what varies; `n` is constant unless it was itself given several
+#'   values. `visits_total`/`visits_per_arm` are `n`/`n_per_arm` times the
+#'   expected number of visits one participant attends -- `scheduled_visits`
+#'   itself when `dropout_total` is zero, less otherwise, since a participant
+#'   who withdraws still contributes the visits attended before doing so (see
+#'   [trial_design()]'s "How dropout enters the calculation"). Cells are
+#'   listed with `design` varying slowest, then `dropout`, then any further
+#'   axes in the order the arguments are declared above.
 #'
 #' @examples
 #' # Table 1, p.595 of Nash et al. (2021): explores how adding interim visits

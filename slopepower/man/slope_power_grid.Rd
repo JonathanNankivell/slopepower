@@ -36,12 +36,17 @@ value itself is what the table reports, in the column of the same name.}
 }
 \value{
 A data frame with one row per combination of the axes supplied, with
-columns \code{design}, \code{dropout}, \code{n_visits}, \code{n_follow_up}, \code{last_visit},
+columns \code{design}, \code{dropout}, \code{scheduled_visits}, \code{last_visit},
 \code{dropout_total}, \code{n}, \code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness},
-\code{tte}, \code{var_tte} and \code{effect_size}. \code{power} is what varies; \code{n} is constant
-unless it was itself given several values. Cells are listed with \code{design}
-varying slowest, then \code{dropout}, then any further axes in the order the
-arguments are declared above.
+\code{tte}, \code{var_tte}, \code{effect_size}, \code{visits_total} and \code{visits_per_arm}.
+\code{power} is what varies; \code{n} is constant unless it was itself given several
+values. \code{visits_total}/\code{visits_per_arm} are \code{n}/\code{n_per_arm} times the
+expected number of visits one participant attends -- \code{scheduled_visits}
+itself when \code{dropout_total} is zero, less otherwise, since a participant
+who withdraws still contributes the visits attended before doing so (see
+\code{\link[=trial_design]{trial_design()}}'s "How dropout enters the calculation"). Cells are
+listed with \code{design} varying slowest, then \code{dropout}, then any further
+axes in the order the arguments are declared above.
 }
 \description{
 Evaluates the cross product of a set of visit schedules and a set of dropout
