@@ -29,32 +29,55 @@ fmt_call_vec <- function(x) {
 #' which is what makes it useful to the grid functions, where one object drives
 #' every row of a table of competing schedules.
 #'
-#' The expansion is linear in elapsed time, matching the way the worked example in
-#' section 4.2 of Nash et al. (2021) is set up: the proportion whose last attended
-#' visit is `visits[j]` is `rate * (visits[j + 1] - visits[j])`. Every dropout is
-#' expressed as a fraction of the randomised cohort, not of those still in
-#' follow-up, so the increments sum to `rate * total_duration`.
+#' `type` chooses which of two withdrawal patterns `rate` describes:
 #'
-#' Because the expansion produces incremental proportions by construction, a
+#' * `"linear"` (the default) applies `rate` to the *original randomised
+#'   cohort*, matching the worked example in section 4.2 of Nash et al. (2021):
+#'   the proportion whose last attended visit is `visits[j]` is
+#'   `rate * (visits[j + 1] - visits[j]) / per`. The same number withdraw in
+#'   every equal-length interval regardless of how many have already left, and
+#'   the increments sum to `rate * total_duration / per`.
+#' * `"cumulative"` applies `rate` as the proportion of *whoever is still in
+#'   follow-up* who withdraws per `per` units of time, so the same proportion
+#'   of the remaining participants drops out at every visit rather than the
+#'   same proportion of the original cohort. The fraction still being followed
+#'   at time `t` is `(1 - rate) ^ (t / per)`, decaying geometrically, and the
+#'   proportion whose last attended visit is `visits[j]` is the drop in that
+#'   fraction over the interval:
+#'   `(1 - rate) ^ (visits[j] / per) - (1 - rate) ^ (visits[j + 1] / per)`.
+#'   Because the survival fraction approaches but never passes zero, the total
+#'   never exceeds 1 however long the trial runs, and `rate` --- itself a
+#'   proportion of the remaining sample --- is restricted to `[0, 1]`.
+#'
+#' Because both expansions produce incremental proportions by construction, a
 #' `dropout_rate` cannot be combined with `dropout_type = "cumulative"`; see
-#' [trial_design()].
+#' [trial_design()]. That argument is a different, unrelated choice --- how the
+#' *vector itself* was written down --- from this object's `type`, which
+#' describes how withdrawal behaves over time; the shared word is coincidence,
+#' not the same idea twice.
 #'
 #' This object only produces the per-visit proportions. What the calculation then
 #' does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
 #' what it assumes about why people withdraw --- is described in
 #' [trial_design()].
 #'
-#' @param rate Expected proportion of the randomised sample withdrawing per `per`
-#'   units of time. Must be non-negative.
+#' @param rate Expected proportion withdrawing per `per` units of time. For
+#'   `type = "linear"`, a proportion of the original randomised sample and so
+#'   non-negative with no upper bound of its own (the total across all visits
+#'   is what is capped at 1). For `type = "cumulative"`, a proportion of
+#'   whoever remains and so restricted to `[0, 1]`.
 #' @param per Length of time `rate` refers to, in the units of the `time` variable
 #'   used to estimate the slope parameters. Defaults to 1, i.e. `rate` is a
 #'   per-unit-time rate.
+#' @param type Which withdrawal pattern `rate` describes: `"linear"` (the
+#'   default) or `"cumulative"`. See Details.
 #'
 #' @return An object of class `dropout_rate`.
 #'
 #' @examples
-#' dropout_rate(0.05)              # 5% per unit time
+#' dropout_rate(0.05)              # 5% of the original cohort per unit time
 #' dropout_rate(0.10, per = 12)    # 10% per 12 months, if time is in months
+#' dropout_rate(0.05, type = "cumulative")  # 5% of those remaining, per unit time
 #'
 #' # The same rate, expanded for two different schedules
 #' trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05))$dropout
@@ -62,11 +85,21 @@ fmt_call_vec <- function(x) {
 #'
 #' @seealso [trial_design()], [slope_power_grid()], [slope_sample_size_grid()]
 #' @export
-dropout_rate <- function(rate, per = 1) {
+dropout_rate <- function(rate, per = 1, type = c("linear", "cumulative")) {
   context <- "dropout_rate()"
-  check_scalar(rate, "rate", context, lower = 0, upper = Inf, lower_open = FALSE)
+  type <- match.arg(type)
+  if (identical(type, "cumulative")) {
+    # A cumulative rate is a proportion of the remaining sample and is the base
+    # of a power in expand_dropout_rate(); anything above 1 would describe more
+    # than everyone remaining leaving, and a non-integer exponent of a negative
+    # base is complex, not a dropout proportion.
+    check_scalar(rate, "rate", context, lower = 0, upper = 1, lower_open = FALSE,
+                 upper_open = FALSE)
+  } else {
+    check_scalar(rate, "rate", context, lower = 0, upper = Inf, lower_open = FALSE)
+  }
   check_scalar(per, "per", context, lower = 0, upper = Inf, lower_open = TRUE)
-  structure(list(rate = as.numeric(rate), per = as.numeric(per)),
+  structure(list(rate = as.numeric(rate), per = as.numeric(per), type = type),
             class = "dropout_rate")
 }
 
@@ -75,8 +108,8 @@ dropout_rate <- function(rate, per = 1) {
 #' @param ... Ignored.
 #' @export
 print.dropout_rate <- function(x, ...) {
-  cat(sprintf("<dropout_rate> %s per %s unit%s of time\n",
-              fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s"))
+  cat(sprintf("<dropout_rate> %s per %s unit%s of time (%s)\n",
+              fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s", x$type))
   invisible(x)
 }
 
@@ -87,18 +120,30 @@ print.dropout_rate <- function(x, ...) {
 #' two cannot expand the same object differently. `where` carries the grid's
 #' cell label into the message; it is empty for a direct [trial_design()] call,
 #' which has no cell to name.
+#'
+#' The two `type`s (see [dropout_rate()]) compute the incremental proportions
+#' differently: `"linear"` applies `rate` to the original cohort, so the total
+#' across the whole trial can exceed 1 and is checked for that here, with a
+#' diagnosis in terms of `rate` and `per` rather than the expanded vector.
+#' `"cumulative"` applies `rate` to whoever remains, compounding geometrically,
+#' so the total is mathematically bounded below 1 and no equivalent check is
+#' needed. Both callers run `increments` through `check_dropout_total()`
+#' afterwards regardless, so a bug in this earlier, friendlier check could not
+#' let an invalid total through uncaught.
 #' @noRd
 expand_dropout_rate <- function(spec, visits, ctx, where = "") {
+  if (identical(spec$type, "cumulative")) {
+    survival <- (1 - spec$rate) ^ (visits / spec$per)
+    return(-diff(survival))
+  }
+
   increments <- (spec$rate / spec$per) * diff(visits)
   total <- sum(increments)
   # The same bound `check_dropout_total()` enforces on `dropout` generally --
   # reusing its shared DROPOUT_TOL so the threshold itself cannot drift between
   # the two -- but diagnosed here in terms of `rate` and `per` rather than the
   # expanded vector, because the general check would otherwise report a
-  # `dropout_rate()` mistake by naming a vector the caller never wrote. Both
-  # callers run `increments` through `check_dropout_total()` afterwards anyway,
-  # so a bug in this earlier, friendlier check could not let an invalid total
-  # through uncaught.
+  # `dropout_rate()` mistake by naming a vector the caller never wrote.
   if (total > 1 + DROPOUT_TOL) {
     stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
                         "implies total dropout of %s, which exceeds 1."),

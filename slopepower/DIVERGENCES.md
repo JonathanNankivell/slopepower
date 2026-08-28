@@ -176,21 +176,36 @@ manually converted to `dropouts(0.15)`, `dropouts(.05 .05 .05)`, or
 `dropouts(.025 .025 .025 .025 .025 .025)` depending on which visit schedule
 is being compared, with the arithmetic redone by hand for each.
 
-**R** adds `dropout_rate(rate, per = 1)`, which `trial_design()` expands for
-whatever schedule it is given — `(rate / per) * (visits[j+1] - visits[j])` per
-stratum:
+**R** adds `dropout_rate(rate, per = 1, type = c("linear", "cumulative"))`,
+which `trial_design()` expands for whatever schedule it is given. `type`
+chooses which of two withdrawal patterns `rate` describes:
 
-```r
-trial_design(c(0, 1, 2, 3),        dropout = dropout_rate(0.05))  # 0.05 x 3
-trial_design(seq(0, 3, by = 0.5),  dropout = dropout_rate(0.05))  # 0.025 x 6
-trial_design(c(0, 3),              dropout = dropout_rate(0.05))  # 0.15
-```
+- `"linear"` (the default) applies `rate` to the *original* cohort —
+  `(rate / per) * (visits[j+1] - visits[j])` per stratum:
+
+  ```r
+  trial_design(c(0, 1, 2, 3),        dropout = dropout_rate(0.05))  # 0.05 x 3
+  trial_design(seq(0, 3, by = 0.5),  dropout = dropout_rate(0.05))  # 0.025 x 6
+  trial_design(c(0, 3),              dropout = dropout_rate(0.05))  # 0.15
+  ```
+
+- `"cumulative"` applies `rate` as the proportion of *whoever is still in
+  follow-up* who withdraws per `per` units of time, compounding
+  geometrically rather than shrinking the original cohort by equal amounts:
+  survival at time `t` is `(1 - rate) ^ (t / per)`.
+
+  ```r
+  trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05, type = "cumulative"))
+  # 0.05, 0.0475, 0.045125 -- 5% of whoever remains, each interval
+  ```
 
 Because the expansion happens in the constructor, the same object drives a
 single design and every row of a Table-1 style comparison alike: the grid
-functions expand it per cell through the same code path. A rate produces
-incremental proportions by construction, so it cannot be paired with
-`dropout_type = "cumulative"` (section 5) and that combination is rejected.
+functions expand it per cell through the same code path. Whichever `type` is
+used, a rate produces incremental proportions by construction, so it cannot be
+paired with `dropout_type = "cumulative"` (section 5) — an unrelated choice,
+about how the vector itself was written down rather than how withdrawal
+behaves over time — and that combination is rejected.
 
 This is new surface area, but it computes exactly what a Stata user would
 otherwise compute by hand for `dropouts()`, so it is not a change to the

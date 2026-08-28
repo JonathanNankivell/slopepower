@@ -132,7 +132,13 @@ label_visits <- function(x) if (is.numeric(x)) label_numeric(x) else "design"
 label_dropout <- function(x) {
   if (is.null(x)) return("none")
   if (inherits(x, "dropout_rate")) {
-    return(sprintf("%s per %s", fmt_num(x$rate), fmt_num(x$per)))
+    # `type` is carried into the label, like `per`, only when it is not the
+    # default: "linear" is what every existing rate label already means, so
+    # leaving it off keeps those labels unchanged, while a cumulative rate --
+    # a different assumption from a linear one at the same rate and per --
+    # would otherwise key the same row.
+    suffix <- if (identical(x$type, "cumulative")) ", cumulative" else ""
+    return(sprintf("%s per %s%s", fmt_num(x$rate), fmt_num(x$per), suffix))
   }
   if (is.numeric(x)) return(label_numeric(x))
   "dropout"
