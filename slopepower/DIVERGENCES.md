@@ -726,6 +726,37 @@ withdrawal too.
 
 ---
 
+## 24. `slope_sample_size_grid_boot()` bootstraps a whole grid from one resampling pass
+
+**Stata** has no equivalent of the grid functions at all (divergence 7 —
+Table 1 is built by hand, one `slopepower` call per row), so it has no
+equivalent of bootstrapping one either. The paper's own worked bootstrap
+(§4.1.2) is a `bootstrap:` prefix around a single `slopepower` call, refit
+completely for that one design; doing the same nine times over, once per row
+of Table 1, is the only way the Stata recipe could be extended to a grid,
+and it refits the stage-one model `n_cells * R` times.
+
+**R** shares one set of resampled replicates across every cell instead of
+bootstrapping each design independently. The resampling scheme —
+`boot_setup()`, `boot_replicate_matrix()`, `jackknife_values()`, all
+`R/bootstrap.R` — depends only on the stage-one `params`, never on the
+design being priced, so refitting once prices every cell: `R` replicates
+plus one leave-one-subject-out jackknife, not `n_cells` times that. A
+nine-cell grid at the default `R = 999` costs about what one
+`slope_bootstrap()` call does, not nine times it.
+
+This is not only cheaper — it changes what the intervals mean together.
+Every cell's interval is built from the *same* draws, so two designs'
+intervals move together with whatever the resampling happened to do to the
+slope on that draw. The comparison between two rows of the table is
+therefore paired, the way it would be if the same nine hundred simulated
+datasets were run through nine designs, rather than confounded with two
+independent samples' worth of Monte Carlo noise the way `n_cells` separate
+`bootstrap:` prefixes would be. Choosing between designs is exactly when
+this matters: Table 1 exists to compare rows, not to read one at a time.
+
+---
+
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded

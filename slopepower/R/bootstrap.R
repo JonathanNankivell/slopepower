@@ -342,6 +342,133 @@ widen_to_lattice <- function(ci, statistic) {
   c(2 * floor(ci[[1L]] / 2), 2 * ceiling(ci[[2L]] / 2))
 }
 
+#' Resample setup shared by every replicate of a bootstrap
+#'
+#' The section 2.6 standard-error check, the recovered modelling frame, the
+#' per-subject row index, the stratification groups and the refitting closure
+#' all depend only on `params` -- never on what is being computed from a
+#' replicate, or on how many things are. Lifted out of [run_bootstrap()] so
+#' that [slope_sample_size_grid_boot()] can build this once for a whole grid
+#' rather than once per cell: the resampling scheme does not know a grid cell
+#' exists.
+#' @noRd
+boot_setup <- function(params, context) {
+  # Section 2.6: if the slope is not large relative to its standard error the
+  # replicates can straddle zero, and an interval for the sample size stops
+  # meaning anything.
+  se <- slope_se(params)
+  if (is.finite(se) && se > 0 && abs(params$slope) / se < 2.5) {
+    warning(sprintf(paste0("%s: the estimated slope (%.4g) is only %.2f times its standard error ",
+                           "(%.4g). Nash et al. (2021, section 2.6) suggest a ratio above 2.5; ",
+                           "below it, bootstrap replicates may include slopes of both signs and ",
+                           "the resulting interval can be meaningless."),
+                    context, params$slope, abs(params$slope) / se, se), call. = FALSE)
+  }
+
+  frame <- boot_frame(params, context)
+  subject_index <- split(seq_len(nrow(frame)), frame$subject)
+  positions <- seq_along(subject_index)
+  groups <- if (is.null(frame$group)) {
+    list(positions)
+  } else {
+    sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
+    unname(split(positions, sub_group))
+  }
+
+  list(frame = frame, subject_index = subject_index, groups = groups,
+      refitter = make_refitter(params), se = se)
+}
+
+#' Refit `R` resampled replicates, reading one or more statistics off each
+#'
+#' The loop [run_bootstrap()] used to run for its one `compute`, generalised to
+#' a list of them: `jackknife_values()` already reads several accessors off one
+#' refit for the price of one jackknife pass, and a bootstrap grid needs the
+#' same thing here, for the same reason -- one refit priced out at every design
+#' rather than one refit per cell. A single-element `computes` reproduces
+#' [run_bootstrap()]'s own loop exactly, column for column.
+#'
+#' Warnings are suppressed for every replicate. Anything worth saying about the
+#' calculation -- a target effect that makes the slope more extreme, say -- is a
+#' property of the data, and the caller has already heard it once from the
+#' stage-two call that built the object; repeating it several hundred times
+#' here, attributed to a function they did not call, tells them nothing new.
+#' Suppressed once around the whole loop rather than per replicate: messages
+#' (the progress ticks) are a different condition class and pass through
+#' regardless.
+#'
+#' The refit is caught separately from each `compute` so that the replicate's
+#' own slope can be read off it: that -- not any one statistic -- is what a
+#' sign-straddling check has to be measured on. A refit failure and a
+#' `compute` failure both land the whole row (or that one column) on `NA`, so
+#' which of the two failed does not change the accounting.
+#'
+#' @param setup As returned by [boot_setup()].
+#' @param computes A list of `function(p) numeric(1)` closures, each reading
+#'   one statistic off a refit. Failing independently: one column's `NA` does
+#'   not cost the others their value for that replicate.
+#' @return A list with `replicates`, an `R` x `length(computes)` matrix, and
+#'   `slopes`, the length-`R` vector of each replicate's own refitted slope.
+#' @noRd
+boot_replicate_matrix <- function(setup, computes, R, progress, context) {
+  frame <- setup$frame
+  subject_index <- setup$subject_index
+  groups <- setup$groups
+  refitter <- setup$refitter
+
+  replicates <- matrix(NA_real_, nrow = R, ncol = length(computes))
+  slopes <- rep(NA_real_, R)
+  tick <- max(1L, floor(R / 10))
+  suppressWarnings(for (b in seq_len(R)) {
+    p <- tryCatch(refitter(resample_frame(frame, subject_index, groups)),
+                  error = function(e) NULL)
+    if (!is.null(p)) {
+      slopes[b] <- p$slope
+      replicates[b, ] <- vapply(computes,
+                                function(f) tryCatch(f(p), error = function(e) NA_real_),
+                                numeric(1L))
+    }
+    if (isTRUE(progress) && b %% tick == 0L) {
+      message(sprintf("%s: %d of %d replicates", context, b, R))
+    }
+  })
+
+  list(replicates = replicates, slopes = slopes)
+}
+
+#' One statistic's interval, BCa where possible and percentile as its fallback
+#'
+#' The body of the `interval()` closure [run_bootstrap()] used to build inline,
+#' lifted out so a bootstrap grid can build one interval per cell without
+#' repeating the fallback logic. `jack_col` is a zero-argument function rather
+#' than the column itself, so the jackknife it reads from stays lazy: under
+#' `type = "percentile"` it is never called, and the jackknife is never taken.
+#'
+#' The percentile quantile is computed only where it is actually used: as the
+#' answer itself under `type = "percentile"`, or as the fallback when a BCa
+#' interval could not be built. A successful BCa interval never touches it, so
+#' it is no longer computed -- and immediately discarded -- on every such call.
+#' @noRd
+boot_interval <- function(theta, observed, jack_col, type, probs, context, what) {
+  percentile <- function(theta) {
+    list(ci = stats::quantile(theta, probs, names = FALSE, type = 7),
+        type = "percentile")
+  }
+  if (!identical(type, "bca")) return(percentile(theta))
+  bca <- bca_from_jack(theta, observed, jack_col(), probs)
+  # A character return is the reason it could not be built. Previously either
+  # failure was reported as "every replicate falls on one side of the observed
+  # value", including the ones where the bias correction was fine and it was
+  # the jackknife that could not be had -- so the warning named a cause the
+  # caller could not act on and, in that case, was simply untrue.
+  if (is.character(bca)) {
+    warning(sprintf("%s: %s%s; reporting a percentile interval instead.",
+                    context, bca, what), call. = FALSE)
+    return(percentile(theta))
+  }
+  list(ci = bca, type = "bca")
+}
+
 #' Bootstrap a scalar computed from resampled stage-one parameters
 #'
 #' The resampling scheme, the section 2.6 check and the interval construction are
@@ -373,58 +500,15 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # result it was handed -- but recomputing would re-emit any warning the
   # stage-two call made, and under this interface the caller has already run
   # that exact call themselves to produce the object.
+  setup <- boot_setup(params, context)
+  frame <- setup$frame
+  subject_index <- setup$subject_index
+  refitter <- setup$refitter
+  se <- setup$se
 
-  # Section 2.6: if the slope is not large relative to its standard error the
-  # replicates can straddle zero, and an interval for the sample size stops
-  # meaning anything.
-  se <- slope_se(params)
-  if (is.finite(se) && se > 0 && abs(params$slope) / se < 2.5) {
-    warning(sprintf(paste0("%s: the estimated slope (%.4g) is only %.2f times its standard error ",
-                           "(%.4g). Nash et al. (2021, section 2.6) suggest a ratio above 2.5; ",
-                           "below it, bootstrap replicates may include slopes of both signs and ",
-                           "the resulting interval can be meaningless."),
-                    context, params$slope, abs(params$slope) / se, se), call. = FALSE)
-  }
-
-  frame <- boot_frame(params, context)
-  subject_index <- split(seq_len(nrow(frame)), frame$subject)
-  positions <- seq_along(subject_index)
-  groups <- if (is.null(frame$group)) {
-    list(positions)
-  } else {
-    sub_group <- vapply(subject_index, function(r) frame$group[r[1L]], numeric(1L))
-    unname(split(positions, sub_group))
-  }
-  refitter <- make_refitter(params)
-
-  # Warnings are suppressed for every replicate. Anything worth saying about the
-  # calculation -- a target effect that makes the slope more extreme, say -- is a
-  # property of the data, and the caller has already heard it once from the
-  # stage-two call that built the object; repeating it several hundred times
-  # here, attributed to a function they did not call, tells them nothing new.
-  # Suppressed once around the whole loop rather than per replicate: messages
-  # (the progress ticks below) are a different condition class and pass through
-  # regardless.
-  #
-  # The refit is caught separately from `compute` so that the replicate's own
-  # slope can be read off it: that -- not the statistic -- is what the
-  # sign-straddling check below has to be measured on. Both failure modes still
-  # land on NA and are discarded together, so which of the two failed does not
-  # change the accounting.
-  replicates <- rep(NA_real_, R)
-  slopes <- rep(NA_real_, R)
-  tick <- max(1L, floor(R / 10))
-  suppressWarnings(for (b in seq_len(R)) {
-    p <- tryCatch(refitter(resample_frame(frame, subject_index, groups)),
-                  error = function(e) NULL)
-    if (!is.null(p)) {
-      slopes[b] <- p$slope
-      replicates[b] <- tryCatch(compute(p), error = function(e) NA_real_)
-    }
-    if (isTRUE(progress) && b %% tick == 0L) {
-      message(sprintf("%s: %d of %d replicates", context, b, R))
-    }
-  })
+  mat <- boot_replicate_matrix(setup, list(compute), R, progress, context)
+  replicates <- mat$replicates[, 1L]
+  slopes <- mat$slopes
 
   failed <- is.na(replicates)
   n_failed <- sum(failed)
@@ -462,31 +546,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
     jack[, k]
   }
 
-  # The percentile quantile is computed only where it is actually used: as the
-  # answer itself under `type = "percentile"`, or as the fallback when a BCa
-  # interval could not be built. A successful BCa interval never touches it, so
-  # it is no longer computed -- and immediately discarded -- on every such call.
-  percentile <- function(theta) {
-    list(ci = stats::quantile(theta, probs, names = FALSE, type = 7),
-        type = "percentile")
-  }
-  interval <- function(theta, obs, k, what) {
-    if (!identical(type, "bca")) return(percentile(theta))
-    bca <- bca_from_jack(theta, obs, jack_column(k), probs)
-    # A character return is the reason it could not be built. Previously either
-    # failure was reported as "every replicate falls on one side of the observed
-    # value", including the ones where the bias correction was fine and it was
-    # the jackknife that could not be had -- so the warning named a cause the
-    # caller could not act on and, in that case, was simply untrue.
-    if (is.character(bca)) {
-      warning(sprintf("%s: %s%s; reporting a percentile interval instead.",
-                      context, bca, what), call. = FALSE)
-      return(percentile(theta))
-    }
-    list(ci = bca, type = "bca")
-  }
-
-  main <- interval(good, observed, 1L, "")
+  main <- boot_interval(good, observed, function() jack_column(1L), type, probs, context, "")
   # The replicate slopes get an interval of their own, so that the printed table
   # can show what the resampling did to the quantity every other row is derived
   # from -- a sample size two-thirds wider than its point estimate means one
@@ -497,7 +557,8 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   slope_int <- if (identical(statistic, "slope")) {
     main
   } else {
-    interval(good_slopes, params$slope, 2L, " for the replicate slopes")
+    boot_interval(good_slopes, params$slope, function() jack_column(2L), type, probs, context,
+                 " for the replicate slopes")
   }
 
   # After the choice, so a percentile interval and a BCa one are reported on the
@@ -716,7 +777,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 #' }
 #'
 #' @seealso [slope_sample_size()], [slope_power()], [slope_params()],
-#'   [slope_se()] for the standard error behind the section 2.6 check
+#'   [slope_se()] for the standard error behind the section 2.6 check,
+#'   [slope_sample_size_grid_boot()] to bootstrap every cell of a sample-size
+#'   grid at once, sharing one set of replicates
 #' @export
 slope_bootstrap <- function(x, R = 999, type = c("bca", "percentile"), ...,
                             level = 0.95, seed = NULL, progress = FALSE) {
@@ -811,8 +874,11 @@ slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
     "  you want an interval around -- a slope_sample_size object from\n",
     "  slope_sample_size(), a slope_power object from slope_power(), or a\n",
     "  slope_params object from slope_params() for the slope itself.\n",
-    "  The grid functions return one row per design; bootstrap the design you\n",
-    "  settle on rather than the grid."),
+    "  A slope_power_grid() or slope_sample_size_grid() result is not accepted\n",
+    "  here -- it returns one row per design, not one quantity. For an interval\n",
+    "  around every design in a sample-size grid at once, sharing one set of\n",
+    "  replicates across the whole table, call slope_sample_size_grid_boot()\n",
+    "  instead of building the grid first."),
     paste(sQuote(class(x)), collapse = "/")), call. = FALSE)
 }
 

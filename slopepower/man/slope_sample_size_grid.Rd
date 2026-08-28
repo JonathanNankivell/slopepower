@@ -115,5 +115,8 @@ slope_sample_size_grid(
 
 }
 \seealso{
-\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power_grid]{slope_power_grid()}}, \code{\link[=dropout_rate]{dropout_rate()}}
+\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power_grid]{slope_power_grid()}}, \code{\link[=dropout_rate]{dropout_rate()}},
+\code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} for a bootstrapped confidence interval
+around every cell of this table, sharing one set of replicates across
+the whole grid
 }

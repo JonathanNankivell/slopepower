@@ -97,10 +97,12 @@ quantity the object exists to report.}
 \value{
 An object of class \code{slope_bootstrap}, with elements \code{observed}, \code{replicates},
 \code{ci}, \code{type}, \code{statistic}, \code{R}, \code{n_failed}, \code{level}, \code{se}, \code{boot_mean} and
-\code{boot_sd} (the mean and SD of \code{replicates}), and \code{straddle} (the proportion
+\code{boot_sd} (the mean and SD of \code{replicates}), \code{straddle} (the proportion
 of retained replicates whose \emph{refitted slope} has a different sign from the
 fitted slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
-itself, rather than the analytic proxy for it in \code{se}).
+itself, rather than the analytic proxy for it in \code{se}), and \code{lattice}
+(whether \code{statistic} is \code{"n"}, decided once here and read by the print
+method rather than re-tested there).
 
 The refitted slopes are summarised alongside, whatever \code{statistic} was
 asked for, in \code{slope_observed} (the fitted slope), \code{slope_replicates},
@@ -263,5 +265,7 @@ slopepower command. \emph{Stata Journal} 21(3): 575--601.
 }
 \seealso{
 \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_params]{slope_params()}},
-\code{\link[=slope_se]{slope_se()}} for the standard error behind the section 2.6 check
+\code{\link[=slope_se]{slope_se()}} for the standard error behind the section 2.6 check,
+\code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} to bootstrap every cell of a sample-size
+grid at once, sharing one set of replicates
 }

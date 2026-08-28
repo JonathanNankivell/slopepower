@@ -132,5 +132,7 @@ slope_power_grid(
 
 }
 \seealso{
-\code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}, \code{\link[=dropout_rate]{dropout_rate()}}
+\code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}, \code{\link[=dropout_rate]{dropout_rate()}},
+\code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} for a bootstrapped interval around the
+converse table -- the sample size each design needs
 }
