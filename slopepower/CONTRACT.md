@@ -170,6 +170,26 @@ where `qnorm(1)` is `Inf` — the same double-precision edge that section 5.6 ha
 `NA_integer_` rather than a count, because the row belongs to no schedule. The 4.1/4.2 guarantee
 that column *names* are identical across classes is unaffected.
 
+### 4.4 `slope_sample_size_grid_boot` (`R/grid_boot.R`)
+
+Not a `slope_result` subclass — a grid was always a data frame rather than a `slope_result`, and
+this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fourteen
+`slope_sample_size_grid()` columns, unchanged, plus ten more — `n_mean`, `n_sd`, `n_lower`,
+`n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `ci_type`, `n_failed`.
+
+What every cell shares — `R`, `type`, `level`, `se`, `n_refit_failed`, `straddle`, and the same six
+`slope_*` fields `slope_bootstrap()` itself returns — is carried as **attributes**, not columns: a
+value that never varies across rows does not belong in one. `[.slope_sample_size_grid_boot()`
+strips them (and the class) on every subset, since a value describing the whole table becomes
+false, not merely stale, the moment the table it describes changes shape.
+
+Every cell shares one set of resampled replicates: the resampling scheme (`R/bootstrap.R`'s
+`boot_setup()`, `boot_replicate_matrix()`, `jackknife_values()`) depends only on `params`, never on
+the design being priced, so `R` replicates refit once price every cell rather than `R` refits *per
+cell*. A cell with fewer than two surviving replicates reports `NA` in its own row rather than
+aborting the whole grid the way `slope_bootstrap()` aborts a single result (section 6) — a grid
+that took several minutes to resample must not be discarded over one bad cell.
+
 ---
 
 ## 5. The mathematics — implement exactly as written
@@ -360,6 +380,9 @@ Warnings:
 - `dropout[1] > 0` (those participants contribute nothing)
 - any subject's time origin had to be shifted (`slope_params()`)
 - `abs(slope) / se(slope) < 2.5` in `slope_bootstrap()` (paper §2.6)
+- fewer than two replicates succeed for one cell of `slope_sample_size_grid_boot()` — that cell's
+  interval columns are `NA` (collected into one warning naming every such cell); the call errors
+  only if every cell is starved
 
 **Floating point:** sum the dropout vector once and compare the total against 1 with a tolerance;
 do not accumulate by repeated subtraction. `1 - 0.3 - 0.3 - 0.4` is `-5.551e-17`, so a bare `< 0`

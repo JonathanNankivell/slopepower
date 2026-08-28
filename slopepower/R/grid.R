@@ -185,12 +185,22 @@ grid_cells <- function(axes) {
   rev(expand.grid(lapply(rev(axes), seq_along), KEEP.OUT.ATTRS = FALSE))
 }
 
-#' Walk the cross product of every axis, evaluating one design per cell
+#' Normalise a grid's axes and build the columns that describe a cell
 #'
-#' `evaluate(design, args)` takes a `trial_design` and the cell's values for the
-#' scalar axes, and returns a `slope_sample_size` or `slope_power` object.
-#' Everything except that call is shared between the two grids, so the two
-#' tables are guaranteed to have the same shape and the same dropout expansion.
+#' The half of what used to be `grid_impl()` that has nothing to do with
+#' solving a cell: normalising the three kinds of axis, building one
+#' `trial_design` per visits/dropout pair (collecting the baseline-dropout
+#' warning as it goes, since that is a property of the design, not of what is
+#' later computed from it), the cross product of every axis, and the six
+#' columns -- `design` through `dropout_total` -- that a cell has independently
+#' of any calculation.
+#'
+#' Split out from the solving loop, now [grid_evaluate()], so that
+#' [slope_sample_size_grid_boot()] can build this once and read the *design*
+#' every cell needs -- `g$designs[[g$design_of[k]]]` -- to build its own
+#' per-cell closures, without [grid_evaluate()]'s plain stage-two solve running
+#' first and being thrown away. `grid_impl()` below still calls both, in the
+#' same order, for the same two grids this always served.
 #'
 #' `scalars` is a named list of the remaining axes -- `effectiveness`, `alpha`,
 #' and whichever of `n` and `power` the grid is not solving for -- each a single
@@ -198,7 +208,7 @@ grid_cells <- function(axes) {
 #' slowest, so a grid that varies nothing else lists its cells in exactly the
 #' order the visits x dropout loop always did.
 #' @noRd
-grid_impl <- function(visits, dropout, scalars, evaluate, context) {
+grid_axes <- function(visits, dropout, scalars, context) {
   visit_list <- as_visits_list(visits, context)
   drop_list  <- as_dropout_list(dropout, context)
   scalar_lists <- stats::setNames(
@@ -207,7 +217,6 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
 
   n_designs <- length(visit_list) * length(drop_list)
   baseline_only <- character(0L)
-  tte_direction <- character(0L)
 
   # The designs are built once per visits/dropout pair rather than once per
   # cell. A sensitivity axis re-prices the same trial, so rebuilding it at every
@@ -232,7 +241,7 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
       # condition class, not message text, so a copy-edit of the warning's
       # wording in design.R cannot silently break this. An invalid combination
       # (e.g. a `visits` element not starting at 0) is caught here too, and
-      # named the same way a failure from `evaluate()` below is.
+      # named the same way a failure from `evaluate()` in grid_evaluate() is.
       designs[[(di - 1L) * length(drop_list) + dj]] <- tryCatch(
         withCallingHandlers(
           trial_design(v, inc),
@@ -245,6 +254,10 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
       )
     }
   }
+  report_collected(context, baseline_only, n_designs,
+                   paste0("a non-zero proportion is expected to attend the baseline visit ",
+                          "only (%s). Those participants provide no follow-up measurement ",
+                          "and so contribute nothing to the comparison of slopes."))
 
   axes <- c(list(design = visit_list, dropout = drop_list), scalar_lists)
   cells <- grid_cells(axes)
@@ -259,7 +272,7 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
   named <- lengths(axes) > 1L
   named[c("design", "dropout")] <- TRUE
 
-  # Called from inside the two condition handlers below, and nowhere else.
+  # Called from inside grid_evaluate()'s condition handlers, and nowhere else.
   # Lazy argument evaluation is what keeps it that way: `labels` is a promise
   # inside grid_cell_error()'s closure, forced only if the cell actually fails,
   # so offering a message that no cell will need costs nothing per cell.
@@ -269,21 +282,16 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
       names(axes))[named]
   }
 
-  # Every column to the left of `n` is a property of the visits/dropout pair
-  # the cell sits on rather than of the calculation, so each is filled in one
-  # indexing operation off the cell's position on those two axes -- not a row
-  # at a time inside the loop, where a sensitivity axis would have it looked up
-  # again at every level.
+  # Every column below is a property of the visits/dropout pair the cell sits
+  # on rather than of the calculation, so each is filled in one indexing
+  # operation off the cell's position on those two axes -- not a row at a time
+  # in grid_evaluate()'s loop, where a sensitivity axis would have it looked
+  # up again at every level.
   di <- cells$design
   dj <- cells$dropout
   design_of <- (di - 1L) * length(drop_list) + dj
   n_visits <- unname(lengths(visit_list))
 
-  # Fourteen columns, filled in place and made a data frame once at the end.
-  # Assembling a one-row data frame per cell and rbind()ing the list cost more
-  # than the calculation the grid exists to perform -- about 2 ms a cell against
-  # 0.6 ms for the sample size itself, so roughly 60% of a grid's total runtime
-  # went on building the table rather than filling it.
   out <- list(
     design        = names(visit_list)[di],
     dropout       = names(drop_list)[dj],
@@ -292,7 +300,45 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
     last_visit    = vapply(visit_list, function(v) v[length(v)], numeric(1L),
                            USE.NAMES = FALSE)[di],
     dropout_total = vapply(designs, function(d) sum(d$dropout), numeric(1L),
-                           USE.NAMES = FALSE)[design_of],
+                           USE.NAMES = FALSE)[design_of]
+  )
+
+  # The scalar axes' values for one cell, as an index into each axis rather
+  # than the value itself, so grid_evaluate() can refill one shared args list
+  # by position instead of reassembling and renaming it n_cells times.
+  scalar_idx <- lapply(names(scalar_lists), function(nm) cells[[nm]])
+
+  list(visit_list = visit_list, drop_list = drop_list, scalar_lists = scalar_lists,
+      designs = designs, design_of = design_of, n_cells = n_cells,
+      axes = axes, named = named, labels_at = labels_at, scalar_idx = scalar_idx,
+      out = out)
+}
+
+#' Walk the cross product of a normalised grid, evaluating one design per cell
+#'
+#' `evaluate(design, args)` takes a `trial_design` and the cell's values for the
+#' scalar axes, and returns a `slope_sample_size` or `slope_power` object.
+#' Everything except that call is shared between the two grids, so the two
+#' tables are guaranteed to have the same shape and the same dropout expansion.
+#'
+#' `g` is what [grid_axes()] built. Kept as a second function rather than
+#' folded back into one, so that a caller wanting only the axes -- a bootstrap
+#' grid solving each cell several hundred times over its own resampled
+#' parameters, rather than once -- can build `g` and read `g$designs` directly
+#' instead of paying for this plain solve first and discarding it.
+#' @noRd
+grid_evaluate <- function(g, evaluate, context) {
+  scalar_lists <- g$scalar_lists
+  n_cells <- g$n_cells
+  tte_direction <- character(0L)
+
+  # Eight columns, filled in place and returned as a list, made a data frame
+  # once by the caller. Assembling a one-row data frame per cell and
+  # rbind()ing the list cost more than the calculation the grid exists to
+  # perform -- about 2 ms a cell against 0.6 ms for the sample size itself, so
+  # roughly 60% of a grid's total runtime went on building the table rather
+  # than filling it.
+  res_cols <- list(
     n             = numeric(n_cells),
     n_per_arm     = numeric(n_cells),
     power         = numeric(n_cells),
@@ -306,25 +352,24 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
   # The scalar axes' values for one cell, spliced into the stage-two call. The
   # names are the same in every cell, so the list is built once and refilled by
   # position rather than reassembled and renamed n_cells times.
-  scalar_idx <- lapply(names(scalar_lists), function(nm) cells[[nm]])
   args <- lapply(scalar_lists, function(levels) levels[[1L]])
 
   for (k in seq_len(n_cells)) {
-    for (j in seq_along(args)) args[[j]] <- scalar_lists[[j]][[scalar_idx[[j]][k]]]
+    for (j in seq_along(args)) args[[j]] <- scalar_lists[[j]][[g$scalar_idx[[j]][k]]]
 
     # effect_components() warns, by the same class mechanism the baseline
-    # warning above uses, when the target treatment effect makes the slope more
-    # extreme rather than less. Collected and reported once here too, rather
-    # than once per cell.
+    # warning in grid_axes() uses, when the target treatment effect makes the
+    # slope more extreme rather than less. Collected and reported once here
+    # too, rather than once per cell.
     res <- tryCatch(
       withCallingHandlers(
-        evaluate(designs[[design_of[k]]], args),
+        evaluate(g$designs[[g$design_of[k]]], args),
         slopepower_tte_direction = function(w) {
-          tte_direction <<- c(tte_direction, paste(labels_at(k), collapse = " / "))
+          tte_direction <<- c(tte_direction, paste(g$labels_at(k), collapse = " / "))
           invokeRestart("muffleWarning")
         }
       ),
-      error = grid_cell_error(context, labels_at(k))
+      error = grid_cell_error(context, g$labels_at(k))
     )
 
     # The eight result columns are read straight off `res`. That is the same
@@ -334,26 +379,30 @@ grid_impl <- function(visits, dropout, scalars, evaluate, context) {
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
     # the other ten columns and discarding them.
-    out$n[k]             <- res$n
-    out$n_per_arm[k]     <- res$n_per_arm
-    out$power[k]         <- res$power
-    out$alpha[k]         <- res$alpha
-    out$effectiveness[k] <- res$effectiveness
-    out$tte[k]           <- res$tte
-    out$var_tte[k]       <- res$var_tte
-    out$effect_size[k]   <- res$effect_size
+    res_cols$n[k]             <- res$n
+    res_cols$n_per_arm[k]     <- res$n_per_arm
+    res_cols$power[k]         <- res$power
+    res_cols$alpha[k]         <- res$alpha
+    res_cols$effectiveness[k] <- res$effectiveness
+    res_cols$tte[k]           <- res$tte
+    res_cols$var_tte[k]       <- res$var_tte
+    res_cols$effect_size[k]   <- res$effect_size
   }
 
-  report_collected(context, baseline_only, n_designs,
-                   paste0("a non-zero proportion is expected to attend the baseline visit ",
-                          "only (%s). Those participants provide no follow-up measurement ",
-                          "and so contribute nothing to the comparison of slopes."))
   report_collected(context, tte_direction, n_cells,
                    paste0("the target treatment effect makes the slope more extreme (%s). ",
                           "The comparator slope is further from zero than the group being ",
                           "treated; check that `slope_comparator` is the intended target."))
 
-  as.data.frame(out, stringsAsFactors = FALSE)
+  res_cols
+}
+
+#' Build and solve a grid: [grid_axes()] then [grid_evaluate()]
+#' @noRd
+grid_impl <- function(visits, dropout, scalars, evaluate, context) {
+  g <- grid_axes(visits, dropout, scalars, context)
+  res <- grid_evaluate(g, evaluate, context)
+  as.data.frame(c(g$out, res), stringsAsFactors = FALSE)
 }
 
 #' Report one class of collected per-cell warning, once for the whole grid
@@ -478,7 +527,9 @@ report_collected <- function(context, cells, k, tail) {
 #'   dropout = NULL
 #' )
 #'
-#' @seealso [slope_power()], [slope_sample_size_grid()], [dropout_rate()]
+#' @seealso [slope_power()], [slope_sample_size_grid()], [dropout_rate()],
+#'   [slope_sample_size_grid_boot()] for a bootstrapped interval around the
+#'   converse table -- the sample size each design needs
 #' @export
 slope_power_grid <- function(params, visits, dropout = NULL, n,
                              effectiveness = 0.25,
@@ -589,7 +640,10 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #'   dropout = NULL
 #' )
 #'
-#' @seealso [slope_sample_size()], [slope_power_grid()], [dropout_rate()]
+#' @seealso [slope_sample_size()], [slope_power_grid()], [dropout_rate()],
+#'   [slope_sample_size_grid_boot()] for a bootstrapped confidence interval
+#'   around every cell of this table, sharing one set of replicates across
+#'   the whole grid
 #' @export
 slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
                                    effectiveness = 0.25,
