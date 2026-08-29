@@ -11,7 +11,8 @@ slope_power_grid(
   n,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
-  alpha = 0.05
+  alpha = 0.05,
+  per_arm = TRUE
 )
 }
 \arguments{
@@ -33,14 +34,20 @@ every level of it. Names are used to identify the cell in any message; the
 value itself is what the table reports, in the column of the same name.}
 
 \item{target}{Passed to \code{\link[=slope_power]{slope_power()}} and held constant across the grid.}
+
+\item{per_arm}{Which basis \code{n} and \code{visits} are reported on: \code{TRUE}
+(the default) for participants per arm, \code{FALSE} for the trial total. Both
+are computed either way; this only picks which one the returned columns
+carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_arm")}) so it can be recovered later.}
 }
 \value{
 A data frame with one row per combination of the axes supplied, with
 columns \code{design}, \code{dropout}, \code{scheduled_visits}, \code{last_visit},
-\code{dropout_total}, \code{n}, \code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness},
-\code{tte}, \code{var_tte}, \code{effect_size}, \code{visits_total} and \code{visits_per_arm}.
-\code{power} is what varies; \code{n} is constant unless it was itself given several
-values. \code{visits_total}/\code{visits_per_arm} are \code{n}/\code{n_per_arm} times the
+\code{dropout_total}, \code{n}, \code{power}, \code{alpha}, \code{effectiveness}, \code{tte}, \code{var_tte},
+\code{effect_size} and \code{visits}. \code{power} is what varies; \code{n} is constant
+unless it was itself given several values. \code{n} and \code{visits} are on the
+basis \code{per_arm} selects -- participants (or visits) per arm by default,
+or the trial total under \code{per_arm = FALSE}. \code{visits} is \code{n} times the
 expected number of visits one participant attends -- \code{scheduled_visits}
 itself when \code{dropout_total} is zero, less otherwise, since a participant
 who withdraws still contributes the visits attended before doing so (see

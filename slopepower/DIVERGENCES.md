@@ -757,6 +757,46 @@ this matters: Table 1 exists to compare rows, not to read one at a time.
 
 ---
 
+## 25. Printed counts default to per arm, on one basis at a time
+
+**Stata's** `slopepower` prints both `N` and `N per arm` on every result, and
+the two grid-style displays it has (Table 1's hand-assembled rows) do the
+same. Nothing chooses between them; both are always on the page.
+
+**R** used to do the same — every printed result and table carried `n` and
+`n_per_arm` side by side, and `slope_sample_size_grid_boot()`'s table carried
+`visits_total`/`visits_per_arm` alongside them, plus a bootstrap summary
+(`n_mean`, `n_sd`, `n_ci`) that was silently totals-only. A reader had to know,
+from outside the table, which of several count columns were per arm.
+
+A `per_arm` argument now picks one basis and every printed count follows it:
+`n` and `visits` mean whichever was chosen, stated in a note beneath a data
+frame or in the line label for the Stata-style single-result printouts. It
+defaults to `TRUE` — per arm is the *N* of equation (6) and what each
+recruiting site actually needs — where Stata's default is "print both". This
+is display only: every affected object still carries both `n` and `n_per_arm`
+(and, for the bootstrap grid, both `n_mean`/`n_sd`/`n_lower`/`n_upper` scales
+via halving at print time), so nothing computed is lost, and `per_arm` is
+recorded as an attribute rather than a field or a hand-chosen pair of column
+names.
+
+The two plain grids, `slope_sample_size_grid()` and `slope_power_grid()`, have
+no print method to consult a display attribute at print time, so for them
+`per_arm` instead selects which columns the *returned* data frame carries —
+still recorded as an attribute (`attr(x, "per_arm")`) so a table already in
+hand can be read back, but there is no twin column left to fall back on.
+
+`slopepower()`, the Stata-compatibility wrapper, takes no `per_arm` argument —
+it mirrors Stata's own option set, and this is not a Stata option — but it
+returns a `slope_sample_size` or `slope_power` object like any other caller,
+so its printed `N` is per arm by default too, where Stata's is both. Both
+figures are still on the object either way; anyone wanting Stata's
+side-by-side display back can print it twice, once per basis
+(`print(x); print(x, per_arm = FALSE)`), or read `n`/`n_per_arm` off the
+object directly.
+
+---
+
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded

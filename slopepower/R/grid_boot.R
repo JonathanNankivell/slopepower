@@ -200,6 +200,14 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'
 #' @inheritParams slope_sample_size_grid
 #' @inheritParams slope_bootstrap
+#' @param per_arm Which basis the printed table's counts are on: `TRUE` (the
+#'   default) for participants per arm, `FALSE` for the trial total. Unlike
+#'   the plain grids' `per_arm` (which reshapes the returned columns), this
+#'   grid always carries both bases -- see the `@return` block below -- and
+#'   `per_arm` only sets which one [print.slope_sample_size_grid_boot()] shows
+#'   by default; the stored value can still be reached through the other
+#'   columns, and a single call can be printed either way with
+#'   `print(x, per_arm = ...)`.
 #'
 #' @return A data frame of class `c("slope_sample_size_grid_boot",
 #'   "data.frame")`, one row per cell, with the fifteen columns
@@ -229,7 +237,8 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'   The table also carries, as attributes rather than columns because they
 #'   are shared by every cell: `R`, `type` (as requested), `level`, `se`,
 #'   `n_refit_failed` (replicates whose stage-one refit failed, before any
-#'   per-cell solve is attempted), `straddle`, and `slope_observed`,
+#'   per-cell solve is attempted), `straddle`, `per_arm` (as requested, or
+#'   overridden at print time), and `slope_observed`,
 #'   `slope_mean`, `slope_sd`, `slope_ci`, `slope_type`, `slope_replicates` --
 #'   the same summary of the refitted slopes a single [slope_bootstrap()]
 #'   result carries, since the slope is what the resampling actually
@@ -263,11 +272,13 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
                                         target = c("effectiveness", "observed"),
                                         alpha = 0.05,
                                         R = 999, type = c("bca", "percentile"),
-                                        level = 0.95, seed = NULL, progress = FALSE) {
+                                        level = 0.95, seed = NULL, progress = FALSE,
+                                        per_arm = TRUE) {
   context <- "slope_sample_size_grid_boot()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   type <- check_boot_args(R, type, level, context)
+  per_arm <- check_per_arm(per_arm, context)
   # Reproducible without reseeding the session, exactly as run_bootstrap()
   # (bootstrap.R) arranges for a single result; see seed_bootstrap() on why the
   # on.exit() stays here rather than moving into it.
@@ -375,7 +386,7 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
                  R = R, type = type, level = level, se = setup$se,
                  n_refit_failed = n_refit_failed,
                  added_cols = names(added),
-                 named = g$named),
+                 named = g$named, per_arm = per_arm),
             slope_replicate_summary(params$slope, good_slopes, slope_int)))
 }
 
@@ -490,6 +501,14 @@ grid_boot_tte_frame <- function(x, type) {
 #' sign-straddling counts --- is reported in the notes beneath, which print on
 #' every call whether or not anything went wrong.
 #'
+#' `n`, `visits`, `n_mean`, `n_sd` and `n_ci` are shown on one basis --
+#' participants per arm by default -- rather than as the `n`/`n_per_arm` and
+#' `visits_total`/`visits_per_arm` pairs the underlying table carries; a
+#' "Counts:" note above the other notes says which basis is on the page. This
+#' is display only: the object itself is unaffected, and `print(x, per_arm =
+#' !attr(x, "per_arm"))` shows the other basis of the same table without
+#' rebuilding it.
+#'
 #' The resampled slope is not shown. It is still on the object, in the
 #' `slope_observed` attribute and the five beside it, and the straddle note
 #' still reports the one thing about it that bears on whether these intervals
@@ -507,6 +526,12 @@ grid_boot_tte_frame <- function(x, type) {
 #'   unrelated `x` (an object to bootstrap, not one to print) in here, since
 #'   both share this help topic and both happen to have a parameter of the
 #'   same name.
+#' @param per_arm Which basis to print the table's counts on: `TRUE` for
+#'   participants per arm, `FALSE` for the trial total. Defaults to `NULL`,
+#'   meaning "whatever the call that built `x` requested" -- read from its
+#'   `per_arm` attribute, or per arm if that is absent (an object built before
+#'   this argument existed). Passing it explicitly prints the other basis of
+#'   the same object without rebuilding it.
 #' @param ... Not used.
 # The grid columns are recovered by dropping the `added_cols` attribute -- which
 # slope_sample_size_grid_boot() fills from the names of the block it actually
@@ -514,7 +539,7 @@ grid_boot_tte_frame <- function(x, type) {
 # method, which already returns a plain data frame stripped of the grid-wide
 # summary.
 #' @export
-print.slope_sample_size_grid_boot <- function(x, ...) {
+print.slope_sample_size_grid_boot <- function(x, ..., per_arm = NULL) {
   if (is.null(attr(x, "R"))) {
     print.data.frame(x, ...)
     return(invisible(x))
@@ -525,14 +550,25 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
   R <- attr(x, "R")
   n_refit_failed <- attr(x, "n_refit_failed")
   named <- attr(x, "named")
+  per_arm <- display_basis(x, per_arm, "print.slope_sample_size_grid_boot()")
 
   # `[` on this class strips the class and every grid-wide attribute, so this
   # is already the plain data frame print.data.frame() should be handed --
   # no unclass() here, and no second place that knows which attributes exist.
-  cells <- x[, setdiff(names(x), attr(x, "added_cols")), drop = FALSE]
-  cells$n_mean <- x$n_mean
-  cells$n_sd <- x$n_sd
-  cells$n_ci <- grid_boot_ci_col(x$n_lower, x$n_upper, x$ci_type, type)
+  # basis_columns() (grid.R) then reduces its n/n_per_arm and
+  # visits_total/visits_per_arm pairs to the one basis being printed -- the
+  # same reduction the plain grids apply to their returned data, here applied
+  # only to what is shown.
+  cells <- basis_columns(x[, setdiff(names(x), attr(x, "added_cols")), drop = FALSE], per_arm)
+
+  # The bootstrap summary of `n` is total-only on the object (CONTRACT.md
+  # section 4.4); halving it here to match `cells$n` is exact, not
+  # approximate -- widen_to_lattice() (below) already moved n_lower/n_upper
+  # out to even sizes before they were stored, and the mean and SD are linear.
+  divisor <- if (per_arm) 2 else 1
+  cells$n_mean <- x$n_mean / divisor
+  cells$n_sd <- x$n_sd / divisor
+  cells$n_ci <- grid_boot_ci_col(x$n_lower / divisor, x$n_upper / divisor, x$ci_type, type)
 
   # The target treatment effect does not depend on the design, only on
   # `effectiveness` -- see slope_sample_size_grid_boot()'s @return -- so a
@@ -559,6 +595,7 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
   # them. `tte` is NULL when its frame was not shown, and c() drops it.
   shown_ci <- c(cells$n_ci, tte$tte_ci)
 
+  cat(basis_note(per_arm), sep = "\n")
   cat(boot_method_note(type, R, level), sep = "\n")
 
   cat(boot_note("Note", sprintf(paste0(
@@ -587,9 +624,9 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
     "%d/%d (%.1f%%) of replicates refit a slope on the opposite side of zero from the ",
     "fitted one."), round(straddle * n_used), n_used, 100 * straddle)), sep = "\n")
 
-  cat(boot_note("Mean, SD", paste(
-    "each replicate of `n` is rounded up to a whole participant per arm before averaging,",
-    "so its mean is not a runnable trial size.")), sep = "\n")
+  cat(boot_note("Mean, SD", paste0(
+    "each replicate of `n` is rounded up to a whole participant per arm before averaging, ",
+    "so its mean is not a runnable ", if (per_arm) "arm" else "trial", " size.")), sep = "\n")
 
   if (any(grepl("*", shown_ci, fixed = TRUE), na.rm = TRUE)) {
     cat("  * percentile interval; BCa could not be built there.\n")

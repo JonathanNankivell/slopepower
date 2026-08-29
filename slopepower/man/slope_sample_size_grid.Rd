@@ -11,7 +11,8 @@ slope_sample_size_grid(
   power = 0.8,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
-  alpha = 0.05
+  alpha = 0.05,
+  per_arm = TRUE
 )
 }
 \arguments{
@@ -34,11 +35,16 @@ the value itself is what the table reports, in the column of the same name.}
 
 \item{target}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held constant across the
 grid.}
+
+\item{per_arm}{Which basis \code{n} and \code{visits} are reported on: \code{TRUE}
+(the default) for participants per arm, \code{FALSE} for the trial total. Both
+are computed either way; this only picks which one the returned columns
+carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_arm")}) so it can be recovered later.}
 }
 \value{
-A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n} and
-\code{n_per_arm} are what vary; \code{power} is constant unless it was itself given
-several values.
+A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n} is
+what varies; \code{power} is constant unless it was itself given several
+values.
 }
 \description{
 The companion to \code{\link[=slope_power_grid]{slope_power_grid()}}: holds the target power fixed and reports

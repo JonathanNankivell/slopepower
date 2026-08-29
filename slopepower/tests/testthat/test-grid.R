@@ -43,8 +43,9 @@ test_that("slope_power_grid() returns one row per design/dropout combination", {
   ))
   expect_s3_class(out, "data.frame")
   expect_equal(nrow(out), length(table1_visits) * 2L)
-  expect_true(all(c("design", "dropout", "n", "n_per_arm", "power",
+  expect_true(all(c("design", "dropout", "n", "power",
                     "tte", "var_tte", "effect_size") %in% names(out)))
+  expect_false("n_per_arm" %in% names(out))
   expect_setequal(unique(out$design), names(table1_visits))
   expect_setequal(unique(out$dropout), c("none", "5pc"))
 })
@@ -69,7 +70,11 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
   # expensive line in the loop. This is the guarantee that bought back: the two
   # must report the same numbers for the same object, so that a grid row and a
   # bound as.data.frame() row can never disagree.
-  shared <- c("n", "n_per_arm", "power", "alpha", "effectiveness",
+  #
+  # `n` is compared with `per_arm = FALSE`, so it reads as the same total
+  # basis_columns() would otherwise reduce it away from; the per-arm basis is
+  # covered separately below.
+  shared <- c("n", "power", "alpha", "effectiveness",
               "tte", "var_tte", "effect_size")
   p <- paper_fit("slpower1")
 
@@ -79,7 +84,7 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
       des <- suppressWarnings(trial_design(v, drop))
       out <- suppressWarnings(slope_power_grid(
         p, visits = list(only = v), dropout = list(only = drop),
-        n = 450, effectiveness = 0.33))
+        n = 450, effectiveness = 0.33, per_arm = FALSE))
       direct <- as.data.frame(suppressWarnings(
         slope_power(p, des, n = 450, effectiveness = 0.33)))
       expect_equal(unlist(out[1L, shared]), unlist(direct[shared]),
@@ -89,10 +94,37 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
 
   # The same for the sample-size grid, whose rows come off a different class.
   out <- slope_sample_size_grid(p, visits = list(only = c(0, 1, 2)),
-                                dropout = list(only = NULL), effectiveness = 0.33)
+                                dropout = list(only = NULL), effectiveness = 0.33,
+                                per_arm = FALSE)
   direct <- as.data.frame(slope_sample_size(p, trial_design(c(0, 1, 2)),
                                             effectiveness = 0.33))
   expect_equal(unlist(out[1L, shared]), unlist(direct[shared]), tolerance = 0)
+})
+
+test_that("per_arm picks the grid's basis for `n` and `visits`, both readable from the object", {
+  p <- paper_fit("slpower1")
+  design <- list(annual = c(0, 1, 2))
+
+  arm   <- slope_sample_size_grid(p, visits = design, effectiveness = 0.33)
+  total <- slope_sample_size_grid(p, visits = design, effectiveness = 0.33, per_arm = FALSE)
+
+  # Default is per arm.
+  expect_identical(attr(arm, "per_arm"), TRUE)
+  expect_identical(attr(total, "per_arm"), FALSE)
+  expect_false("n_per_arm" %in% names(arm))
+  expect_false("n_per_arm" %in% names(total))
+  expect_false("visits_total" %in% names(arm))
+  expect_false("visits_per_arm" %in% names(total))
+
+  expect_equal(total$n, 712)
+  expect_equal(arm$n, 356)
+  expect_equal(total$n, 2 * arm$n)
+  expect_equal(total$visits, 2 * arm$visits)
+
+  expect_error(slope_sample_size_grid(p, visits = design, per_arm = NA),
+              "per_arm")
+  expect_error(slope_power_grid(p, visits = design, n = 712, per_arm = "yes"),
+              "per_arm")
 })
 
 test_that("slope_power_grid() reproduces all nine Table 1 powers in one call", {
@@ -119,27 +151,29 @@ test_that("slope_sample_size_grid() reports the N each design needs", {
     paper_fit("slpower1"),
     visits = list(annual = c(0, 1, 2)),
     dropout = list(none = NULL),
-    power = 0.8, effectiveness = 0.33
+    power = 0.8, effectiveness = 0.33, per_arm = FALSE
   ))
   expect_equal(nrow(out), 1L)
   expect_equal(out$n, 712)
-  expect_equal(out$n_per_arm, 356)
   # power is the held-constant input on this side of the split
   expect_equal(out$power, 0.8)
 })
 
-test_that("visits_total and visits_per_arm account for dropout", {
+test_that("visits accounts for dropout, on either basis", {
   # No dropout: every participant is a completer, so the anticipated visit
   # count is exactly n times the number of visits scheduled.
   p <- paper_fit("slpower1")
   out <- suppressWarnings(slope_sample_size_grid(
     p, visits = list(annual = c(0, 1, 2)), dropout = list(none = NULL),
-    power = 0.8, effectiveness = 0.33))
+    power = 0.8, effectiveness = 0.33, per_arm = FALSE))
   expect_false("n_follow_up" %in% names(out))
   expect_equal(out$scheduled_visits, 3L)
-  expect_equal(out$visits_total, out$n * out$scheduled_visits)
-  expect_equal(out$visits_per_arm, out$n_per_arm * out$scheduled_visits)
-  expect_equal(out$visits_total, 2L * out$visits_per_arm)
+  expect_equal(out$visits, out$n * out$scheduled_visits)
+
+  arm <- suppressWarnings(slope_sample_size_grid(
+    p, visits = list(annual = c(0, 1, 2)), dropout = list(none = NULL),
+    power = 0.8, effectiveness = 0.33))
+  expect_equal(out$visits, 2 * arm$visits)
 
   # With dropout, a withdrawing participant still contributes the visits
   # attended before doing so (trial_design()'s pattern mixture), so the
@@ -147,11 +181,10 @@ test_that("visits_total and visits_per_arm account for dropout", {
   out2 <- suppressWarnings(slope_sample_size_grid(
     p, visits = list(extended = c(0, 1, 2, 5)),
     dropout = list(tenpc_final = c(0, 0, 0.1)),
-    power = 0.8, effectiveness = 0.33))
+    power = 0.8, effectiveness = 0.33, per_arm = FALSE))
   expected_pp <- 0 * 1 + 0 * 2 + 0.1 * 3 + (1 - 0.1) * 4
-  expect_equal(out2$visits_total, out2$n * expected_pp)
-  expect_equal(out2$visits_per_arm, out2$n_per_arm * expected_pp)
-  expect_lt(out2$visits_total, out2$n * out2$scheduled_visits)
+  expect_equal(out2$visits, out2$n * expected_pp)
+  expect_lt(out2$visits, out2$n * out2$scheduled_visits)
 })
 
 test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
@@ -159,7 +192,7 @@ test_that("slope_sample_size_grid() accepts explicit dropout vectors", {
     paper_fit("slpower1"),
     visits = list(extended = c(0, 1, 2, 5)),
     dropout = list(tenpc_final = c(0, 0, 0.1)),
-    power = 0.8, effectiveness = 0.33))
+    power = 0.8, effectiveness = 0.33, per_arm = FALSE))
   expect_equal(out$n, 328)
 })
 
@@ -167,7 +200,7 @@ test_that("slope_sample_size_grid() agrees with slope_sample_size() cell by cell
   p <- paper_fit("slpower1")
   out <- suppressWarnings(slope_sample_size_grid(
     p, visits = table1_visits, dropout = list(none = NULL),
-    power = 0.9, effectiveness = 0.33))
+    power = 0.9, effectiveness = 0.33, per_arm = FALSE))
 
   for (nm in names(table1_visits)) {
     direct <- slope_sample_size(p, trial_design(table1_visits[[nm]]),
@@ -182,7 +215,7 @@ test_that("the two grids are inverses, design by design", {
   p <- paper_fit("slpower1")
   sizes <- suppressWarnings(slope_sample_size_grid(
     p, visits = table1_visits, dropout = list(`5pc` = dropout_rate(0.05)),
-    power = 0.8, effectiveness = 0.33))
+    power = 0.8, effectiveness = 0.33, per_arm = FALSE))
   expect_identical(names(sizes),
                    names(suppressWarnings(slope_power_grid(
                      p, visits = table1_visits,
@@ -245,7 +278,7 @@ test_that("a bare numeric `visits` vector is labelled by its visit times", {
   # and `dropout` left at its default, which stands for a single no-dropout row.
   p <- paper_fit("slpower1")
   out <- slope_sample_size_grid(p, visits = c(0, 1, 2),
-                                power = 0.8, effectiveness = 0.33)
+                                power = 0.8, effectiveness = 0.33, per_arm = FALSE)
   expect_equal(nrow(out), 1L)
   expect_identical(out$design, "0, 1, 2")
   expect_identical(out$dropout, "none")
@@ -253,7 +286,6 @@ test_that("a bare numeric `visits` vector is labelled by its visit times", {
   # CONTRACT.md 7, paper p.588: the shorthand must reach the same calculation
   # the list form does, so the headline N of the first worked example stands.
   expect_equal(out$n, 712)
-  expect_equal(out$n_per_arm, 356)
 })
 
 test_that("a bare dropout vector or dropout_rate() is labelled by its contents", {
@@ -404,7 +436,7 @@ test_that("effectiveness, power and alpha each become an axis when given several
     p, visits = c(0, 1, 2), dropout = NULL,
     power = c(`80pc` = 0.8, `90pc` = 0.9),
     effectiveness = list(`20pc` = 0.2, `30pc` = 0.3),
-    alpha = 0.05)
+    alpha = 0.05, per_arm = FALSE)
 
   expect_equal(nrow(out), 4L)
   # The scalar axes report their own value, not their label: unlike a schedule
@@ -426,7 +458,7 @@ test_that("slope_power_grid() varies n and alpha the same way", {
   p <- paper_fit("slpower1")
   out <- slope_power_grid(
     p, visits = list(annual = c(0, 1, 2), denser = seq(0, 2, 0.5)), dropout = NULL,
-    n = c(450, 600), effectiveness = 0.33, alpha = c(0.05, 0.01))
+    n = c(450, 600), effectiveness = 0.33, alpha = c(0.05, 0.01), per_arm = FALSE)
 
   expect_equal(nrow(out), 2L * 2L * 2L)
   expect_equal(out$n, rep(c(450, 450, 600, 600), 2L))

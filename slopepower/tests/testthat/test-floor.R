@@ -228,6 +228,20 @@ test_that("printing a floor names the schedule it does not depend on", {
   expect_true(any(grepl("limiting s\\*\\^2", out)))
 })
 
+test_that("the floor's printed N follows per_arm, per arm by default", {
+  flr <- slope_sample_size_floor(ref_params(), effectiveness = 0.33)
+  expect_identical(attr(flr, "per_arm"), TRUE)
+
+  out_arm   <- capture.output(print(flr))
+  out_total <- capture.output(print(flr, per_arm = FALSE))
+  expect_true(any(grepl(sprintf("N per arm = %d$", flr$n_per_arm), out_arm)))
+  expect_false(any(grepl("^ *N = ", out_arm)))
+  expect_true(any(grepl(sprintf("^ *N = %d$", flr$n), out_total)))
+  expect_false(any(grepl("N per arm", out_total)))
+
+  expect_error(print(flr, per_arm = "no"), "per_arm")
+})
+
 # --- against the paper ------------------------------------------------------
 
 test_that("the floor reproduces the vignette's slpower1 figure", {

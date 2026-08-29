@@ -173,12 +173,15 @@ that column *names* are identical across classes is unaffected.
 ### 4.4 `slope_sample_size_grid_boot` (`R/grid_boot.R`)
 
 Not a `slope_result` subclass — a grid was always a data frame rather than a `slope_result`, and
-this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fifteen
-`slope_sample_size_grid()` columns, unchanged, plus eleven more — `n_mean`, `n_sd`, `n_lower`,
+this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fifteen columns
+`grid_evaluate()` computes for a grid cell — both `n`/`n_per_arm` and both
+`visits_total`/`visits_per_arm`, unreduced — plus eleven more: `n_mean`, `n_sd`, `n_lower`,
 `n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `tte_ci_type`, `ci_type`, `n_failed`.
-`ci_type` and `tte_ci_type` are separate because the two intervals have separate bias corrections
-and separate jackknife columns: either can fall back from BCa to percentile without the other,
-and the printed table marks each column with the method it actually used.
+(`slope_sample_size_grid()` itself returns thirteen of those fifteen — see "Display basis" below —
+so this object's own data frame carries two more columns than that function's return value, not
+the same fifteen.) `ci_type` and `tte_ci_type` are separate because the two intervals have separate
+bias corrections and separate jackknife columns: either can fall back from BCa to percentile
+without the other, and the printed table marks each column with the method it actually used.
 
 `tte` depends on `effectiveness` alone — not the visit schedule, the dropout pattern, `power` or
 `alpha` — so it is resampled once per distinct `effectiveness` level rather than once per cell,
@@ -198,6 +201,27 @@ the design being priced, so `R` replicates refit once price every cell rather th
 cell*. A cell with fewer than two surviving replicates reports `NA` in its own row rather than
 aborting the whole grid the way `slope_bootstrap()` aborts a single result (section 6) — a grid
 that took several minutes to resample must not be discarded over one bad cell.
+
+### 4.5 Display basis: `per_arm`
+
+Every function in this section that reports a count accepts `per_arm` (default `TRUE`), which
+picks whether a *printed* `n` — and, on a grid, `n`'s companion `visits` — reads as participants
+per arm or as the trial total. It is **display only** and is carried as an attribute
+(`attr(x, "per_arm")`), never as a field of a `slope_result` list and never as a column of a grid
+`data.frame` — a value that changes how a number is shown, not what was computed, belongs beside
+the object rather than inside it, the same reasoning section 4.4 gives for the bootstrap grid's
+shared attributes. `print()` methods take their own `per_arm` argument, defaulting to `NULL`
+("whatever the object's attribute says, or per arm if it carries none"), so the printed basis can
+be overridden after the fact without recomputing anything: `print(x, per_arm = FALSE)`.
+
+The two plain grids, `slope_sample_size_grid()` and `slope_power_grid()`, are the one exception.
+They are undecorated data frames with no print method to consult an attribute at print time, so
+for them `per_arm` instead shapes the *returned* data: the `n`/`n_per_arm` and
+`visits_total`/`visits_per_arm` pairs each collapse to a single `n`/`visits` column on the chosen
+basis (`basis_columns()`, `R/grid.R`), and the object carries thirteen columns, not fifteen. The
+attribute is still recorded, so a table already in hand can be identified, but there is no
+surviving twin column to fall back on — unlike every other function in this section, where both
+bases are always retrievable from the object itself.
 
 ---
 

@@ -130,6 +130,10 @@ one tidy row with the same columns, so results from either can be bound into one
 table — a `solve_for` column records which question produced each row. `alpha`
 defaults to 0.05, two-sided.
 
+Both objects carry `n` and `n_per_arm` regardless; the printed summary shows one
+of them at a time, per arm by default (`per_arm = TRUE`), and `print(x, per_arm =
+FALSE)` shows the trial total instead without recomputing anything.
+
 `design` may be a bare numeric vector of visit times instead of a `trial_design`
 object, so `slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)` also
 works.
@@ -226,10 +230,12 @@ slope_sample_size_grid(
 )
 ```
 
-Both return one row per visits × dropout combination, with identical columns. Use
-`dropout_rate()` rather than a fixed vector when the schedules being compared have
-different numbers of visits: each cell expands it against its own schedule, so the
-same withdrawal rate means the same thing in every row.
+Both return one row per visits × dropout combination, with identical columns,
+including `n` and the anticipated visit burden `visits` — per arm by default
+(`per_arm = TRUE`), or `per_arm = FALSE` for the trial total. Use `dropout_rate()`
+rather than a fixed vector when the schedules being compared have different
+numbers of visits: each cell expands it against its own schedule, so the same
+withdrawal rate means the same thing in every row.
 
 The assumptions are axes too. `effectiveness`, `alpha` and whichever of `n` and
 `power` the grid is not solving for each take several values as readily as one, and
