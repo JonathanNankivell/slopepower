@@ -307,9 +307,15 @@ grid_axes <- function(visits, dropout, scalars, context) {
   # by position instead of reassembling and renaming it n_cells times.
   scalar_idx <- lapply(names(scalar_lists), function(nm) cells[[nm]])
 
-  list(visit_list = visit_list, drop_list = drop_list, scalar_lists = scalar_lists,
+  # `visit_list`, `drop_list` and `axes` are deliberately not returned: they are
+  # the raw material this function normalises, and everything downstream reads
+  # what was built from them -- `designs`/`design_of`, `named`, `labels_at`,
+  # `scalar_idx`. Returning them too made the bundle read as the grid's shape
+  # while five of eleven fields were scaffolding, and kept the whole normalised
+  # visit list alive for the life of a grid that no longer refers to it.
+  list(scalar_lists = scalar_lists,
       designs = designs, design_of = design_of, n_cells = n_cells,
-      axes = axes, named = named, labels_at = labels_at, scalar_idx = scalar_idx,
+      named = named, labels_at = labels_at, scalar_idx = scalar_idx,
       out = out)
 }
 
@@ -702,6 +708,29 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
 #' @noRd
 grid_stage_two <- function(params, visits, dropout, fixed_name, fixed_value,
                            effectiveness, target, alpha, fn, context) {
+  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha, fn)
+  grid_impl(visits, dropout, spec$scalars, spec$evaluate, context)
+}
+
+#' Which stage-two arguments are grid axes, and how a cell is priced
+#'
+#' The two halves of [grid_stage_two()] that do not depend on having a whole
+#' grid to hand: the scalar axis set, and the closure that solves one cell.
+#' Split out because [slope_sample_size_grid_boot()] (grid_boot.R) needs both,
+#' but needs `grid_axes()` and `grid_evaluate()` kept apart rather than run
+#' back to back by [grid_impl()] -- it prices each cell several hundred times
+#' over its own resampled parameters, off the `g` that `grid_axes()` builds.
+#'
+#' Written once rather than reproduced there, because *which arguments are
+#' axes* is the thing that changes: `alpha` and `effectiveness` were both added
+#' after this function was written, and a copy would have gained them in the
+#' plain grids and silently not in the bootstrapped one -- a missing sensitivity
+#' axis, not an error. `named` and the per-level `tte` collapsing in the
+#' bootstrap grid are derived from the axis set too, so the two tables would
+#' have disagreed about their own shape.
+#' @noRd
+grid_stage_two_spec <- function(params, fixed_name, fixed_value,
+                                effectiveness, target, alpha, fn) {
   # maybe_add_effectiveness() decides whether `effectiveness` belongs in the
   # call at all -- it must not be passed under target = "observed" -- which here
   # is the same question as whether it is an axis of the grid.
@@ -709,9 +738,8 @@ grid_stage_two <- function(params, visits, dropout, fixed_name, fixed_value,
                                      effectiveness, target)
   scalars$alpha <- alpha
 
-  grid_impl(visits, dropout, scalars,
-            function(des, args) do.call(fn,
-                                        c(list(params = params, design = des, target = target),
-                                          args)),
-            context)
+  list(scalars = scalars,
+       evaluate = function(des, args) {
+         do.call(fn, c(list(params = params, design = des, target = target), args))
+       })
 }

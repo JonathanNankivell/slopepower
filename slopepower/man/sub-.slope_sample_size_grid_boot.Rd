@@ -13,15 +13,16 @@
 }
 \description{
 Every attribute \code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} adds -- \code{R}, the slope
-block, \code{row_labels} and the rest -- describes the \emph{whole table}: \code{R}
-replicates were drawn once for every cell, and \code{row_labels} names all
-\code{nrow(x)} of them. A \code{[} subset can change which cells are present, or how
-many, without changing any of that -- and base \verb{[.data.frame} does not
-reliably strip attributes it does not recognise, so, empirically, those
-become stale rather than absent: \code{row_labels} still named the original
-cells after a row subset dropped some of them, longer than the data it
-would label. So this method strips them itself, on every subset, along
-with the class -- explicitly, rather than relying on incidental
+block, \code{named} and the rest -- describes the \emph{whole table}: \code{R} replicates
+were drawn once for every cell, \code{slope_replicates} holds the ones that
+priced all \code{nrow(x)} of them, and \code{named} says which axes vary across the
+lot. A \code{[} subset can change which cells are present, or how many, or
+leave only one level of an axis standing, without changing any of that --
+and base \verb{[.data.frame} does not reliably strip attributes it does not
+recognise, so, empirically, those become stale rather than absent:
+\code{slope_replicates} still summarised the resampling behind cells a row
+subset had dropped. So this method strips them itself, on every subset,
+along with the class -- explicitly, rather than relying on incidental
 attribute-dropping \code{\link[=print.slope_sample_size_grid_boot]{print.slope_sample_size_grid_boot()}} could not safely
 assume.
 }

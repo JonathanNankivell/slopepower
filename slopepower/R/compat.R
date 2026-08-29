@@ -150,10 +150,16 @@ slopepower <- function(data, depvar, subject, time, schedule,
          call. = FALSE)
   }
 
-  group_arg <- if (model == 1L) "healthy" else if (model == 3L) "treated" else NULL
-  group_col <- if (model == 1L) casecon else if (model == 3L) treat else NULL
-  if (!is.null(group_col)) {
-    check_column_name(group_col, if (model == 1L) "casecon" else "treat", data, context)
+  # One branch over `model`, read three times, rather than three branches that
+  # have to agree: a mismatch between `arg` and `col` would build a
+  # slope_params() call passing the wrong column under the right name, which no
+  # later check would catch.
+  group <- switch(model,
+                  list(arg = "healthy", col = casecon, name = "casecon"),
+                  list(arg = NULL,      col = NULL,    name = NULL),
+                  list(arg = "treated", col = treat,   name = "treat"))
+  if (!is.null(group$col)) {
+    check_column_name(group$col, group$name, data, context)
   }
 
   # ---- schedule and scale --------------------------------------------------
@@ -219,7 +225,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   env <- new.env(parent = environment())
   assign(".slopepower_data", work, envir = env)
   call_args <- list(quote(slope_params), formula = fml, data = quote(.slopepower_data))
-  if (!is.null(group_arg)) call_args[[group_arg]] <- as.name(group_col)
+  if (!is.null(group$arg)) call_args[[group$arg]] <- as.name(group$col)
   params <- eval(as.call(c(call_args, list(...))), env)
 
   # ---- stage two -----------------------------------------------------------

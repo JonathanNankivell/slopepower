@@ -126,8 +126,11 @@ check_re_covariance <- function(sigma2_intercept, sigma2_slope, sigma_cov, conte
 #' by [run_bootstrap()]'s `R` and [solve_slope()]'s `n`, which differ only in
 #' the bound and the noun used to name what is being counted.
 #' @noRd
-check_whole_number <- function(x, name, noun, context, lower, upper = Inf, lower_open = FALSE) {
-  check_scalar(x, name, context, lower = lower, upper = upper, lower_open = lower_open)
+check_whole_number <- function(x, name, noun, context, lower) {
+  # No `upper`/`lower_open` passthrough: every caller wants a closed lower bound
+  # and no upper one, and an argument no call site passes is a bound nothing
+  # guarantees is still honoured.
+  check_scalar(x, name, context, lower = lower, upper = Inf, lower_open = FALSE)
   if (x != floor(x)) {
     stop(sprintf("%s: `%s` must be a whole number of %s; got %g.", context, name, noun, x),
          call. = FALSE)

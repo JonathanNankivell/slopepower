@@ -174,8 +174,17 @@ that column *names* are identical across classes is unaffected.
 
 Not a `slope_result` subclass — a grid was always a data frame rather than a `slope_result`, and
 this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fifteen
-`slope_sample_size_grid()` columns, unchanged, plus ten more — `n_mean`, `n_sd`, `n_lower`,
-`n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `ci_type`, `n_failed`.
+`slope_sample_size_grid()` columns, unchanged, plus eleven more — `n_mean`, `n_sd`, `n_lower`,
+`n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `tte_ci_type`, `ci_type`, `n_failed`.
+`ci_type` and `tte_ci_type` are separate because the two intervals have separate bias corrections
+and separate jackknife columns: either can fall back from BCa to percentile without the other,
+and the printed table marks each column with the method it actually used.
+
+`tte` depends on `effectiveness` alone — not the visit schedule, the dropout pattern, `power` or
+`alpha` — so it is resampled once per distinct `effectiveness` level rather than once per cell,
+and cells sharing a level share one interval exactly rather than merely agreeing to rounding.
+The printed target-effect frame is keyed by `effectiveness` for the same reason: one row per
+level, not one per cell.
 
 What every cell shares — `R`, `type`, `level`, `se`, `n_refit_failed`, `straddle`, and the same six
 `slope_*` fields `slope_bootstrap()` itself returns — is carried as **attributes**, not columns: a

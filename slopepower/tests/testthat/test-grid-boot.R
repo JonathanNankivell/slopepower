@@ -25,6 +25,20 @@ small_fit <- function() {
   slope_params(y ~ visit | id, d)
 }
 
+# The same, with a treated arm: the only shape `target = "observed"` accepts,
+# since it reuses a previous trial's own observed treatment effect.
+small_treated_fit <- function() {
+  subj <- local({
+    set.seed(11)
+    data.frame(id = 1:12, arm = rep(0:1, 6),
+               a = rnorm(12, 50, 8), b = rnorm(12, -2, 0.6))
+  })
+  subj$b <- subj$b + 0.8 * subj$arm
+  d <- merge(subj, data.frame(visit = 0:3))
+  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
+  slope_params(y ~ visit | id, d, treated = arm)
+}
+
 # --- equivalence to slope_bootstrap() ---------------------------------------
 
 test_that("a one-cell grid reproduces slope_bootstrap() exactly, at the same seed", {
@@ -94,7 +108,7 @@ test_that("slope_sample_size_grid_boot() returns one row per combination, with t
   expect_equal(nrow(out), 4L)
   expect_true(all(c("n_mean", "n_sd", "n_lower", "n_upper",
                     "tte_mean", "tte_sd", "tte_lower", "tte_upper",
-                    "ci_type", "n_failed") %in% names(out)))
+                    "tte_ci_type", "ci_type", "n_failed") %in% names(out)))
 })
 
 test_that("a bootstrapped `n` interval is always widened to even sizes", {
@@ -193,7 +207,7 @@ test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plu
   expect_false(any(startsWith(lines, "  |")))
   headers <- frame_block(lines)[!grepl("^[0-9]", frame_block(lines))]
   printed <- Filter(nzchar, unlist(strsplit(trimws(headers), " +")))
-  added <- slopepower:::grid_boot_added_cols
+  added <- attr(out, "added_cols")
   expect_equal(printed, c(setdiff(names(out), added), "n_mean", "n_sd", "n_ci"))
 
   # The three added columns are the object's own values, not a re-derivation.
@@ -258,6 +272,56 @@ test_that("print.slope_sample_size_grid_boot() marks a starved cell and a fallen
                         lines, fixed = TRUE)))
 })
 
+test_that("print.slope_sample_size_grid_boot() marks a fallen-back tte interval too", {
+  # `tte`'s interval has its own bias correction and its own jackknife column,
+  # so it can fall back to percentile where `n`'s did not. Forced, as the
+  # markers above are, rather than provoked.
+  pars <- small_fit()
+  out <- slope_sample_size_grid_boot(pars, visits = c(0, 1, 2, 3),
+                                     effectiveness = c(0.25, 0.33), R = 5, seed = 6)
+  expect_true(all(out$ci_type == "bca"))
+  out$tte_ci_type[1L] <- "percentile"
+  out$tte_lower[2L] <- NA_real_
+  out$tte_upper[2L] <- NA_real_
+  out$tte_ci_type[2L] <- NA_character_
+
+  lines <- capture.output(print(out))
+  frame <- frame_block(lines)
+  header <- grep("tte_ci$", frame)
+  expect_length(header, 1L)
+  ci <- sub(".*  +", "", frame[header + 1:2])
+  expect_match(ci[1L], "[*]$")
+  expect_equal(ci[2L], "--")
+
+  # Both markers are explained beneath even though it was `tte`, not `n`,
+  # that earned them.
+  expect_true(any(grepl("* percentile interval; BCa could not be built there.",
+                        lines, fixed = TRUE)))
+  expect_true(any(grepl("cells marked \"--\" had fewer than two surviving", lines)))
+})
+
+test_that("the extra-failure note reports the losses beyond the refits, not the totals", {
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, power = 0.8, effectiveness = 0.33, R = 10, seed = 6,
+    visits = list(a = c(0, 1, 2, 3), b = c(0, 1, 2))))
+
+  # Three replicates lost to the refit, shared by every cell; one cell lost
+  # four more to its own stage-two solve, the other none. The note is about
+  # the "more", so it must read 0-4 and not the 3-7 totals.
+  out <- structure(out, n_refit_failed = 3L)
+  out$n_failed <- c(3L, 7L)
+  # boot_note() wraps a note across lines, so the notes are read as one string
+  # rather than line by line: the phrase this is about spans a break.
+  notes <- function(x) gsub(" +", " ", paste(capture.output(print(x)), collapse = " "))
+  expect_match(notes(out),
+               "beyond the refits above (0-4 of 10 failed per cell).", fixed = TRUE)
+
+  # And a grid that lost nothing beyond the refits does not raise the note.
+  out$n_failed <- c(3L, 3L)
+  expect_false(grepl("beyond the refits above", notes(out), fixed = TRUE))
+})
+
 test_that("print.slope_sample_size_grid_boot() adds a target-effect frame only when effectiveness varies", {
   pars <- small_fit()
   fixed <- suppressWarnings(slope_sample_size_grid_boot(
@@ -271,8 +335,48 @@ test_that("print.slope_sample_size_grid_boot() adds a target-effect frame only w
   for (col in c("tte_mean", "tte_sd", "tte_ci")) {
     expect_true(any(grepl(col, lines, fixed = TRUE)))
   }
-  # Keyed by the axes the first frame leads with, so a row matches by eye.
-  expect_true(any(grepl("design dropout effectiveness", lines, fixed = TRUE)))
+  # Keyed by `effectiveness` alone: it is the only axis tte depends on.
+  expect_true(any(grepl("^ *effectiveness +tte +tte_mean", lines)))
+})
+
+test_that("the target-effect frame carries one row per effectiveness level, not per cell", {
+  # tte does not depend on the design, so a frame keyed by design and dropout
+  # would print the same two intervals four times over.
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, power = 0.8, effectiveness = c(0.25, 0.33), R = 5, seed = 6,
+    visits  = list(a = c(0, 1, 2, 3), b = c(0, 1, 2)),
+    dropout = list(none = NULL, `5pc` = dropout_rate(0.05))))
+  expect_equal(nrow(out), 8L)
+
+  frame <- slopepower:::grid_boot_tte_frame(out, "bca")
+  expect_equal(nrow(frame), 2L)
+  expect_equal(frame$effectiveness, c(0.25, 0.33))
+  expect_false(any(c("design", "dropout") %in% names(frame)))
+
+  # And the cells sharing a level share the interval exactly, not merely to
+  # rounding: they were priced off one replicate column, not four identical ones.
+  for (col in c("tte", "tte_mean", "tte_sd", "tte_lower", "tte_upper")) {
+    expect_equal(length(unique(out[[col]])), 2L, info = col)
+  }
+})
+
+test_that("a grid solved for target = \"observed\" prints", {
+  # `effectiveness` is not an axis of such a grid -- it is not passed at all --
+  # so the `named` vector the tte frame is gated on carries no element of that
+  # name, and the guard must not subscript one out of bounds.
+  pars <- small_treated_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, visits = list(a = c(0, 1, 2, 3), b = c(0, 1, 2)),
+    target = "observed", R = 6, seed = 8))
+
+  lines <- capture.output(print(out))
+  expect_true(any(grepl("<slope_sample_size_grid_boot>", lines, fixed = TRUE)))
+  # No second frame: with one target effect for the whole grid there is
+  # nothing for it to show that the notes do not.
+  expect_false(any(grepl("tte_mean", lines, fixed = TRUE)))
+  # The notes beneath still print, which they cannot if the frames aborted.
+  expect_true(any(grepl("bootstrap replicates failed to refit", lines)))
 })
 
 test_that("print.slope_sample_size_grid_boot() falls back to a plain print for a missing summary", {
@@ -297,7 +401,8 @@ test_that("subsetting a bootstrapped grid drops the class and the grid-wide summ
   row_sub <- out[1L, ]
   expect_false(inherits(row_sub, "slope_sample_size_grid_boot"))
   expect_null(attr(row_sub, "R"))
-  expect_null(attr(row_sub, "row_labels"))
+  expect_null(attr(row_sub, "slope_replicates"))
+  expect_null(attr(row_sub, "named"))
   expect_equal(row_sub$n, out$n[1L])
 
   col_sub <- out[, c("design", "n")]
