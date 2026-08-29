@@ -37,60 +37,88 @@ grid_cell_args <- function(g) {
   })
 }
 
-#' Two replicate-statistic closures per cell: the sample size and its target
-#' treatment effect
+#' The replicate statistics a grid needs: one sample size per cell, one target
+#' treatment effect per distinct `effectiveness`
 #'
-#' Every cell of the grid gets its own pair of `function(p) numeric(1)`
-#' closures, each re-solving [slope_sample_size()] against one resampled
-#' replicate's refitted parameters `p` and the cell's own design and scalar
-#' values. `power` is spliced in as the fixed argument the way
-#' `bootstrap_stage_two()` (bootstrap.R) does for a single result;
-#' [resolve_args()] -- the same helper -- supplies `design`, `target`,
-#' `alpha` and `effectiveness`.
+#' Every cell of the grid gets its own `n` closure, a `function(p) numeric(1)`
+#' re-solving [slope_sample_size()] against one resampled replicate's refitted
+#' parameters `p` and the cell's own design and scalar values. `power` is
+#' spliced in as the fixed argument the way `bootstrap_stage_two()`
+#' (bootstrap.R) does for a single result; [resolve_args()] -- the same
+#' helper -- supplies `design`, `target`, `alpha` and `effectiveness`.
 #'
-#' `tte` is re-solved by its own call rather than read off an `n`-solve
-#' already made for the replicate: [boot_replicate_matrix()] and
-#' [jackknife_values()] (both bootstrap.R) take a flat list of
-#' `function(p) numeric(1)` accessors, and keeping every accessor to that
-#' shape means neither has to learn that two of them happen to come from the
-#' same underlying solve. The price is one extra call to
-#' [slope_sample_size()] per cell per replicate -- arithmetic, not a model
-#' fit, and small next to what a replicate already costs.
+#' `tte` gets one closure per *distinct* `effectiveness` level instead of one
+#' per cell. The target treatment effect is
+#' `-effectiveness * (slope - reference_slope)`: it depends on the replicate
+#' and on `effectiveness`, and on nothing else this grid varies -- not the
+#' visit schedule, the dropout pattern, `power` or `alpha`. One closure per
+#' cell would make a D x P x E grid recompute the same E values D x P times
+#' over on every replicate, and again on every jackknife refit, and then
+#' store D x P identical copies of each in the replicate and jackknife
+#' matrices.
 #'
-#' Each closure closes over `slim` and `power_k` alone, not over `params` or
-#' the grid itself, so a several-hundred-replicate run does not keep the
-#' original fit -- and its model frame -- reachable through every closure.
-#' `lapply()` rather than a loop, so each cell's closures capture their own
-#' `slim`/`power_k` in a fresh call frame instead of the last value a shared
-#' loop variable happened to hold.
+#' It is read from [target_components()] -- the function [slope_sample_size()]
+#' itself gets it from, so the two cannot report different effects -- rather
+#' than off a second [slope_sample_size()] solve, which would price a whole
+#' design to reach a number that does not depend on one. That also keeps a
+#' replicate's `tte` free of a cell's design: a resample whose stage-two solve
+#' fails for one schedule still has the same target effect every other
+#' schedule has, which is what this grid's `@return` block promises of the
+#' `tte_*` columns.
 #'
-#' @return A list of `g$n_cells` elements, each `list(n = <closure>,
-#'   tte = <closure>)`.
+#' Both kinds keep the flat `function(p) numeric(1)` shape
+#' [boot_replicate_matrix()] and [jackknife_values()] (both bootstrap.R) take,
+#' so neither has to learn that a column may serve more than one cell; the
+#' `tte_of` map below is what remembers which.
+#'
+#' Each closure closes over `slim`/`power_k`, or over one `effectiveness`
+#' level, alone -- not over `params` or the grid itself -- so a
+#' several-hundred-replicate run does not keep the original fit, and its model
+#' frame, reachable through every closure. `lapply()` rather than a loop, so
+#' each closure captures its own values in a fresh call frame instead of the
+#' last value a shared loop variable happened to hold.
+#'
+#' @return `list(n = <one closure per cell>, tte = <one closure per distinct
+#'   `effectiveness` level>, tte_of = <for each cell, the index of its `tte`
+#'   closure>)`.
 #' @noRd
-grid_boot_computes <- function(g, target) {
+grid_boot_computes <- function(g, target, context) {
   cell_args <- grid_cell_args(g)
-  lapply(seq_len(g$n_cells), function(k) {
+
+  n <- lapply(seq_len(g$n_cells), function(k) {
     slim <- list(design = g$designs[[g$design_of[k]]], target = target,
                 alpha = cell_args[[k]]$alpha, effectiveness = cell_args[[k]]$effectiveness)
     power_k <- cell_args[[k]]$power
-    list(
-      n = function(p) do.call(slope_sample_size, c(resolve_args(p, slim), list(power = power_k)))$n,
-      tte = function(p) do.call(slope_sample_size,
-                                c(resolve_args(p, slim), list(power = power_k)))$tte
-    )
+    function(p) do.call(slope_sample_size, c(resolve_args(p, slim), list(power = power_k)))$n
   })
+
+  # NA_real_ stands for the absent level of a grid solved for
+  # `target = "observed"`, where `effectiveness` is not an axis and
+  # `cell_args` carries none; match() pairs NA with NA, so every cell of such
+  # a grid collapses onto the single closure it needs.
+  eff <- vapply(cell_args,
+                function(a) if (is.null(a$effectiveness)) NA_real_ else a$effectiveness,
+                numeric(1L))
+  eff_levels <- unique(eff)
+  tte <- lapply(eff_levels, function(e) {
+    eff_e <- if (is.na(e)) NULL else e
+    function(p) target_components(p, target, eff_e, context)$tte
+  })
+
+  list(n = n, tte = tte, tte_of = match(eff, eff_levels))
 }
 
-#' Flatten the per-cell compute list into the shape [boot_replicate_matrix()]
-#' and [jackknife_values()] both take
+#' Flatten the compute list into the shape [boot_replicate_matrix()] and
+#' [jackknife_values()] both take
 #'
-#' `n` and `tte` interleaved, cell by cell, so column `2 * k - 1` is always
-#' cell `k`'s sample size and `2 * k` its target treatment effect -- the one
-#' indexing rule the rest of [slope_sample_size_grid_boot()] relies on.
+#' Every cell's `n` first, then one `tte` per distinct `effectiveness` level:
+#' column `k` is cell `k`'s sample size, and column `n_cells + cc$tte_of[k]`
+#' its target treatment effect -- the one indexing rule the rest of
+#' [slope_sample_size_grid_boot()] relies on. Two blocks rather than the `n`
+#' and `tte` pairs this used to interleave, since there is no longer one `tte`
+#' column per cell to pair each `n` with.
 #' @noRd
-grid_boot_flatten <- function(cell_computes) {
-  unlist(lapply(cell_computes, function(cc) list(cc$n, cc$tte)), recursive = FALSE)
-}
+grid_boot_flatten <- function(cc) c(cc$n, cc$tte)
 
 #' A compact row label for one cell of a bootstrap grid's printed table
 #'
@@ -185,11 +213,14 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'       target treatment effect behind that sample size. Constant down the
 #'       `design` and `dropout` axes -- it does not depend on the design,
 #'       only on `effectiveness` -- so it repeats unless `effectiveness` is
-#'       itself an axis of the grid.}
-#'     \item{`ci_type`}{`"bca"` or `"percentile"`: the method actually used
-#'       for that cell's `n` interval, which can fall back to percentile cell
-#'       by cell even when `type = "bca"` was requested. `NA` for a cell that
-#'       could not be bootstrapped at all.}
+#'       itself an axis of the grid, and cells sharing an `effectiveness`
+#'       share one interval exactly rather than merely agreeing to rounding.}
+#'     \item{`ci_type`, `tte_ci_type`}{`"bca"` or `"percentile"`: the method
+#'       actually used for that cell's `n` and `tte` interval, which can fall
+#'       back to percentile cell by cell -- and, since the two intervals have
+#'       their own bias corrections and their own jackknife columns, one
+#'       without the other -- even when `type = "bca"` was requested. `NA` for
+#'       an interval that could not be built at all.}
 #'     \item{`n_failed`}{How many of the `R` replicates failed to yield a
 #'       sample size for that cell -- refits that failed to converge, plus
 #'       any resample whose stage-two solve itself failed -- out of `R`.}
@@ -236,33 +267,26 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
   context <- "slope_sample_size_grid_boot()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
-  type <- match.arg(type, c("bca", "percentile"))
-  check_whole_number(R, "R", "replicates", context, lower = 1)
-  check_probability(level, "level", context)
+  type <- check_boot_args(R, type, level, context)
+  # Reproducible without reseeding the session, exactly as run_bootstrap()
+  # (bootstrap.R) arranges for a single result; see seed_bootstrap() on why the
+  # on.exit() stays here rather than moving into it.
+  old_seed <- seed_bootstrap(seed)
+  if (!is.null(seed)) on.exit(restore_seed(old_seed), add = TRUE)
 
-  # Seeded calls are reproducible without reseeding the session, exactly as
-  # run_bootstrap() (bootstrap.R) arranges for a single result; see its own
-  # note on why on.exit() rather than a restore at the end.
-  if (!is.null(seed)) {
-    old_seed <- current_seed()
-    on.exit(restore_seed(old_seed), add = TRUE)
-    set.seed(seed)
-  }
+  # The point estimates: built through grid_stage_two_spec() (grid.R), the same
+  # axis set and the same per-cell closure slope_sample_size_grid() itself is
+  # built from, so this table's `n`/`tte`/... columns cannot drift from that
+  # function's -- and an axis added there reaches this grid too. Only the two
+  # halves underneath grid_impl() are called separately, since `g` is needed on
+  # its own to price each cell several hundred times over.
+  spec <- grid_stage_two_spec(params, "power", power, effectiveness, target, alpha,
+                              slope_sample_size)
+  g <- grid_axes(visits, dropout, spec$scalars, context)
+  pts <- grid_evaluate(g, spec$evaluate, context)
 
-  # The point estimates: built by exactly the code path slope_sample_size_grid()
-  # itself uses (grid_stage_two()'s own evaluate() closure, reproduced here),
-  # so this table's `n`/`tte`/... columns can never drift from that function's.
-  scalars <- maybe_add_effectiveness(stats::setNames(list(power), "power"), effectiveness, target)
-  scalars$alpha <- alpha
-  g <- grid_axes(visits, dropout, scalars, context)
-  pts <- grid_evaluate(g,
-                       function(des, args) do.call(slope_sample_size,
-                                                   c(list(params = params, design = des,
-                                                          target = target), args)),
-                       context)
-
-  computes <- grid_boot_flatten(grid_boot_computes(g, target))
-  n_slots <- 2L * g$n_cells
+  cc <- grid_boot_computes(g, target, context)
+  computes <- grid_boot_flatten(cc)
 
   setup <- boot_setup(params, context)
   mat <- boot_replicate_matrix(setup, computes, R, progress, context)
@@ -275,44 +299,49 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
                         "bootstrap any cell."), context, n_refit_failed, R), call. = FALSE)
   }
 
-  probs <- c((1 - level) / 2, 1 - (1 - level) / 2)
+  probs <- boot_probs(level)
 
   # One jackknife pass, covering every cell's `n` and `tte` plus the slope,
-  # taken on first use and kept -- the same laziness run_bootstrap() applies
-  # to its own single jackknife, generalised from one column pair to
-  # `n_slots + 1`.
-  jack <- NULL
-  jack_matrix <- function() {
-    if (is.null(jack)) {
-      jack <<- jackknife_values(setup$frame, setup$subject_index, setup$refitter,
-                                c(computes, list(function(p) p$slope)))
-    }
-    jack
-  }
+  # taken on first use and kept. lazy_jackknife() (bootstrap.R) is the same
+  # memoisation run_bootstrap() uses for its own single jackknife, and owns the
+  # convention that the slope accessor is appended last -- so this driver reads
+  # `slope_col()` rather than counting columns to find it.
+  jack <- lazy_jackknife(setup$frame, setup$subject_index, setup$refitter, computes)
 
-  slope_int <- boot_interval(good_slopes, params$slope,
-                             function() jack_matrix()[, n_slots + 1L], type, probs, context,
+  slope_int <- boot_interval(good_slopes, params$slope, jack$slope_col, type, probs, context,
                              " for the replicate slopes")
 
   n_res <- vector("list", g$n_cells)
-  tte_res <- vector("list", g$n_cells)
   starved <- character(0L)
   for (k in seq_len(g$n_cells)) {
-    ni <- 2L * k - 1L
-    ti <- 2L * k
     label <- grid_boot_row_label(g$labels_at(k))
-    n_res[[k]] <- grid_boot_cell_stat(mat$replicates[, ni], function() jack_matrix()[, ni],
+    n_res[[k]] <- grid_boot_cell_stat(mat$replicates[, k], function() jack$col(k),
                                       pts$n[k], type, probs, context,
                                       sprintf(" for cell %s", label), lattice = TRUE)
-    tte_res[[k]] <- grid_boot_cell_stat(mat$replicates[, ti], function() jack_matrix()[, ti],
-                                        pts$tte[k], type, probs, context,
-                                        sprintf(" for cell %s (tte)", label), lattice = FALSE)
     if (isTRUE(n_res[[k]]$starved)) starved <- c(starved, label)
   }
   if (length(starved) == g$n_cells) {
     stop(sprintf(paste0("%s: every cell had fewer than 2 surviving replicates for `n`; no ",
                         "interval could be built."), context), call. = FALSE)
   }
+
+  # One interval per distinct `effectiveness` level rather than one per cell,
+  # matching the one replicate column per level grid_boot_computes() filled:
+  # every cell at a level shares that column, so a per-cell pass would rebuild
+  # the identical interval -- and, at type = "bca", read the identical
+  # jackknife column -- once for every design and dropout in the grid. Spread
+  # back over the cells by `tte_of` when the columns are assembled below, so
+  # the table still reports every cell's own row.
+  tte_res <- lapply(seq_along(cc$tte), function(j) {
+    ti <- g$n_cells + j
+    # The first cell at this level, for a label naming a real row of the grid.
+    k <- match(j, cc$tte_of)
+    grid_boot_cell_stat(mat$replicates[, ti], function() jack$col(ti),
+                        pts$tte[k], type, probs, context,
+                        sprintf(" for cell %s (tte)", grid_boot_row_label(g$labels_at(k))),
+                        lattice = FALSE)
+  })[cc$tte_of]
+
   report_collected(context, starved, g$n_cells,
                    paste0("fewer than two replicates succeeded for `n` (%s), so no interval ",
                           "could be built for it there. Its `n_*`/`tte_*` columns are NA for ",
@@ -320,7 +349,7 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
 
   extract <- function(res, field, template) vapply(res, function(r) r[[field]], template)
 
-  out <- c(g$out, pts, list(
+  added <- list(
     n_mean = extract(n_res, "mean", numeric(1L)),
     n_sd = extract(n_res, "sd", numeric(1L)),
     n_lower = vapply(n_res, function(r) r$ci[1L], numeric(1L)),
@@ -329,37 +358,40 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
     tte_sd = extract(tte_res, "sd", numeric(1L)),
     tte_lower = vapply(tte_res, function(r) r$ci[1L], numeric(1L)),
     tte_upper = vapply(tte_res, function(r) r$ci[2L], numeric(1L)),
+    tte_ci_type = extract(tte_res, "type", character(1L)),
     ci_type = extract(n_res, "type", character(1L)),
     n_failed = extract(n_res, "n_failed", integer(1L))
-  ))
+  )
 
-  df <- as.data.frame(out, stringsAsFactors = FALSE)
+  df <- as.data.frame(c(g$out, pts, added), stringsAsFactors = FALSE)
 
-  structure(df, class = c("slope_sample_size_grid_boot", "data.frame"),
-           R = R, type = type, level = level, se = setup$se,
-           n_refit_failed = n_refit_failed,
-           straddle = mean(sign(good_slopes) != sign(params$slope)),
-           slope_observed = params$slope,
-           slope_mean = mean(good_slopes), slope_sd = stats::sd(good_slopes),
-           slope_ci = slope_int$ci, slope_type = slope_int$type,
-           slope_replicates = good_slopes,
-           named = g$named,
-           row_labels = vapply(seq_len(g$n_cells), function(k) grid_boot_row_label(g$labels_at(k)),
-                               character(1L)))
+  # `added_cols` rather than a constant listing these names a second time: the
+  # printed cells frame is defined by subtracting them from the table, so a
+  # column added above and forgotten in a hand-written list would leak straight
+  # into that frame. Carried as an attribute, and so stripped by `[` along with
+  # the rest of the grid-wide summary.
+  do.call(structure,
+          c(list(df, class = c("slope_sample_size_grid_boot", "data.frame"),
+                 R = R, type = type, level = level, se = setup$se,
+                 n_refit_failed = n_refit_failed,
+                 added_cols = names(added),
+                 named = g$named),
+            slope_replicate_summary(params$slope, good_slopes, slope_int)))
 }
 
 #' Subsetting drops the grid-wide summary, not just the class
 #'
 #' Every attribute [slope_sample_size_grid_boot()] adds -- `R`, the slope
-#' block, `row_labels` and the rest -- describes the *whole table*: `R`
-#' replicates were drawn once for every cell, and `row_labels` names all
-#' `nrow(x)` of them. A `[` subset can change which cells are present, or how
-#' many, without changing any of that -- and base `[.data.frame` does not
-#' reliably strip attributes it does not recognise, so, empirically, those
-#' become stale rather than absent: `row_labels` still named the original
-#' cells after a row subset dropped some of them, longer than the data it
-#' would label. So this method strips them itself, on every subset, along
-#' with the class -- explicitly, rather than relying on incidental
+#' block, `named` and the rest -- describes the *whole table*: `R` replicates
+#' were drawn once for every cell, `slope_replicates` holds the ones that
+#' priced all `nrow(x)` of them, and `named` says which axes vary across the
+#' lot. A `[` subset can change which cells are present, or how many, or
+#' leave only one level of an axis standing, without changing any of that --
+#' and base `[.data.frame` does not reliably strip attributes it does not
+#' recognise, so, empirically, those become stale rather than absent:
+#' `slope_replicates` still summarised the resampling behind cells a row
+#' subset had dropped. So this method strips them itself, on every subset,
+#' along with the class -- explicitly, rather than relying on incidental
 #' attribute-dropping [print.slope_sample_size_grid_boot()] could not safely
 #' assume.
 #'
@@ -390,18 +422,6 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
 # printing
 # ---------------------------------------------------------------------------
 
-#' The ten columns [slope_sample_size_grid_boot()] adds to a plain grid
-#'
-#' Named once, here, so that the printed frame can be defined by *subtraction*
-#' -- whatever `slope_sample_size_grid()` itself produced is everything else --
-#' rather than by a second list of grid columns that would have to be updated
-#' alongside `grid_axes()` and `grid_evaluate()` (grid.R) every time the grid
-#' gains one. It has gained two since this file was written.
-#' @noRd
-grid_boot_added_cols <- c("n_mean", "n_sd", "n_lower", "n_upper",
-                          "tte_mean", "tte_sd", "tte_lower", "tte_upper",
-                          "ci_type", "n_failed")
-
 #' One statistic's interval as a single printed column
 #'
 #' `lower`/`upper` joined by `boot_interval_col()` (bootstrap.R) into the
@@ -412,16 +432,50 @@ grid_boot_added_cols <- c("n_mean", "n_sd", "n_lower", "n_upper",
 #'   no interval to show. Not `NA`: the note below the table names `"--"`, and
 #'   a reader should find in the table the thing the note pointed at.
 #' * `" *"` where the interval that could be built is not the one asked for.
-#'   `used` is the per-cell `ci_type`; `asked` the grid-wide `type`.
+#'   `used` is the per-cell `ci_type` -- `n`'s or `tte`'s, since either can fall
+#'   back without the other; `asked` the grid-wide `type`.
 #'
+#' Both required. They were optional while only the `n` column carried the
+#' marker, and a `tte` column that forgot them silently claimed a method it had
+#' not used -- so there is no longer a caller that should be allowed to omit them.
 #' @noRd
-grid_boot_ci_col <- function(lower, upper, used = NULL, asked = NULL) {
+grid_boot_ci_col <- function(lower, upper, used, asked) {
   out <- boot_interval_col(lower, upper)
-  if (!is.null(used)) {
-    mixed <- !is.na(used) & used != asked
-    out[mixed] <- paste0(out[mixed], " *")
-  }
+  mixed <- !is.na(used) & used != asked
+  out[mixed] <- paste0(out[mixed], " *")
   ifelse(is.na(lower), "--", out)
+}
+
+#' The second printed frame: the target treatment effect, one row per
+#' `effectiveness` level
+#'
+#' `tte` depends on `effectiveness` and on nothing else this grid varies --
+#' see [slope_sample_size_grid_boot()]'s `@return`, and grid_boot_computes(),
+#' which computes one of them per level for exactly that reason. So this
+#' frame is keyed by `effectiveness` alone: keying it by the `design` and
+#' `dropout` columns the first frame leads with would print every interval
+#' once per design, which is the repetition the frame is gated on
+#' `effectiveness` varying to avoid in the first place. A grid over two
+#' designs, two dropout patterns and two effectiveness levels wants two rows
+#' here, not eight rows holding two distinct intervals.
+#'
+#' Built rather than printed, so [print.slope_sample_size_grid_boot()] can
+#' gate the notes beneath both frames on what they actually show.
+#' @noRd
+grid_boot_tte_frame <- function(x, type) {
+  first <- !duplicated(x$effectiveness)
+  data.frame(
+    effectiveness = x$effectiveness[first],
+    tte = x$tte[first],
+    tte_mean = x$tte_mean[first],
+    tte_sd = x$tte_sd[first],
+    # `used`/`asked` as the first frame passes them: `tte`'s interval has its
+    # own bias correction and its own jackknife column, so it can fall back to
+    # percentile where `n`'s did not, and the `*` has to say so here too or
+    # the header note claims a method this column did not use.
+    tte_ci = grid_boot_ci_col(x$tte_lower[first], x$tte_upper[first],
+                              x$tte_ci_type[first], type),
+    stringsAsFactors = FALSE)
 }
 
 #' @describeIn slope_sample_size_grid_boot Print a bootstrapped sample-size grid.
@@ -454,9 +508,11 @@ grid_boot_ci_col <- function(lower, upper, used = NULL, asked = NULL) {
 #'   both share this help topic and both happen to have a parameter of the
 #'   same name.
 #' @param ... Not used.
-# The grid columns are recovered by dropping `grid_boot_added_cols` rather than
-# by listing them, through this class's own `[` method, which already returns a
-# plain data frame stripped of the grid-wide summary.
+# The grid columns are recovered by dropping the `added_cols` attribute -- which
+# slope_sample_size_grid_boot() fills from the names of the block it actually
+# built -- rather than by listing them here, through this class's own `[`
+# method, which already returns a plain data frame stripped of the grid-wide
+# summary.
 #' @export
 print.slope_sample_size_grid_boot <- function(x, ...) {
   if (is.null(attr(x, "R"))) {
@@ -473,32 +529,35 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
   # `[` on this class strips the class and every grid-wide attribute, so this
   # is already the plain data frame print.data.frame() should be handed --
   # no unclass() here, and no second place that knows which attributes exist.
-  cells <- x[, setdiff(names(x), grid_boot_added_cols), drop = FALSE]
+  cells <- x[, setdiff(names(x), attr(x, "added_cols")), drop = FALSE]
   cells$n_mean <- x$n_mean
   cells$n_sd <- x$n_sd
   cells$n_ci <- grid_boot_ci_col(x$n_lower, x$n_upper, x$ci_type, type)
-
-  cat("<slope_sample_size_grid_boot>\n\n")
-  print.data.frame(cells)
-  cat("\n")
 
   # The target treatment effect does not depend on the design, only on
   # `effectiveness` -- see slope_sample_size_grid_boot()'s @return -- so a
   # second frame for it earns its place only when that axis actually varies;
   # otherwise every row would repeat the same interval.
-  if (isTRUE(named[["effectiveness"]])) {
-    # The axis columns, in the order the first frame shows them, so a row can
-    # be matched between the two by eye. intersect() rather than a literal
-    # trio: `effectiveness` is absent from a grid solved for `target =
-    # "observed"`, though such a grid cannot reach this branch today.
-    keys <- intersect(c("design", "dropout", "effectiveness"), names(x))
-    tte <- x[, c(keys, "tte"), drop = FALSE]
-    tte$tte_mean <- x$tte_mean
-    tte$tte_sd <- x$tte_sd
-    tte$tte_ci <- grid_boot_ci_col(x$tte_lower, x$tte_upper)
+  #
+  # Single-bracket indexing, not `[[`: `named` carries no `effectiveness`
+  # element at all for a grid solved with `target = "observed"`, where it is
+  # not an axis, and `[[` on an absent name errors where `[` returns NA.
+  # Built before anything is printed so that the notes below can be gated on
+  # what the two frames actually show.
+  tte <- if (isTRUE(unname(named["effectiveness"]))) grid_boot_tte_frame(x, type)
+
+  cat("<slope_sample_size_grid_boot>\n\n")
+  print.data.frame(cells)
+  cat("\n")
+  if (!is.null(tte)) {
     print.data.frame(tte)
     cat("\n")
   }
+
+  # Every interval column on the page, so that the two markers' notes below
+  # follow the markers wherever they appear rather than only where `n` put
+  # them. `tte` is NULL when its frame was not shown, and c() drops it.
+  shown_ci <- c(cells$n_ci, tte$tte_ci)
 
   cat(boot_method_note(type, R, level), sep = "\n")
 
@@ -506,16 +565,20 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
     "%d/%d (%.1f%%) bootstrap replicates failed to refit the stage-one model, and were ",
     "discarded from every cell."), n_refit_failed, R, 100 * n_refit_failed / R)), sep = "\n")
 
+  # `x$n_failed` counts every replicate that yielded no `n` for the cell,
+  # refit failures included; the refits are reported on their own above, so
+  # what is left to report here is the difference -- the losses that were the
+  # stage-two solve's own.
   extra_failed <- x$n_failed - n_refit_failed
   if (any(extra_failed > 0L)) {
     cat(boot_note("Note", sprintf(paste0(
       "cells also lost replicates solving for `n` itself, beyond the refits above ",
-      "(%d-%d of %d failed per cell)."), min(x$n_failed), max(x$n_failed), R)), sep = "\n")
+      "(%d-%d of %d failed per cell)."), min(extra_failed), max(extra_failed), R)), sep = "\n")
   }
-  if (any(is.na(x$ci_type))) {
+  if (any(shown_ci == "--", na.rm = TRUE)) {
     cat(boot_note("Note", paste(
-      "cells marked \"--\" had fewer than two surviving replicates for `n`; no interval",
-      "could be built for them.")), sep = "\n")
+      "cells marked \"--\" had fewer than two surviving replicates for that quantity;",
+      "no interval could be built for them.")), sep = "\n")
   }
 
   straddle <- attr(x, "straddle")
@@ -528,7 +591,7 @@ print.slope_sample_size_grid_boot <- function(x, ...) {
     "each replicate of `n` is rounded up to a whole participant per arm before averaging,",
     "so its mean is not a runnable trial size.")), sep = "\n")
 
-  if (any(grepl("*", cells$n_ci, fixed = TRUE))) {
+  if (any(grepl("*", shown_ci, fixed = TRUE), na.rm = TRUE)) {
     cat("  * percentile interval; BCa could not be built there.\n")
   }
 

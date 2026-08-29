@@ -80,11 +80,14 @@ as a single \code{\link[=slope_bootstrap]{slope_bootstrap()}} call does for \cod
 target treatment effect behind that sample size. Constant down the
 \code{design} and \code{dropout} axes -- it does not depend on the design,
 only on \code{effectiveness} -- so it repeats unless \code{effectiveness} is
-itself an axis of the grid.}
-\item{\code{ci_type}}{\code{"bca"} or \code{"percentile"}: the method actually used
-for that cell's \code{n} interval, which can fall back to percentile cell
-by cell even when \code{type = "bca"} was requested. \code{NA} for a cell that
-could not be bootstrapped at all.}
+itself an axis of the grid, and cells sharing an \code{effectiveness}
+share one interval exactly rather than merely agreeing to rounding.}
+\item{\code{ci_type}, \code{tte_ci_type}}{\code{"bca"} or \code{"percentile"}: the method
+actually used for that cell's \code{n} and \code{tte} interval, which can fall
+back to percentile cell by cell -- and, since the two intervals have
+their own bias corrections and their own jackknife columns, one
+without the other -- even when \code{type = "bca"} was requested. \code{NA} for
+an interval that could not be built at all.}
 \item{\code{n_failed}}{How many of the \code{R} replicates failed to yield a
 sample size for that cell -- refits that failed to converge, plus
 any resample whose stage-two solve itself failed -- out of \code{R}.}

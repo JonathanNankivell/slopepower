@@ -342,6 +342,126 @@ widen_to_lattice <- function(ci, statistic) {
   c(2 * floor(ci[[1L]] / 2), 2 * ceiling(ci[[2L]] / 2))
 }
 
+#' The three arguments every bootstrap driver takes, checked once
+#'
+#' [run_bootstrap()] and [slope_sample_size_grid_boot()] are two drivers of one
+#' resampling scheme and validate its arguments identically. Written twice, the
+#' two could accept different things -- a `type` spelling admitted by one and
+#' not the other, say -- while claiming in their shared documentation to take
+#' the same arguments.
+#'
+#' Returns the matched `type` rather than validating in place, since
+#' [match.arg()] is the one of the three that has a value to give back.
+#' @noRd
+check_boot_args <- function(R, type, level, context) {
+  check_whole_number(R, "R", "replicates", context, lower = 1)
+  check_probability(level, "level", context)
+  match.arg(type, c("bca", "percentile"))
+}
+
+#' The interval's tail probabilities
+#'
+#' One spelling, because the exact floating-point value matters: see
+#' [widen_to_lattice()] on how one ulp in `(1 - level) / 2` decides which side
+#' of a `quantile()` step an endpoint falls on. Two drivers computing it in two
+#' places is two things to keep in step with that reasoning.
+#' @noRd
+boot_probs <- function(level) c((1 - level) / 2, 1 - (1 - level) / 2)
+
+#' Seed a bootstrap, and say what the caller must put back
+#'
+#' The seeding policy both drivers follow, in one place: a seeded call reads
+#' the caller's stream, seeds, and hands back what to restore; `seed = NULL`
+#' touches nothing and returns `NULL`, so an unseeded bootstrap draws from and
+#' advances the stream as any other RNG-using function does -- back-to-back
+#' unseeded calls must give different answers.
+#'
+#' The `on.exit()` that consumes the return value stays at the call site rather
+#' than being registered from in here, because it is the *caller's* frame it has
+#' to fire on: a driver can leave by several routes -- a "not enough replicates
+#' succeeded" stop, an error no `tryCatch()` covers, a user interrupt part-way
+#' through several hundred fits -- and all of them must leave the stream as they
+#' found it. Registering it in a parent frame from here would work, but only by
+#' reaching into a frame this function does not own; two readable lines at each
+#' driver are worth more than one clever one here.
+#' Note that `NULL` comes back in two different situations, and the caller must
+#' not confuse them: `seed = NULL`, where there is nothing to put back because
+#' nothing was disturbed, and a seeded call made in a session that had no
+#' `.Random.seed` yet, where `NULL` is precisely what has to be restored --
+#' [restore_seed()] reads it as "remove the variable `set.seed()` just created".
+#' So the `on.exit()` at each call site is gated on `seed`, never on this
+#' return value.
+#' @return The stream to restore; see the note above on its `NULL`.
+#' @noRd
+seed_bootstrap <- function(seed) {
+  if (is.null(seed)) return(NULL)
+  old_seed <- current_seed()
+  set.seed(seed)
+  old_seed
+}
+
+#' One jackknife pass, taken on first use and kept
+#'
+#' Both drivers want the same laziness -- a bootstrap whose bias correction is
+#' degenerate refits nothing, and one that needs several columns pays for the
+#' refits once -- and both append the replicate slope as the *last* accessor so
+#' that it can be read alongside the statistics proper. That convention used to
+#' be re-expressed as a literal index at each read site, where getting it wrong
+#' yields a plausible acceleration rather than an error; here `slope_col()`
+#' knows the position because it is the function that chose it.
+#' @param computes The statistics' accessors, without the slope.
+#' @return `list(col = function(k), slope_col = function())`, both reading the
+#'   one memoised matrix.
+#' @noRd
+lazy_jackknife <- function(frame, subject_index, refitter, computes) {
+  jack <- NULL
+  matrix_of <- function() {
+    if (is.null(jack)) {
+      jack <<- jackknife_values(frame, subject_index, refitter,
+                                c(computes, list(function(p) p$slope)))
+    }
+    jack
+  }
+  list(col = function(k) matrix_of()[, k],
+       slope_col = function() matrix_of()[, length(computes) + 1L])
+}
+
+#' The summary of the refitted slopes every bootstrap result carries
+#'
+#' The slope is what the resampling actually perturbs, and every interval a
+#' bootstrap reports is a function of it, so both drivers carry the same six
+#' fields -- `run_bootstrap()` as list elements, the grid as attributes. Two
+#' hand-maintained field lists is the drift [stage_two_result()] (power.R) was
+#' extracted to remove for the result classes; this is the same extraction for
+#' the slope block.
+#'
+#' `slope_int` is passed in rather than built here: under
+#' `statistic = "slope"` [run_bootstrap()] has already built exactly this
+#' interval as its main one and must reuse it, since a second [boot_interval()]
+#' pass would warn twice about one failure.
+#'
+#' On `straddle`: this is section 2.6's sign-straddling hazard measured on the
+#' replicates actually drawn, rather than the analytic standard error that
+#' stands proxy for it. Measured on the replicate *slopes*, against the fitted
+#' slope -- never on a statistic against its own observed value. What the paper
+#' (p.583) warns about is bootstrap samples yielding "estimates of the mean
+#' slope that are both negative and positive", so that some replicates describe
+#' a trial reducing a rising slope and others one reducing a falling slope.
+#' Comparing a statistic's own sign answers a different question, and for `n`
+#' and `power` it is not a question at all: a sample size is a positive integer
+#' and a power lies in [0, 1], so that comparison was identically 0 and the
+#' check silently never fired.
+#' @noRd
+slope_replicate_summary <- function(observed_slope, good_slopes, slope_int) {
+  list(straddle = mean(sign(good_slopes) != sign(observed_slope)),
+       slope_observed = observed_slope,
+       slope_replicates = good_slopes,
+       slope_mean = mean(good_slopes),
+       slope_sd = stats::sd(good_slopes),
+       slope_ci = slope_int$ci,
+       slope_type = slope_int$type)
+}
+
 #' Resample setup shared by every replicate of a bootstrap
 #'
 #' The section 2.6 standard-error check, the recovered modelling frame, the
@@ -478,22 +598,9 @@ boot_interval <- function(theta, observed, jack_col, type, probs, context, what)
 run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
                           seed, progress) {
   context <- "slope_bootstrap()"
-  type <- match.arg(type, c("bca", "percentile"))
-  check_whole_number(R, "R", "replicates", context, lower = 1)
-  check_probability(level, "level", context)
-  # Seeded calls are reproducible without reseeding the session: the caller's
-  # stream is put back on the way out. `on.exit()` rather than a restore at the
-  # end, because this function can leave by several routes -- the "not enough
-  # replicates succeeded" stop, an error no tryCatch covers, a user interrupt
-  # part-way through several hundred fits -- and all of them must leave the
-  # stream as they found it. `seed = NULL` touches nothing, so an unseeded
-  # bootstrap draws from and advances the stream as any other RNG-using function
-  # does; back-to-back unseeded calls must give different answers.
-  if (!is.null(seed)) {
-    old_seed <- current_seed()
-    on.exit(restore_seed(old_seed), add = TRUE)
-    set.seed(seed)
-  }
+  type <- check_boot_args(R, type, level, context)
+  old_seed <- seed_bootstrap(seed)
+  if (!is.null(seed)) on.exit(restore_seed(old_seed), add = TRUE)
 
   # `observed` is read off the object rather than recomputed. It is the same
   # number either way -- `compute` on the original parameters reproduces the
@@ -532,21 +639,13 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
                     context, n_failed, R), call. = FALSE)
   }
 
-  probs <- c((1 - level) / 2, 1 - (1 - level) / 2)
+  probs <- boot_probs(level)
 
-  # One jackknife pass serves both intervals. It is taken on first use and kept,
-  # so a bootstrap whose bias correction is degenerate still refits nothing, and
-  # one that needs both columns pays for the refits once.
-  jack <- NULL
-  jack_column <- function(k) {
-    if (is.null(jack)) {
-      jack <<- jackknife_values(frame, subject_index, refitter,
-                                list(compute, function(p) p$slope))
-    }
-    jack[, k]
-  }
+  # One jackknife pass serves both intervals; lazy_jackknife() owns both the
+  # memoisation and the convention that the slope accessor is appended last.
+  jack <- lazy_jackknife(frame, subject_index, refitter, list(compute))
 
-  main <- boot_interval(good, observed, function() jack_column(1L), type, probs, context, "")
+  main <- boot_interval(good, observed, function() jack$col(1L), type, probs, context, "")
   # The replicate slopes get an interval of their own, so that the printed table
   # can show what the resampling did to the quantity every other row is derived
   # from -- a sample size two-thirds wider than its point estimate means one
@@ -557,7 +656,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   slope_int <- if (identical(statistic, "slope")) {
     main
   } else {
-    boot_interval(good_slopes, params$slope, function() jack_column(2L), type, probs, context,
+    boot_interval(good_slopes, params$slope, jack$slope_col, type, probs, context,
                  " for the replicate slopes")
   }
 
@@ -573,38 +672,22 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # with the widening this function already did.
   lattice <- identical(statistic, "n")
 
-  # Sign-straddling is what section 2.6's pre-check (above, on the analytic
-  # standard error) is a proxy for; this is the thing itself, measured on the
-  # replicates that were actually drawn, so it holds even if the model's
-  # standard error was a poor guide (or `se` came back NA).
-  #
-  # Measured on the replicate *slopes*, against the fitted slope -- never on
-  # `good` against `observed`. What the paper (p.583) warns about is bootstrap
-  # samples yielding "estimates of the mean slope that are both negative and
-  # positive", so that some replicates describe a trial reducing a rising slope
-  # and others one reducing a falling slope. Comparing the statistic's own sign
-  # answers a different question, and for the two statistics this exists to
-  # report it is not a question at all: a sample size is a positive integer and
-  # a power lies in [0, 1], so `sign(good) != sign(observed)` was identically 0
-  # for them and the check silently never fired. It agreed with this only for
-  # `statistic = "slope"`, where the two are the same comparison.
-  straddle <- mean(sign(good_slopes) != sign(params$slope))
+  # The slope block -- `straddle` included -- is built by the same helper the
+  # bootstrapped grid uses, so the two results describe the resampling in the
+  # same terms. Under `statistic == "slope"` its `slope_mean`/`slope_sd` are
+  # `boot_mean`/`boot_sd` recomputed on the identical vector: `compute` is then
+  # `function(p) p$slope`, the same read as `slopes[b] <- p$slope`, so `good`
+  # and `good_slopes` are one vector under two names and the two means cannot
+  # differ. Recomputed rather than aliased, so the helper owes its caller
+  # nothing about which statistic was asked for.
+  slope_block <- slope_replicate_summary(params$slope, good_slopes, slope_int)
 
-  # As with `good_slopes` above, these are aliased rather than recomputed when
-  # the two are the same computation under `statistic == "slope"`.
-  boot_mean <- mean(good)
-  boot_sd <- stats::sd(good)
-  same_stat <- identical(statistic, "slope")
-
-  structure(list(observed = observed, replicates = good, ci = ci,
-                 type = used_type, statistic = statistic, R = R,
-                 n_failed = n_failed, level = level, se = se,
-                 boot_mean = boot_mean, boot_sd = boot_sd,
-                 straddle = straddle, lattice = lattice,
-                 slope_observed = params$slope, slope_replicates = good_slopes,
-                 slope_mean = if (same_stat) boot_mean else mean(good_slopes),
-                 slope_sd = if (same_stat) boot_sd else stats::sd(good_slopes),
-                 slope_ci = slope_int$ci, slope_type = slope_int$type),
+  structure(c(list(observed = observed, replicates = good, ci = ci,
+                   type = used_type, statistic = statistic, R = R,
+                   n_failed = n_failed, level = level, se = se,
+                   boot_mean = mean(good), boot_sd = stats::sd(good),
+                   straddle = slope_block$straddle, lattice = lattice),
+              slope_block[setdiff(names(slope_block), "straddle")]),
             class = "slope_bootstrap")
 }
 
@@ -796,17 +879,30 @@ slope_bootstrap <- function(x, R = 999, type = c("bca", "percentile"), ...,
 #' which of the object's own inputs is held fixed while doing so, and which
 #' statistics are on offer; everything else -- matching `statistic`, rejecting
 #' `...`, and the call to `run_bootstrap()` -- is identical.
+#' Build one replicate-statistic closure in an environment of its own
+#'
+#' The four things `compute` reads, and nothing else. See the note at its call
+#' site on why an inline `function(p)` would retain the whole stage-two result
+#' -- fitted model included -- no matter what was copied out of it first.
+#' @noRd
+boot_stage_two_compute <- function(fn, slim, fixed, statistic) {
+  function(p) do.call(fn, c(resolve_args(p, slim), fixed))[[statistic]]
+}
+
 #' @noRd
 bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
                                 R, type, statistic, level, seed, progress, dots) {
   statistic <- match_statistic(statistic, choices, advice)
   reject_dots(dots, dots_advice_result(label), "slope_bootstrap()")
   fixed <- stats::setNames(list(x[[fixed_name]]), fixed_name)
-  # `compute` closes over `slim` -- just the four inputs resolve_args() reads --
-  # rather than `x` itself, so it does not keep x$params$fit (the original fit
-  # and its model frame) reachable through every one of several hundred replicates.
+  # `compute` is built by a factory rather than inline, so that its enclosing
+  # environment holds only the four arguments passed to it. Written inline, its
+  # environment would be *this* frame, which holds `x` -- and so x$params$fit,
+  # the original fit and its model frame -- keeping all of it reachable through
+  # the closure for as long as the closure lives, however slim the `slim` copy
+  # is. R closures capture environments, not the variables named in them.
   slim <- x[c("design", "target", "alpha", "effectiveness")]
-  compute <- function(p) do.call(fn, c(resolve_args(p, slim), fixed))[[statistic]]
+  compute <- boot_stage_two_compute(fn, slim, fixed, statistic)
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, type, level,
                seed, progress)
 }
@@ -1025,6 +1121,32 @@ boot_method_note <- function(type, R, level) {
                                  if (identical(type, "bca")) "BCa" else "percentile"))
 }
 
+#' How many replicates refit a slope on the wrong side of zero
+#'
+#' Printed unconditionally by both bootstrap print methods, including the 0/R
+#' case. This is the measured form of the section 2.6 hazard, and a reader
+#' checking whether the interval means anything needs to see that it was
+#' checked -- an absent line is indistinguishable from a version of the package
+#' that never looked. Suppressing it at zero also made the one number worth
+#' reporting visible only when it was already bad news.
+#'
+#' The count is shown beside the percentage because the percentage alone hides
+#' its own precision: "2.5%" off 40 replicates is one replicate, and a reader
+#' deciding whether to worry needs to know it was one. Recovered by rounding
+#' rather than stored, since `straddle` is a count over the replicates kept and
+#' so the product is that count to within floating point.
+#'
+#' One sentence rather than two identical ones, because the two printers report
+#' the same statistic and a copy-edit to one would otherwise leave them
+#' describing it in different voices -- the drift [boot_method_note()] was
+#' extracted to prevent, one note further on.
+#' @noRd
+boot_straddle_note <- function(straddle, n_used) {
+  boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a slope on ",
+                                   "the opposite side of zero from the fitted one."),
+                            round(straddle * n_used), n_used, 100 * straddle))
+}
+
 #' The printed frame: one row per unit the statistic comes in
 #'
 #' A sample size is the one bootstrapped statistic that comes in two units --
@@ -1102,24 +1224,7 @@ print.slope_bootstrap <- function(x, ...) {
     x$n_failed, x$R, 100 * x$n_failed / x$R)),
       sep = "\n")
 
-  # Printed unconditionally, including the 0/R case. This is the measured form
-  # of the section 2.6 hazard, and a reader checking whether the interval means
-  # anything needs to see that it was checked -- an absent line is indis-
-  # tinguishable from a version of the package that never looked. Suppressing it
-  # at zero also made the one number worth reporting visible only when it was
-  # already bad news.
-  #
-  # The count is shown beside the percentage because the percentage alone hides
-  # its own precision: "2.5%" off 40 replicates is one replicate, and a reader
-  # deciding whether to worry needs to know it was one. Recovered by rounding
-  # rather than stored, since `straddle` is a count over the replicates kept and
-  # so the product is that count to within floating point.
-  n_used <- length(x$replicates)
-  cat(boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a slope on ",
-                                       "the opposite side of zero from the fitted one."),
-                                round(x$straddle * n_used), n_used,
-                                100 * x$straddle)),
-      sep = "\n")
+  cat(boot_straddle_note(x$straddle, length(x$replicates)), sep = "\n")
 
   # Where the rounding happens, and what follows from it. "mean 357.855" invites
   # the reading that 357.855 is the size the bootstrap recommends and that a
