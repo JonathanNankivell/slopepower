@@ -795,6 +795,59 @@ side-by-side display back can print it twice, once per basis
 (`print(x); print(x, per_arm = FALSE)`), or read `n`/`n_per_arm` off the
 object directly.
 
+## 26. Printed parameters fall back to scientific notation when three decimal places cannot carry them
+
+**Stata's** `slopepower` prints every slope, variance component and target
+treatment effect with `%9.3f` — three decimal places, always. On the paper's
+three datasets, where SDMT runs from roughly 20 to 80, that is exactly right.
+
+**R** kept the same fixed-decimal form and inherited its one failure. Sample
+size depends on `params` only through the dimensionless ratio
+`slope / sqrt(s*^2)`, so an outcome recorded as a rate around 0.03 is as
+analysable as the same construct recorded in points around 30 — the two price
+out bit-identically. But at that scale the slope is ~1e-4 and all four variance
+components are ~1e-6, so the entire "Data characteristics" block printed as
+
+```
+                 slope of cases = -0.000
+  variance of random intercepts = 0.000
+      variance of random slopes = 0.000
+      covariance of int. and slope = 0.000
+              residual variance = 0.000
+```
+
+which is also, digit for digit, what a genuinely degenerate fit prints — one
+whose random-slope variance has been driven to the boundary. The format does
+not merely lose precision here; it makes a good fit and a broken one
+indistinguishable, and it is the good fit that then looks broken, because the
+sample size printed beside it is in the thousands.
+
+One decade up the scale is worse than `0.000`, not better: a target treatment
+effect of 5.52e-4 rendered as `0.001` is not visibly degenerate at all. It is
+an 81% overstatement wearing three decimal places, and nothing on the page says
+so. So the guard is not "did this round to zero" but "did this survive".
+
+`fmt_line()` renders the fixed form first and falls back to `digits`
+significant figures in scientific notation (`-4.44e-04`, `8.26e-06`,
+`1.67e-03`) only when that rendering is **both** thinner than two significant
+digits **and** inexact. Two conditions rather than a magnitude threshold,
+because the two kinds of small number on these blocks want opposite treatment:
+
+- Significant digits are counted off the rendered string, not derived from
+  `log10(value)`, so the test cannot disagree with `formatC()` about where its
+  own rounding boundary lies.
+- Exactness is what keeps a deliberately small round number in Stata's format.
+  `alpha = 0.001` carries one significant digit and is worth nothing less for
+  it: `0.001` *is* the number, not an approximation to it. An exact zero still
+  prints `0.000` and an infinity still prints `Inf`, for the same reason — they
+  are the values `%9.3f` represents perfectly.
+
+Every value Stata could print a faithful number for still prints in Stata's
+format, so this is compatible rather than merely different. The divergence
+appears only on inputs where Stata's own output would have been unreadable or
+wrong, which is why Stata has no fallback: the paper's examples never reach
+them.
+
 ---
 
 ## Claims checked and rejected

@@ -480,3 +480,50 @@ test_that("whole numbers print in full rather than in scientific notation", {
   expect_true(any(grepl("actual N = 100000", out, fixed = TRUE)))
   expect_false(any(grepl("1e+05", out, fixed = TRUE)))
 })
+
+test_that("a small-scale outcome prints its parameters, not a column of zeros", {
+  # Sample size depends on `params` only through the dimensionless ratio
+  # slope / sqrt(s*^2), so an outcome recorded as a rate around 0.03 prices out
+  # exactly like the same construct recorded in points around 30. Stata's %9.3f
+  # can show neither its slope (~1e-4) nor its variance components (~1e-6): the
+  # whole `slope_params` block printed as 0.000, which is also what a fit with a
+  # variance pinned at the boundary prints, so a good fit read as a degenerate
+  # one. One decade further up was worse still -- a tte of 5.52e-4 printed as
+  # "0.001", an 81% overstatement wearing three decimal places.
+  fmt_line <- slopepower:::fmt_line
+
+  # Stata's form is kept wherever it survives: two significant digits or more.
+  expect_match(fmt_line("slope", -1.6725), "slope = -1\\.673$")
+  expect_match(fmt_line("alpha", 0.05), "alpha = 0\\.050$")
+  expect_match(fmt_line("x", 0.0123), "x = 0\\.012$")
+  # ... or, below that, wherever it is exact. `0.001` is the number, not an
+  # approximation to it, and an exact zero and an infinity likewise.
+  expect_match(fmt_line("alpha", 0.001), "alpha = 0\\.001$")
+  expect_match(fmt_line("cov", 0), "cov = 0\\.000$")
+  expect_match(fmt_line("cov", Inf), "cov = +Inf$")
+  # It is dropped only when it is both thin and inexact.
+  expect_match(fmt_line("tte", 5.52e-04), "tte = 5\\.52e-04$")
+  expect_match(fmt_line("slope", 0.0016725), "slope = 1\\.67e-03$")
+  expect_match(fmt_line("slope", -0.000443506), "slope = -4\\.44e-04$")
+  expect_match(fmt_line("var", 8.255476e-06), "var = 8\\.26e-06$")
+  expect_match(fmt_line("var", 1e-12), "var = 1\\.00e-12$")
+
+  # The digits = 0 branch is upstream of all of it and is unmoved.
+  expect_match(fmt_line("N", 1e5, digits = 0L), "N = 100000$")
+  expect_match(fmt_line("N", 100.5, digits = 1L), "N = 100\\.5$")
+
+  # End to end, on the paper's own data divided by 1000.
+  big <- paper_fit("slpower1")
+  d <- load_paper_data("slpower1")
+  d$sdmt <- d$sdmt / 1000
+  small <- slope_params(sdmt ~ time | id, d)
+
+  design <- c(0, 1, 2, 3)
+  expect_identical(slope_sample_size(small, design, effectiveness = 0.3)$n,
+                   slope_sample_size(big, design, effectiveness = 0.3)$n)
+
+  out <- capture.output(print(small))
+  shown <- grep("slope of|variance|covariance", out, value = TRUE)
+  expect_length(shown, 5L)
+  expect_false(any(grepl("= -?0\\.00", shown)))
+})
