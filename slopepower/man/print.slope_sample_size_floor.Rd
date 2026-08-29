@@ -4,12 +4,17 @@
 \alias{print.slope_sample_size_floor}
 \title{Print a sample-size floor}
 \usage{
-\method{print}{slope_sample_size_floor}(x, ...)
+\method{print}{slope_sample_size_floor}(x, ..., per_arm = NULL)
 }
 \arguments{
 \item{x}{A \code{slope_sample_size_floor} object.}
 
 \item{...}{Ignored.}
+
+\item{per_arm}{Which basis to print \code{N} on: \code{TRUE} for participants per
+arm, \code{FALSE} for the trial total. Defaults to \code{NULL}, meaning "whatever
+\code{slope_sample_size_floor()} was called with" -- read from \code{x}'s
+\code{per_arm} attribute, or per arm if that is absent.}
 }
 \value{
 \code{x}, invisibly.

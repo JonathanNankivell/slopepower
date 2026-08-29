@@ -464,14 +464,28 @@ test_that("print.slope_sample_size() runs for every scenario, including NA field
   expect_true(any(grepl("effectiveness = \\.", capture.output(print(cases[[3]])))))
 })
 
-test_that("print.slope_power() shows the requested N and the achieved power", {
+test_that("print.slope_power() shows the requested N and the achieved power, on either basis", {
   r <- slope_power(ref_params("none"), c(0, 1, 2), n = 451, effectiveness = 0.33)
-  out <- capture.output(print(r))
+  expect_identical(attr(r, "per_arm"), TRUE)
+
+  # Total basis: unchanged from before per_arm existed.
+  out <- capture.output(print(r, per_arm = FALSE))
   expect_true(any(grepl("Parameters for planned study", out)))
   expect_true(any(grepl("specified N = 451", out)))
   expect_true(any(grepl("actual N = 450", out)))
   expect_true(any(grepl("Estimated power", out)))
   expect_false(any(grepl("Estimated sample size", out)))
+  expect_false(any(grepl("per arm", out)))
+
+  # Per-arm basis, the default: both the specified and the actual count move
+  # to it -- cat_count() prints the un-evened half without rounding it away.
+  out_arm <- capture.output(print(r))
+  expect_true(any(grepl("specified N per arm = 225\\.5", out_arm)))
+  expect_true(any(grepl("N per arm = 225$", out_arm)))
+  expect_false(any(grepl("^ *specified N = ", out_arm)))
+  expect_false(any(grepl("^ *actual N = ", out_arm)))
+
+  expect_error(print(r, per_arm = 1), "per_arm")
 })
 
 test_that("the printed schedule renders the dropout at each follow-up visit", {

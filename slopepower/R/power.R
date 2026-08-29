@@ -570,6 +570,12 @@ solve_slope <- function(params, design, effectiveness,
 #'   the equivalent of the Stata command's `usetrt` option and requires
 #'   parameters estimated from a previous trial.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
+#' @param per_arm Which basis `n` is printed on: `TRUE` (the default) for
+#'   participants per arm, `FALSE` for the trial total. Display only --- the
+#'   result carries both `n` and `n_per_arm` regardless; `per_arm` is recorded
+#'   as an attribute (`attr(x, "per_arm")`) and picks which one `print()`
+#'   leads with, and it can still be overridden afterwards with
+#'   `print(x, per_arm = FALSE)`.
 #'
 #' @section The reference slope:
 #'
@@ -673,6 +679,8 @@ NULL
 #'   `effect_size`, `slope_difference`, `reference_slope`, `params` and `design`.
 #'   See [as.data.frame.slope_result()] for a tabular form whose column names are
 #'   stable across designs and across both entry points.
+#'   `per_arm` is recorded as an attribute rather than a list element -- it
+#'   picks which of `n`/`n_per_arm` `print()` leads with, and changes neither.
 #'
 #' @inheritSection stage_two The reference slope
 #' @inheritSection stage_two Dropout
@@ -706,14 +714,15 @@ NULL
 slope_sample_size <- function(params, design,
                               effectiveness = 0.25,
                               target = c("effectiveness", "observed"),
-                              power = 0.8, alpha = 0.05) {
+                              power = 0.8, alpha = 0.05, per_arm = TRUE) {
   context <- "slope_sample_size()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
+  per_arm <- check_per_arm(per_arm, context)
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
                      n = NULL, power = power, context = context)
-  structure(res, class = c("slope_sample_size", "slope_result"))
+  structure(res, class = c("slope_sample_size", "slope_result"), per_arm = per_arm)
 }
 
 # ---------------------------------------------------------------------------
@@ -743,6 +752,9 @@ slope_sample_size <- function(params, design,
 #'   `tte`, `var_tte`, `effect_size`, `slope_difference`, `reference_slope`,
 #'   `params` and `design`. See [as.data.frame.slope_result()] for a tabular form
 #'   whose column names are stable across designs and across both entry points.
+#'   `per_arm` is recorded as an attribute rather than a list element -- it
+#'   picks which basis `print()` reports every count on, and changes none of
+#'   them.
 #'
 #' @inheritSection stage_two The reference slope
 #' @inheritSection stage_two Dropout
@@ -775,8 +787,9 @@ slope_sample_size <- function(params, design,
 slope_power <- function(params, design, n,
                         effectiveness = 0.25,
                         target = c("effectiveness", "observed"),
-                        alpha = 0.05) {
+                        alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power()"
+  per_arm <- check_per_arm(per_arm, context)
   # `is.null(n)` as well as `missing(n)`: solve_slope() picks its branch on
   # is.null(), so an explicit n = NULL -- the shape a programmatic caller gets
   # from do.call() with an unset element -- would otherwise slip past this guard
@@ -799,7 +812,7 @@ slope_power <- function(params, design, n,
   # n_per_arm", and solve_slope() assembles that list two hundred lines away.
   res <- append(res, list(n_requested = as.numeric(n)),
                 after = match("n_per_arm", names(res)))
-  structure(res, class = c("slope_power", "slope_result"))
+  structure(res, class = c("slope_power", "slope_result"), per_arm = per_arm)
 }
 
 # ---------------------------------------------------------------------------
@@ -874,6 +887,10 @@ print_design_block <- function(x) {
 #'
 #' @param x A `slope_sample_size` object.
 #' @param ... Ignored.
+#' @param per_arm Which basis to print `N` on: `TRUE` for participants per
+#'   arm, `FALSE` for the trial total. Defaults to `NULL`, meaning "whatever
+#'   `slope_sample_size()` was called with" -- read from `x`'s `per_arm`
+#'   attribute, or per arm if that is absent.
 #' @return `x`, invisibly.
 #'
 #' @examples
@@ -881,15 +898,19 @@ print_design_block <- function(x) {
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 #'
 #' @export
-print.slope_sample_size <- function(x, ...) {
+print.slope_sample_size <- function(x, ..., per_arm = NULL) {
+  per_arm <- display_basis(x, per_arm, "print.slope_sample_size()")
   print_data_block(x)
   cat("\nParameters for planned study:\n")
   cat_line("alpha", x$alpha)
   cat_line("power", x$power)
   print_design_block(x)
   cat("\n  Estimated sample size:\n")
-  cat_line("N", x$n, digits = 0L)
-  cat_line("N per arm", x$n_per_arm, digits = 0L)
+  if (per_arm) {
+    cat_line("N per arm", x$n_per_arm, digits = 0L)
+  } else {
+    cat_line("N", x$n, digits = 0L)
+  }
   cat("\n")
   invisible(x)
 }
@@ -898,6 +919,13 @@ print.slope_sample_size <- function(x, ...) {
 #'
 #' @param x A `slope_power` object.
 #' @param ... Ignored.
+#' @param per_arm Which basis to print every count on: `TRUE` for participants
+#'   per arm, `FALSE` for the trial total. Defaults to `NULL`, meaning
+#'   "whatever `slope_power()` was called with" -- read from `x`'s `per_arm`
+#'   attribute, or per arm if that is absent. Unlike
+#'   `print.slope_sample_size()`, both the specified and the actual count
+#'   move to the chosen basis, since `specified N` echoes the `n` argument on
+#'   whichever basis is being shown, not the value as typed.
 #' @return `x`, invisibly.
 #'
 #' @examples
@@ -905,13 +933,21 @@ print.slope_sample_size <- function(x, ...) {
 #' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
 #'
 #' @export
-print.slope_power <- function(x, ...) {
+print.slope_power <- function(x, ..., per_arm = NULL) {
+  per_arm <- display_basis(x, per_arm, "print.slope_power()")
   print_data_block(x)
   cat("\nParameters for planned study:\n")
   cat_line("alpha", x$alpha)
-  cat_line("specified N", x$n_requested, digits = 0L)
-  cat_line("actual N", x$n, digits = 0L)
-  cat_line("N per arm", x$n_per_arm, digits = 0L)
+  if (per_arm) {
+    # `n_requested` has not been evened, so its per-arm figure can be a half
+    # participant -- cat_count() (utils.R) prints that decimal rather than
+    # cat_line()'s digits = 0L path silently rounding it away.
+    cat_count("specified N per arm", x$n_requested / 2)
+    cat_line("N per arm", x$n_per_arm, digits = 0L)
+  } else {
+    cat_line("specified N", x$n_requested, digits = 0L)
+    cat_line("actual N", x$n, digits = 0L)
+  }
   print_design_block(x)
   cat("\nEstimated power:\n")
   cat_line("power", x$power)

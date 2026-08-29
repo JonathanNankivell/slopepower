@@ -10,7 +10,8 @@ slope_sample_size(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   power = 0.8,
-  alpha = 0.05
+  alpha = 0.05,
+  per_arm = TRUE
 )
 }
 \arguments{
@@ -31,6 +32,13 @@ parameters estimated from a previous trial.}
 \item{power}{Desired power, in (0, 1). Defaults to 0.8.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
+
+\item{per_arm}{Which basis \code{n} is printed on: \code{TRUE} (the default) for
+participants per arm, \code{FALSE} for the trial total. Display only --- the
+result carries both \code{n} and \code{n_per_arm} regardless; \code{per_arm} is recorded
+as an attribute (\code{attr(x, "per_arm")}) and picks which one \code{print()}
+leads with, and it can still be overridden afterwards with
+\code{print(x, per_arm = FALSE)}.}
 }
 \value{
 An object of class \code{slope_sample_size}, a list with elements \code{n},
@@ -38,6 +46,8 @@ An object of class \code{slope_sample_size}, a list with elements \code{n},
 \code{effect_size}, \code{slope_difference}, \code{reference_slope}, \code{params} and \code{design}.
 See \code{\link[=as.data.frame.slope_result]{as.data.frame.slope_result()}} for a tabular form whose column names are
 stable across designs and across both entry points.
+\code{per_arm} is recorded as an attribute rather than a list element -- it
+picks which of \code{n}/\code{n_per_arm} \code{print()} leads with, and changes neither.
 }
 \description{
 "How many participants do I need?" --- the second stage of the two-stage

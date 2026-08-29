@@ -104,9 +104,10 @@ ss1 <- slope_sample_size(pars1, design1, effectiveness = 0.33)
 ss1
 ```
 
-712 participants, 356 per arm -- the treatment difference `slopepower` is
-powering the trial to detect, 0.552 points/year, is a third of the estimated
-1.672-point decline.
+356 per arm, 712 in total (`print()` shows one basis at a time, per arm by
+default; `print(ss1, per_arm = FALSE)` shows the total) -- the treatment
+difference `slopepower` is powering the trial to detect, 0.552 points/year, is
+a third of the estimated 1.672-point decline.
 
 ### Longer follow-up can *shrink* the sample size
 

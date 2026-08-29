@@ -525,8 +525,12 @@ frame_row <- function(out, statistic) {
 }
 
 # The frame and nothing else: everything between the class header on the first
-# line and the first note.
-frame_block <- function(out) out[seq(2L, min(grep("Bootstrap:", out, fixed = TRUE)) - 1L)]
+# line and the first note. "Counts:" -- which basis a sample size is on --
+# prints ahead of "Bootstrap:" for a lattice statistic, and not at all for any
+# other, so whichever of the two appears first is where the frame ends.
+frame_block <- function(out) {
+  out[seq(2L, min(grep("Counts:|Bootstrap:", out)) - 1L)]
+}
 
 test_that("print.slope_bootstrap() prints a data frame, not a hand-drawn table", {
   expect_output(print(boot_bca), "<slope_bootstrap>")
@@ -565,14 +569,19 @@ test_that("print.slope_bootstrap() names the method, replicate count and level o
   }
 })
 
-test_that("print.slope_bootstrap() tabulates a sample size per arm and in total", {
+test_that("print.slope_bootstrap() shows a sample size on one basis at a time, per arm by default", {
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
   b <- suppressWarnings(slope_bootstrap(ss, R = 6, seed = 5))
-  out <- capture.output(print(b))
+  expect_identical(attr(b, "per_arm"), TRUE)
 
-  tot <- frame_row(out, "n")
-  per <- frame_row(out, "n_per_arm")
+  out_arm <- capture.output(print(b))
+  out_tot <- capture.output(print(b, per_arm = FALSE))
+  expect_false(any(grepl("n_per_arm", out_arm, fixed = TRUE)))
+  expect_false(any(grepl("n_per_arm", out_tot, fixed = TRUE)))
+
+  per <- frame_row(out_arm, "n")
+  tot <- frame_row(out_tot, "n")
   expect_length(tot, 8L)
 
   # The calculated column is the object's own two figures, not a re-derivation.
@@ -593,6 +602,12 @@ test_that("print.slope_bootstrap() tabulates a sample size per arm and in total"
   expect_equal(as.numeric(tot[5L]), b$boot_sd, tolerance = 1e-6)
   expect_equal(2 * as.numeric(per[4L]), b$boot_mean, tolerance = 1e-6)
   expect_equal(2 * as.numeric(per[5L]), b$boot_sd, tolerance = 1e-6)
+
+  # "Counts:" says which basis is on the page, and print(x, per_arm = ...)
+  # overrides the object's own attribute without recomputing anything.
+  expect_true(any(grepl("Counts:.*per arm", out_arm)))
+  expect_true(any(grepl("Counts:.*total", out_tot)))
+  expect_error(print(b, per_arm = "x"), "per_arm")
 })
 
 test_that("print.slope_bootstrap() gives a statistic with no arms a single row", {
@@ -681,6 +696,8 @@ test_that("the printed note describes what boot_mean is actually a mean of", {
   # The printed note is the short form; the full account lives in the help page,
   # so what is pinned here is that the printed one stays two lines and that each
   # of its two claims is the one checked above.
+  # Default print is per arm, so the note's tail names the basis actually
+  # shown -- "arm size" -- not the total the object's own fields carry above.
   out <- capture.output(print(b))
   note <- out[seq(grep("Mean, SD:", out, fixed = TRUE), length(out))]
   expect_length(note, 2L)
@@ -688,7 +705,13 @@ test_that("the printed note describes what boot_mean is actually a mean of", {
   # would be pinning where the wrap falls rather than what the note says.
   expect_true(any(grepl("rounded up to a whole participant per arm",
                         note, fixed = TRUE)))
-  expect_true(any(grepl("the mean is not a runnable trial size", note, fixed = TRUE)))
+  expect_true(any(grepl("the mean is not a runnable arm size", note, fixed = TRUE)))
+
+  # Printed on the total basis instead, the same note names the total.
+  note_tot <- capture.output(print(b, per_arm = FALSE))
+  note_tot <- note_tot[seq(grep("Mean, SD:", note_tot, fixed = TRUE), length(note_tot))]
+  expect_true(any(grepl("the mean is not a runnable trial size", note_tot, fixed = TRUE)))
+
   # Only the sample size rounds, so only it gets the note.
   expect_false(any(grepl("Mean, SD:", capture.output(print(boot_bca)), fixed = TRUE)))
 })

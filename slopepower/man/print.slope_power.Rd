@@ -4,12 +4,20 @@
 \alias{print.slope_power}
 \title{Print a slope power calculation}
 \usage{
-\method{print}{slope_power}(x, ...)
+\method{print}{slope_power}(x, ..., per_arm = NULL)
 }
 \arguments{
 \item{x}{A \code{slope_power} object.}
 
 \item{...}{Ignored.}
+
+\item{per_arm}{Which basis to print every count on: \code{TRUE} for participants
+per arm, \code{FALSE} for the trial total. Defaults to \code{NULL}, meaning
+"whatever \code{slope_power()} was called with" -- read from \code{x}'s \code{per_arm}
+attribute, or per arm if that is absent. Unlike
+\code{print.slope_sample_size()}, both the specified and the actual count
+move to the chosen basis, since \verb{specified N} echoes the \code{n} argument on
+whichever basis is being shown, not the value as typed.}
 }
 \value{
 \code{x}, invisibly.

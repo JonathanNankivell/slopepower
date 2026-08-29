@@ -16,7 +16,8 @@ slope_bootstrap(
   ...,
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
 \method{slope_bootstrap}{slope_sample_size}(
@@ -27,7 +28,8 @@ slope_bootstrap(
   ...,
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
 \method{slope_bootstrap}{slope_power}(
@@ -38,7 +40,8 @@ slope_bootstrap(
   ...,
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
 \method{slope_bootstrap}{slope_params}(
@@ -48,7 +51,8 @@ slope_bootstrap(
   ...,
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
 \method{slope_bootstrap}{default}(
@@ -58,10 +62,11 @@ slope_bootstrap(
   ...,
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
-\method{print}{slope_bootstrap}(x, ...)
+\method{print}{slope_bootstrap}(x, ..., per_arm = NULL)
 }
 \arguments{
 \item{x}{What to bootstrap: a \code{slope_sample_size} object from
@@ -90,6 +95,12 @@ advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
+\item{per_arm}{Which basis to print a bootstrapped \code{n} on: \code{TRUE} for
+participants per arm, \code{FALSE} for the trial total. Defaults to \code{NULL},
+meaning "whatever \code{slope_bootstrap()} was called with" -- read from \code{x}'s
+\code{per_arm} attribute, or per arm if that is absent. Ignored, silently, for
+any statistic other than a sample size.}
+
 \item{statistic}{Which of the object's quantities to bootstrap. Each method
 offers only what its object solved for or derived, and defaults to the
 quantity the object exists to report.}
@@ -102,7 +113,8 @@ of retained replicates whose \emph{refitted slope} has a different sign from the
 fitted slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
 itself, rather than the analytic proxy for it in \code{se}), and \code{lattice}
 (whether \code{statistic} is \code{"n"}, decided once here and read by the print
-method rather than re-tested there).
+method rather than re-tested there). The \code{per_arm} argument is recorded as
+an attribute, not an element, since it changes nothing about these values.
 
 The refitted slopes are summarised alongside, whatever \code{statistic} was
 asked for, in \code{slope_observed} (the fitted slope), \code{slope_replicates},
@@ -210,12 +222,13 @@ accepted.
 \itemize{
 \item \code{print(slope_bootstrap)}: Print a bootstrap result.
 
-Printed as a data frame, by R itself: one row per unit the statistic comes
-in --- two for a sample size, which comes in totals and per-arm figures, one
-for anything else --- and columns for the calculated value, the bootstrap
-mean and SD, and the interval. The method, replicate count, interval level,
-and the failure and sign-straddling counts are reported in the notes
-beneath, which print on every call whether or not anything went wrong.
+Printed as a data frame, by R itself: one row for the statistic, on the
+chosen basis when it is a sample size, and columns for the calculated
+value, the bootstrap mean and SD, and the interval. The method, replicate
+count, interval level, and the failure and sign-straddling counts are
+reported in the notes beneath, which print on every call whether or not
+anything went wrong; for a sample size, a "Counts:" note ahead of them
+says which basis -- per arm or total -- the row is on.
 
 The resampled slope is not shown. It is still on the object, in
 \code{slope_observed} and the five fields beside it (see \sQuote{Value}), and the

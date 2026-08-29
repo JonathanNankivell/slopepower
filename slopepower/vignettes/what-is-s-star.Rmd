@@ -241,8 +241,12 @@ each is a real restriction on what `slopepower` can be used for:
 
 Finally, a notational trap, since it costs people a factor of two. In equation
 (6) of the paper, \(N\) is the number **per arm** — it is the \(N\) of
-\(s_*/\sqrt N\). The command's printed output labels the *total* as `N` and the
-per-arm figure as `N per arm`:
+\(s_*/\sqrt N\). `print()` shows one figure at a time, per arm by default
+(`per_arm = TRUE`), which is exactly this \(N\); `print(x, per_arm = FALSE)`
+shows the trial total instead. The trap survives underneath, on the object
+itself: `ss$n` is always the *total*, and `ss$n_per_arm` the per-arm figure the
+paper's equation means, whichever basis was printed --- code that reads `$n`
+off a result still wants `$n_per_arm` for equation (6):
 
 ```{r n-convention}
 p1 <- slope_params(sdmt ~ visit | id, data = slpower1)

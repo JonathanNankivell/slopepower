@@ -138,6 +138,62 @@ check_whole_number <- function(x, name, noun, context, lower) {
   invisible(as.numeric(x))
 }
 
+#' Validate the `per_arm` display-basis argument
+#'
+#' A single non-`NA` logical, shared by every entry point that accepts
+#' `per_arm` -- the two plain grids, `slope_sample_size_grid_boot()`,
+#' `slope_bootstrap()`, `slope_sample_size()`, `slope_power()` and
+#' `slope_sample_size_floor()` -- so the check cannot read differently at two
+#' of them. `check_scalar()` does not fit: it is written for a finite numeric,
+#' and `TRUE == 1` would make a stray `per_arm = 2` pass silently.
+#' @noRd
+check_per_arm <- function(per_arm, context) {
+  if (!is.logical(per_arm) || length(per_arm) != 1L || is.na(per_arm)) {
+    stop(sprintf("%s: `per_arm` must be a single TRUE or FALSE.", context), call. = FALSE)
+  }
+  per_arm
+}
+
+#' Resolve a print method's display basis
+#'
+#' `per_arm` is display-only (see CONTRACT.md section 4): the object it is
+#' printing keeps every column or field on both bases, and the basis a call
+#' built it with is recorded as a `per_arm` *attribute*, not a field, so it
+#' cannot be mistaken for part of the result. A print method's own `per_arm`
+#' argument defaults to `NULL`, meaning "use what the object recorded", so
+#' that `print(x, per_arm = FALSE)` can override it after the fact without a
+#' second call to the function that built `x`.
+#'
+#' The attribute defaults to `TRUE` when absent rather than erroring, so a
+#' hand-built object -- or one saved by an earlier version of the package,
+#' before this attribute existed -- still prints instead of failing on a
+#' missing attribute the object was never asked to carry.
+#' @noRd
+display_basis <- function(x, per_arm, context) {
+  if (is.null(per_arm)) {
+    per_arm <- attr(x, "per_arm")
+    if (is.null(per_arm)) per_arm <- TRUE
+  }
+  check_per_arm(per_arm, context)
+}
+
+#' Print a labelled count that may not be a whole number
+#'
+#' `cat_line(..., digits = 0L)` only takes its whole-number branch when the
+#' value already equals its own rounding (see `fmt_line()`'s comment on why
+#' that branch exists), so halving an odd total -- `print.slope_power()`'s
+#' `specified N` under `per_arm = TRUE` -- falls through to `formatC(...,
+#' digits = 0)`, which rounds `100.5` to `"100"` and silently drops the half a
+#' participant that is the whole reason to show the total un-evened. This
+#' calls `cat_line()` with `digits = 0L` when the value is whole and `1L`
+#' otherwise, so a per-arm figure that happens to be exact still prints
+#' without a spurious ".0", and one that is not keeps its one decimal place.
+#' @noRd
+cat_count <- function(label, value, width = 39L) {
+  digits <- if (is.na(value) || value == round(value)) 0L else 1L
+  cat_line(label, value, width = width, digits = digits)
+}
+
 #' The two-sided critical value, computed exactly as the Stata original does
 #'
 #' `qnorm(1 - alpha / 2)` rather than the numerically preferable

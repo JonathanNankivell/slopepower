@@ -68,12 +68,25 @@ test_that("a one-cell grid reproduces slope_bootstrap() exactly, at the same see
 })
 
 test_that("a one-cell grid's point estimates match slope_sample_size_grid()", {
+  # The boot grid's own data frame always carries both bases unreduced
+  # (CONTRACT.md section 4.4), while slope_sample_size_grid() itself returns
+  # one basis at a time, under one name ("n"/"visits") for either -- so the
+  # equivalence is checked once per basis for the two columns that differ,
+  # and once, basis-independent, for the rest.
   pars <- small_fit()
-  plain <- slope_sample_size_grid(pars, visits = c(0, 1, 2, 3), effectiveness = 0.33)
+  plain_arm   <- slope_sample_size_grid(pars, visits = c(0, 1, 2, 3), effectiveness = 0.33)
+  plain_total <- slope_sample_size_grid(pars, visits = c(0, 1, 2, 3), effectiveness = 0.33,
+                                        per_arm = FALSE)
   boot <- suppressWarnings(slope_sample_size_grid_boot(
     pars, visits = c(0, 1, 2, 3), effectiveness = 0.33, R = 5, seed = 1))
 
-  for (nm in names(plain)) expect_equal(boot[[nm]], plain[[nm]], info = nm)
+  expect_equal(boot$n, plain_total$n)
+  expect_equal(boot$n_per_arm, plain_arm$n)
+  expect_equal(boot$visits_total, plain_total$visits)
+  expect_equal(boot$visits_per_arm, plain_arm$visits)
+
+  shared <- setdiff(names(plain_total), c("n", "visits"))
+  for (nm in shared) expect_equal(boot[[nm]], plain_total[[nm]], info = nm)
 })
 
 # --- shared replicates -------------------------------------------------------
@@ -187,34 +200,43 @@ test_that("too few refits succeeding aborts the whole grid, as it does for slope
 # --- printing ------------------------------------------------------------------
 
 # The frames and nothing else: everything between the class header on the first
-# line and the first note.
-frame_block <- function(out) out[seq(2L, min(grep("Bootstrap:", out, fixed = TRUE)) - 1L)]
+# line and the first note. "Counts:" -- which basis n/visits are on -- is now
+# the first note printed, ahead of "Bootstrap:", so it is what this cuts at.
+frame_block <- function(out) out[seq(2L, min(grep("Counts:", out, fixed = TRUE)) - 1L)]
 
-test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plus three", {
+test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plus three, per arm by default", {
   pars <- small_fit()
   out <- suppressWarnings(slope_sample_size_grid_boot(
     pars, power = 0.8, effectiveness = 0.33, R = 5, seed = 6,
     visits  = list(a = c(0, 1, 2, 3), b = c(0, 1, 2)),
     dropout = list(none = NULL, `5pc` = dropout_rate(0.05))))
+  expect_identical(attr(out, "per_arm"), TRUE)
 
   lines <- capture.output(print(out))
   expect_true(any(grepl("<slope_sample_size_grid_boot>", lines, fixed = TRUE)))
 
   # Nothing left of the pipe table: this prints as the plain grid does, with
-  # three columns added. R wraps a wide frame into blocks, each block headed by
-  # its own column names and followed by rows that begin with a row number, so
-  # the printed column set is read off the lines that are not rows.
+  # three columns added -- reduced, like the plain grid itself, to one basis
+  # (basis_columns(), grid.R). R wraps a wide frame into blocks, each block
+  # headed by its own column names and followed by rows that begin with a row
+  # number, so the printed column set is read off the lines that are not rows.
   expect_false(any(startsWith(lines, "  |")))
   headers <- frame_block(lines)[!grepl("^[0-9]", frame_block(lines))]
   printed <- Filter(nzchar, unlist(strsplit(trimws(headers), " +")))
   added <- attr(out, "added_cols")
-  expect_equal(printed, c(setdiff(names(out), added), "n_mean", "n_sd", "n_ci"))
+  raw_cells <- out[, setdiff(names(out), added), drop = FALSE]
+  arm_names <- names(slopepower:::basis_columns(raw_cells, TRUE))
+  expect_equal(printed, c(arm_names, "n_mean", "n_sd", "n_ci"))
+  expect_false("n_per_arm" %in% printed)
+  expect_false("visits_total" %in% printed)
 
-  # The three added columns are the object's own values, not a re-derivation.
-  expect_true(any(grepl(format(out$n_mean[1L], digits = 7), lines, fixed = TRUE)))
+  # The three added columns are the object's own values, halved to the
+  # per-arm basis being shown here -- not a re-derivation.
+  expect_true(any(grepl(format(out$n_mean[1L] / 2, digits = 7), lines, fixed = TRUE)))
 
-  # The method, replicate count and level, which used to ride in the span
-  # header, lead the notes instead.
+  # "Counts:" states the basis, ahead of the bootstrap method note that used
+  # to ride in the span header of the old hand-drawn table.
+  expect_true(any(grepl("Counts:.*per arm", lines)))
   expect_true(any(grepl("Bootstrap:   R = 5 replicates; 95% BCa intervals.",
                         lines, fixed = TRUE)))
 
@@ -222,6 +244,47 @@ test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plu
   # notes, per the convention set for slope_bootstrap()'s own print method.
   expect_true(any(grepl("bootstrap replicates failed to refit", lines)))
   expect_true(any(grepl("of replicates refit a slope on the opposite side", lines)))
+})
+
+test_that("print.slope_sample_size_grid_boot() shows the trial total under per_arm = FALSE, exactly double the per-arm print", {
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, power = 0.8, effectiveness = 0.33, R = 5, seed = 6,
+    visits  = list(a = c(0, 1, 2, 3), b = c(0, 1, 2)),
+    dropout = list(none = NULL, `5pc` = dropout_rate(0.05))))
+
+  lines <- capture.output(print(out, per_arm = FALSE))
+  headers <- frame_block(lines)[!grepl("^[0-9]", frame_block(lines))]
+  printed <- Filter(nzchar, unlist(strsplit(trimws(headers), " +")))
+  added <- attr(out, "added_cols")
+  raw_cells <- out[, setdiff(names(out), added), drop = FALSE]
+  total_names <- names(slopepower:::basis_columns(raw_cells, FALSE))
+  expect_equal(printed, c(total_names, "n_mean", "n_sd", "n_ci"))
+  expect_true(any(grepl("Counts:.*total", lines)))
+
+  # The object itself is untouched by which basis was printed, and the two
+  # bases are exact halves of one another -- endpoint for endpoint, not only
+  # in the point estimate.
+  expect_identical(attr(out, "per_arm"), TRUE)
+  expect_equal(out$n, 2L * out$n_per_arm)
+  expect_equal(out$visits_total, 2L * out$visits_per_arm)
+  expect_equal(out$n_mean, 2L * (out$n_mean / 2L))
+})
+
+test_that("print(x, per_arm = ...) overrides the basis a grid was built with", {
+  pars <- small_fit()
+  out <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, visits = c(0, 1, 2, 3), effectiveness = 0.33, R = 5, seed = 6,
+    per_arm = FALSE))
+  expect_identical(attr(out, "per_arm"), FALSE)
+
+  default_lines  <- capture.output(print(out))
+  override_lines <- capture.output(print(out, per_arm = TRUE))
+  expect_true(any(grepl("Counts:.*total", default_lines)))
+  expect_true(any(grepl("Counts:.*per arm", override_lines)))
+  expect_false(identical(default_lines, override_lines))
+
+  expect_error(print(out, per_arm = NA), "per_arm")
 })
 
 test_that("print.slope_sample_size_grid_boot() no longer reports the resampled slope", {
@@ -403,6 +466,7 @@ test_that("subsetting a bootstrapped grid drops the class and the grid-wide summ
   expect_null(attr(row_sub, "R"))
   expect_null(attr(row_sub, "slope_replicates"))
   expect_null(attr(row_sub, "named"))
+  expect_null(attr(row_sub, "per_arm"))
   expect_equal(row_sub$n, out$n[1L])
 
   col_sub <- out[, c("design", "n")]

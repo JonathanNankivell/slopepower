@@ -15,10 +15,11 @@ slope_sample_size_floor(x, ...)
   target = c("effectiveness", "observed"),
   power = 0.8,
   alpha = 0.05,
+  per_arm = TRUE,
   ...
 )
 
-\method{slope_sample_size_floor}{slope_result}(x, ...)
+\method{slope_sample_size_floor}{slope_result}(x, per_arm = TRUE, ...)
 
 \method{slope_sample_size_floor}{default}(x, ...)
 }
@@ -39,6 +40,13 @@ expected to remove, in (0, 1]. Must not be supplied when
 \item{power}{Desired power, in (0, 1). Defaults to 0.8.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
+
+\item{per_arm}{Which basis to print \code{N} on: \code{TRUE} (the default) for
+participants per arm, \code{FALSE} for the trial total. Display only, as in
+\code{\link[=slope_sample_size]{slope_sample_size()}}: the result carries both \code{n} and \code{n_per_arm}
+regardless, and \code{per_arm} is recorded as an attribute that \code{print()}
+consults and that can be overridden afterwards with
+\code{print(x, per_arm = FALSE)}.}
 }
 \value{
 An object of class \code{slope_sample_size_floor}, a list with the same
@@ -46,7 +54,8 @@ elements as a \code{\link[=slope_sample_size]{slope_sample_size()}} result \stro
 there is none: \code{n}, \code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness},
 \code{target}, \code{tte}, \code{var_tte}, \code{effect_size}, \code{slope_difference},
 \code{reference_slope} and \code{params}. \code{var_tte} is \code{\link[=slope_var_floor]{slope_var_floor()}}, the
-limiting \eqn{s^{*2}}.
+limiting \eqn{s^{*2}}. \code{per_arm} is recorded as an attribute rather than
+a list element, as for the other two entry points.
 
 It inherits from \code{slope_result}, so \link[=as.data.frame.slope_result]{as.data.frame()}
 works and the row binds together with rows from the other two entry points.

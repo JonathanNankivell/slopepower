@@ -258,7 +258,8 @@ test_that("both grids enforce the effectiveness/observed guard", {
   # Not supplying it remains valid and reproduces the published N = 318.
   g <- suppressWarnings(
     slope_sample_size_grid(p3, visits = list(a = c(0, 2, 3)),
-                           dropout = list(d = c(0.2, 0.1)), target = "observed"))
+                           dropout = list(d = c(0.2, 0.1)), target = "observed",
+                           per_arm = FALSE))
   expect_equal(g$n[1], 318)
 })
 
@@ -473,7 +474,8 @@ test_that("whole numbers print in full rather than in scientific notation", {
 
   p <- ref_params()
   out <- capture.output(print(slope_power(p, c(0, 1, 2), n = 100000,
-                                          effectiveness = 0.33)))
+                                          effectiveness = 0.33),
+                              per_arm = FALSE))
   expect_true(any(grepl("specified N = 100000", out, fixed = TRUE)))
   expect_true(any(grepl("actual N = 100000", out, fixed = TRUE)))
   expect_false(any(grepl("1e+05", out, fixed = TRUE)))

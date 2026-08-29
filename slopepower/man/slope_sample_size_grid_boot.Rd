@@ -17,10 +17,11 @@ slope_sample_size_grid_boot(
   type = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE
+  progress = FALSE,
+  per_arm = TRUE
 )
 
-\method{print}{slope_sample_size_grid_boot}(x, ...)
+\method{print}{slope_sample_size_grid_boot}(x, ..., per_arm = NULL)
 }
 \arguments{
 \item{params}{A \code{slope_params} object.}
@@ -59,6 +60,13 @@ advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
+\item{per_arm}{Which basis to print the table's counts on: \code{TRUE} for
+participants per arm, \code{FALSE} for the trial total. Defaults to \code{NULL},
+meaning "whatever the call that built \code{x} requested" -- read from its
+\code{per_arm} attribute, or per arm if that is absent (an object built before
+this argument existed). Passing it explicitly prints the other basis of
+the same object without rebuilding it.}
+
 \item{x}{The \code{slope_sample_size_grid_boot} object to print. Written out
 explicitly, unlike \code{print.slope_bootstrap()}'s own \code{x} -- this topic's
 \verb{@inheritParams slope_bootstrap} would otherwise leak \emph{that} generic's
@@ -96,7 +104,8 @@ any resample whose stage-two solve itself failed -- out of \code{R}.}
 The table also carries, as attributes rather than columns because they
 are shared by every cell: \code{R}, \code{type} (as requested), \code{level}, \code{se},
 \code{n_refit_failed} (replicates whose stage-one refit failed, before any
-per-cell solve is attempted), \code{straddle}, and \code{slope_observed},
+per-cell solve is attempted), \code{straddle}, \code{per_arm} (as requested, or
+overridden at print time), and \code{slope_observed},
 \code{slope_mean}, \code{slope_sd}, \code{slope_ci}, \code{slope_type}, \code{slope_replicates} --
 the same summary of the refitted slopes a single \code{\link[=slope_bootstrap]{slope_bootstrap()}}
 result carries, since the slope is what the resampling actually
@@ -154,6 +163,13 @@ is the only axis it depends on. Everything shared by every cell --- the
 method, the replicate count, the interval level, and the failure and
 sign-straddling counts --- is reported in the notes beneath, which print on
 every call whether or not anything went wrong.
+
+\code{n}, \code{visits}, \code{n_mean}, \code{n_sd} and \code{n_ci} are shown on one basis --
+participants per arm by default -- rather than as the \code{n}/\code{n_per_arm} and
+\code{visits_total}/\code{visits_per_arm} pairs the underlying table carries; a
+"Counts:" note above the other notes says which basis is on the page. This
+is display only: the object itself is unaffected, and \code{print(x, per_arm = !attr(x, "per_arm"))} shows the other basis of the same table without
+rebuilding it.
 
 The resampled slope is not shown. It is still on the object, in the
 \code{slope_observed} attribute and the five beside it, and the straddle note
