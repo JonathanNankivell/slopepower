@@ -431,38 +431,12 @@ cat_line <- function(label, value, width = 39L, digits = 3L) {
 
 #' Format a labelled value the way the Stata command does, for print methods
 #'
-#' The fixed-decimal rendering is a transcription of Stata's `%9.3f`, and is
-#' kept for every value it can actually represent. It cannot represent an
-#' outcome measured on a small scale. Sample size depends on `params` only
-#' through the dimensionless ratio `slope / sqrt(s*^2)`, so an outcome recorded
-#' as a rate around 0.03 is as analysable as the same construct recorded in
-#' points around 30 -- the two price out bit-identically -- but at that scale
-#' the slope is ~1e-4 and all four variance components are ~1e-6, and the whole
-#' `slope_params` block prints as a column of `0.000`. That is not merely a
-#' loss of precision: it is digit for digit what a *degenerate* fit prints, one
-#' whose random-slope variance has been driven to the boundary, so a good fit
-#' and a broken one become indistinguishable -- and it is the good fit that
-#' then looks broken, because the sample size beside it is in the thousands.
-#'
-#' One place further down the same scale is worse than `0.000` rather than
-#' better: a target treatment effect of 5.52e-4 rendered as `0.001` is not
-#' visibly degenerate at all, it is an 81% overstatement wearing three decimal
-#' places. So the guard is not "did this round to zero" but "did this survive":
-#'
-#'   * how many significant digits the fixed rendering still carries, counted
-#'     off the rendered string rather than derived from `log10(value)`, so it
-#'     cannot disagree with `formatC()` about where its own rounding boundary
-#'     lies; and
-#'   * whether the rendering is *exact*, which is what keeps a deliberately
-#'     small round number in Stata's format. `alpha = 0.001` carries one
-#'     significant digit and is worth nothing less for it, because `0.001` is
-#'     the number, not an approximation to it. An exact zero prints as `0.000`
-#'     for the same reason, and `Inf` as `Inf`.
-#'
-#' Fewer than two significant digits *and* inexact is the only combination that
-#' falls back, to `digits` significant figures in scientific notation. Every
-#' value Stata could print a faithful number for still prints in Stata's
-#' format; see DIVERGENCES.md section 26.
+#' The fixed-decimal rendering is a transcription of Stata's `%9.3f`. It is
+#' kept whenever it still represents the value to within 5%, and replaced by
+#' `digits` significant figures in scientific notation when it does not, so
+#' that an outcome measured on a small scale prints its parameters rather than
+#' a column of `0.000` indistinguishable from a degenerate fit. The reasoning,
+#' and the worked examples behind the 5%, are in DIVERGENCES.md section 26.
 #' @noRd
 fmt_line <- function(label, value, width = 39L, digits = 3L) {
   val <- if (is.character(value)) {
@@ -488,18 +462,25 @@ fmt_line <- function(label, value, width = 39L, digits = 3L) {
   sprintf("%s = %s", formatC(label, width = width), val)
 }
 
-#' Has a fixed-decimal rendering rounded a value down to nothing worth reading?
+#' Has a fixed-decimal rendering lost too much of a value to be worth reading?
 #'
 #' Split out of [fmt_line()] because it is the whole of the judgement and none
 #' of the plumbing, and because it is the part worth testing directly.
 #'
-#' The significant-digit count strips everything that is not a digit and then
-#' the leading zeros, so `"0.012"` is two, `"-0.002"` is one and `"0.000"` is
-#' none. `"Inf"` is likewise none, but round-trips exactly, and exactness is
-#' checked second precisely so that values the fixed form represents perfectly
-#' -- `Inf`, `0`, `0.001` -- keep it however few digits they show.
+#' The test is the relative error of the rendering, so it is continuous in
+#' `value`: nothing depends on which arithmetic produced the number, and two
+#' values of the same magnitude are always rendered the same way. A rendering
+#' that round-trips exactly has zero error and is always kept, which is what
+#' holds `alpha = 0.001` in Stata's format -- `0.001` *is* the number, not an
+#' approximation to it. Zero and the infinities have no relative error to
+#' measure and are represented perfectly, so they short-circuit to the fixed
+#' form and print as `0.000` and `Inf`.
 #' @noRd
-fixed_is_thin <- function(fixed, value) {
-  sig <- nchar(sub("^0+", "", gsub("[^0-9]", "", fixed)))
-  sig < 2L && !identical(suppressWarnings(as.numeric(fixed)), value)
+fixed_is_thin <- function(fixed, value, tol = 0.05) {
+  value <- as.vector(value)
+  if (!is.finite(value) || value == 0) {
+    return(FALSE)
+  }
+  round_trip <- suppressWarnings(as.numeric(fixed))
+  !is.finite(round_trip) || abs(round_trip - value) > tol * abs(value)
 }
