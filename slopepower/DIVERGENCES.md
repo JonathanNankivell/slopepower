@@ -805,7 +805,8 @@ three datasets, where SDMT runs from roughly 20 to 80, that is exactly right.
 size depends on `params` only through the dimensionless ratio
 `slope / sqrt(s*^2)`, so an outcome recorded as a rate around 0.03 is as
 analysable as the same construct recorded in points around 30 — the two price
-out bit-identically. But at that scale the slope is ~1e-4 and all four variance
+out to the same sample size, agreeing to within floating-point rounding. But at
+that scale the slope is ~1e-4 and all four variance
 components are ~1e-6, so the entire "Data characteristics" block printed as
 
 ```
@@ -829,18 +830,31 @@ so. So the guard is not "did this round to zero" but "did this survive".
 
 `fmt_line()` renders the fixed form first and falls back to `digits`
 significant figures in scientific notation (`-4.44e-04`, `8.26e-06`,
-`1.67e-03`) only when that rendering is **both** thinner than two significant
-digits **and** inexact. Two conditions rather than a magnitude threshold,
-because the two kinds of small number on these blocks want opposite treatment:
+`1.67e-03`) when that rendering costs more than 5% of the value. The test is
+the relative error of the rendering itself, for three reasons:
 
-- Significant digits are counted off the rendered string, not derived from
-  `log10(value)`, so the test cannot disagree with `formatC()` about where its
-  own rounding boundary lies.
-- Exactness is what keeps a deliberately small round number in Stata's format.
-  `alpha = 0.001` carries one significant digit and is worth nothing less for
-  it: `0.001` *is* the number, not an approximation to it. An exact zero still
-  prints `0.000` and an infinity still prints `Inf`, for the same reason — they
-  are the values `%9.3f` represents perfectly.
+- It is a property of the number, not of the arithmetic that produced it. An
+  earlier version asked whether the fixed form round-tripped *exactly*, which
+  made the notation depend on floating-point noise: `effectiveness = 0.005`
+  came off the call unrounded and printed `0.005`, while the target treatment
+  difference computed from it printed `8.36e-03` on the very next line, two
+  notations for one magnitude within one block.
+- It is continuous, so neighbouring values cannot land on opposite sides for
+  reasons a reader cannot see. Counting significant digits off the rendered
+  string could not be continuous, because rounding carries a trailing zero into
+  `0.010` that reads as a second digit: `0.0096` was kept at 4% error while
+  `0.0095` was rejected, and `0.001` at 81% error was rejected while `0.010` at
+  4% was kept.
+- It still keeps a deliberately small round number in Stata's format, which was
+  the point of the exactness test. `alpha = 0.001` renders with no error at all
+  and is kept, because `0.001` *is* the number rather than an approximation to
+  it. Zero and the infinities have no relative error to measure, and `%9.3f`
+  represents them perfectly, so they short-circuit and still print `0.000` and
+  `Inf`.
+
+At three decimals the 5% gate bites below about 0.01, where half a thousandth
+of rounding is the whole of the tolerance. Nothing on the paper's three
+datasets comes near it.
 
 Every value Stata could print a faithful number for still prints in Stata's
 format, so this is compatible rather than merely different. The divergence

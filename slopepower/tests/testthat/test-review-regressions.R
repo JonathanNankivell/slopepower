@@ -482,31 +482,43 @@ test_that("whole numbers print in full rather than in scientific notation", {
 })
 
 test_that("a small-scale outcome prints its parameters, not a column of zeros", {
-  # Sample size depends on `params` only through the dimensionless ratio
-  # slope / sqrt(s*^2), so an outcome recorded as a rate around 0.03 prices out
-  # exactly like the same construct recorded in points around 30. Stata's %9.3f
-  # can show neither its slope (~1e-4) nor its variance components (~1e-6): the
-  # whole `slope_params` block printed as 0.000, which is also what a fit with a
-  # variance pinned at the boundary prints, so a good fit read as a degenerate
-  # one. One decade further up was worse still -- a tte of 5.52e-4 printed as
-  # "0.001", an 81% overstatement wearing three decimal places.
+  # Stata's %9.3f cannot show a small-scale outcome's slope (~1e-4) or variance
+  # components (~1e-6), and the block it printed was indistinguishable from a
+  # degenerate fit; see DIVERGENCES.md section 26.
   fmt_line <- slopepower:::fmt_line
 
-  # Stata's form is kept wherever it survives: two significant digits or more.
+  # Stata's form is kept wherever it still carries the value to within 5%.
   expect_match(fmt_line("slope", -1.6725), "slope = -1\\.673$")
   expect_match(fmt_line("alpha", 0.05), "alpha = 0\\.050$")
   expect_match(fmt_line("x", 0.0123), "x = 0\\.012$")
-  # ... or, below that, wherever it is exact. `0.001` is the number, not an
-  # approximation to it, and an exact zero and an infinity likewise.
+  # An exact rendering has no error at all, so it is kept however few digits it
+  # shows: `0.001` is the number, not an approximation to it.
   expect_match(fmt_line("alpha", 0.001), "alpha = 0\\.001$")
+  # Zero and the infinities have no relative error to measure and short-circuit.
   expect_match(fmt_line("cov", 0), "cov = 0\\.000$")
-  expect_match(fmt_line("cov", Inf), "cov = +Inf$")
-  # It is dropped only when it is both thin and inexact.
+  # formatC() pads "Inf" to the width of a signed value, so the kept form is
+  # "cov =  Inf"; \\s+ is deliberate, where an unescaped "+" would have made this
+  # assertion pass on a string it does not describe.
+  expect_match(fmt_line("cov", Inf), "cov =\\s+Inf$")
+  expect_match(fmt_line("cov", -Inf), "cov = -Inf$")
+  # It is dropped once the rendering costs more than 5% of the value.
   expect_match(fmt_line("tte", 5.52e-04), "tte = 5\\.52e-04$")
   expect_match(fmt_line("slope", 0.0016725), "slope = 1\\.67e-03$")
   expect_match(fmt_line("slope", -0.000443506), "slope = -4\\.44e-04$")
   expect_match(fmt_line("var", 8.255476e-06), "var = 8\\.26e-06$")
   expect_match(fmt_line("var", 1e-12), "var = 1\\.00e-12$")
+
+  # The gate is a property of the value, not of the arithmetic that produced it:
+  # an exact input and a computed one of the same size render the same way.
+  expect_identical(fmt_line("alpha", 1 - 0.999), fmt_line("alpha", 0.001))
+  expect_identical(fmt_line("d", -1.673 - -1.668), fmt_line("d", -0.005))
+  # ... and not of attributes: a named scalar renders like a bare one.
+  expect_identical(fmt_line("alpha", c(a = 0.001)), fmt_line("alpha", 0.001))
+  # It is also continuous, so neighbours of one magnitude cannot split across
+  # the two notations the way counting rendered digits made them: 0.0096 was
+  # kept at 4% error only because rounding to "0.010" carried a second digit in.
+  expect_match(fmt_line("x", 0.0094), "x = 0\\.009$")
+  expect_match(fmt_line("x", 0.0096), "x = 0\\.010$")
 
   # The digits = 0 branch is upstream of all of it and is unmoved.
   expect_match(fmt_line("N", 1e5, digits = 0L), "N = 100000$")
@@ -518,6 +530,9 @@ test_that("a small-scale outcome prints its parameters, not a column of zeros", 
   d$sdmt <- d$sdmt / 1000
   small <- slope_params(sdmt ~ time | id, d)
 
+  # The two fits agree on n because the ratio they differ on is dimensionless;
+  # they agree only to within floating-point rounding, which is far finer than
+  # the ceiling() between the ratio and n.
   design <- c(0, 1, 2, 3)
   expect_identical(slope_sample_size(small, design, effectiveness = 0.3)$n,
                    slope_sample_size(big, design, effectiveness = 0.3)$n)
