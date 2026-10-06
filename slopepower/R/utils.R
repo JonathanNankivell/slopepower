@@ -312,9 +312,10 @@ single_term_error <- function(context, rhs, complaint) {
   stop(sprintf(paste0(
     "%s: the right-hand side must be a single time term, but `%s` %s.\n",
     "  This port models the outcome as a linear function of time only, as in\n",
-    "  Nash et al. (2021); there is no covariate adjustment, and the Stata\n",
-    "  original refuses such a formula at parse time. To transform time, wrap\n",
-    "  the arithmetic in I(), e.g. `outcome ~ I(vdate / 365) | subject`.\n",
+    "  Nash et al. (2021), and the Stata original refuses such a formula at\n",
+    "  parse time. To adjust for baseline covariates, pass them separately,\n",
+    "  e.g. `covariates = ~ age + sex`. To transform time, wrap the arithmetic\n",
+    "  in I(), e.g. `outcome ~ I(vdate / 365) | subject`.\n",
     "  Baseline in particular needs no adjustment: it is modelled as a\n",
     "  correlated outcome with a single intercept for both arms (paper\n",
     "  section 2.1), rather than entered as a covariate."),

@@ -243,21 +243,37 @@ fit_quietly <- function(expr) {
 #' grows with the caller's data. `fit_healthy_model()` below has always had this
 #' property by accident of being a helper; these two now have it on purpose.
 #' @noRd
-fit_none_model <- function(dat, ctrl) {
-  nlme::lme(sp_y ~ sp_time, random = ~ sp_time | sp_subject,
-            data = dat, method = "REML", control = ctrl)
+fit_none_model <- function(dat, ctrl, cov_terms = character()) {
+  fixed <- with_covariates(sp_y ~ sp_time, cov_terms)
+  eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
+                        data = dat, method = "REML", control = ctrl)))
 }
 
 #' @rdname fit_none_model
 #' @noRd
-fit_treated_model <- function(dat, ctrl) {
-  nlme::lme(sp_y ~ sp_time + sp_placebo_time,
-            random = ~ sp_time | sp_subject,
-            data = dat, method = "REML", control = ctrl)
+fit_treated_model <- function(dat, ctrl, cov_terms = character()) {
+  fixed <- with_covariates(sp_y ~ sp_time + sp_placebo_time, cov_terms)
+  eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
+                        data = dat, method = "REML", control = ctrl)))
+}
+
+#' Append covariate terms to a fixed-effects formula
+#'
+#' With no covariates the formula is returned untouched, so an unadjusted fit
+#' is exactly the model it always was. The new formula keeps the original's
+#' environment -- the small helper frame -- for the reason given above.
+#' `bquote()` at the call sites inlines the formula itself into `fit$call`
+#' rather than the symbol `fixed`, so the call still reads as the model fitted.
+#' @noRd
+with_covariates <- function(f, cov_terms) {
+  if (!length(cov_terms)) return(f)
+  stats::as.formula(paste(paste(deparse(f), collapse = " "), "+",
+                          paste(cov_terms, collapse = " + ")),
+                    env = environment(f))
 }
 
 #' @noRd
-fit_healthy_model <- function(dat, reduced, ctrl) {
+fit_healthy_model <- function(dat, reduced, ctrl, cov_terms = character()) {
   comparator_block <- if (reduced) {
     nlme::pdIdent(~ sp_control - 1)
   } else {
@@ -266,14 +282,97 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
   rand <- list(sp_subject = nlme::pdBlocked(list(
     nlme::pdSymm(~ sp_case + sp_case_time - 1),
     comparator_block)))
-  fit_quietly(
-    nlme::lme(sp_y ~ sp_case * sp_time,
+  fixed <- with_covariates(sp_y ~ sp_case * sp_time, cov_terms)
+  fit_quietly(eval(bquote(
+    nlme::lme(.(fixed),
               random  = rand,
               weights = nlme::varIdent(form = ~ 1 | sp_grp),
               data    = dat,
               method  = "REML",
               control = ctrl)
-  )
+  )))
+}
+
+# ---- covariates -------------------------------------------------------------
+
+#' Expand a one-sided covariate formula into numeric columns `sp_cov_1`, ...
+#'
+#' Factors are dummy-coded by [stats::model.matrix()] with the usual treatment
+#' contrasts and the intercept column dropped. Missing values are passed through
+#' so that `na.action` removes the same rows from every column at once. The
+#' internal names keep the by-name extraction of the slope terms untouched: no
+#' covariate can collide with `sp_time` or `sp_case`.
+#' @noRd
+covariate_matrix <- function(covariates, data, context) {
+  if (is.null(covariates)) return(NULL)
+  if (!inherits(covariates, "formula") || length(covariates) != 2L) {
+    stop(sprintf("%s: `covariates` must be a one-sided formula, e.g. `~ age + sex`.",
+                 context), call. = FALSE)
+  }
+  if ("." %in% all.vars(covariates)) {
+    stop(sprintf(paste0("%s: `covariates` cannot use `.`; it would pull in every column, ",
+                        "including the outcome, time and identifier. Name the covariates."),
+                 context), call. = FALSE)
+  }
+  tt <- stats::terms(covariates)
+  if (!is.null(attr(tt, "offset"))) {
+    stop(sprintf(paste0("%s: `covariates` cannot contain offset() terms; an offset is ",
+                        "not an adjustment and would be dropped."), context), call. = FALSE)
+  }
+  # The fitted models always have an intercept, so the covariate columns must be
+  # coded against one: `~ 0 + sex` would otherwise give a full set of dummies,
+  # collinear with the model's own intercept.
+  attr(tt, "intercept") <- 1L
+  mf <- tryCatch(stats::model.frame(covariates, data, na.action = stats::na.pass),
+                 error = function(e) {
+                   stop(sprintf("%s: could not evaluate `covariates`: %s",
+                                context, conditionMessage(e)), call. = FALSE)
+                 })
+  if (!ncol(mf)) {
+    stop(sprintf("%s: `covariates` names no variables.", context), call. = FALSE)
+  }
+  old <- options(na.action = "na.pass")
+  on.exit(options(old))
+  X <- stats::model.matrix(tt, mf)
+  X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  if (!ncol(X)) {
+    stop(sprintf("%s: `covariates` produced no columns.", context), call. = FALSE)
+  }
+  labels <- colnames(X)
+  colnames(X) <- paste0("sp_cov_", seq_len(ncol(X)))
+  attr(X, "labels") <- stats::setNames(labels, colnames(X))
+  X
+}
+
+#' Check covariates are baseline (constant within participant), then centre
+#'
+#' Each column is centred at its mean over *participants*, not visits, so the
+#' fitted `sp_time` coefficient -- the slope this package reports -- is the
+#' slope of a participant with average covariate values, whatever the visit
+#' pattern. Without centring it would be the slope at covariate = 0 (age zero,
+#' say) whenever covariate-by-time terms are included.
+#'
+#' Time-varying covariates are refused for the same reason group membership is:
+#' every column is read row by row, and a covariate that changes during follow-up
+#' turns the time coefficient into something other than a slope.
+#' @noRd
+centre_covariates <- function(dat, cols, labels, context) {
+  for (cc in cols) {
+    # Compared with a tolerance, not exactly: basis functions such as poly()
+    # are computed through a QR decomposition, so equal inputs can come out
+    # differing in the last bit.
+    tol <- sqrt(.Machine$double.eps) * max(1, abs(dat[[cc]]))
+    varies <- tapply(dat[[cc]], dat$sp_subject, function(v) any(abs(v - v[1L]) > tol))
+    if (any(varies)) {
+      stop(sprintf(paste0(
+        "%s: covariates must be constant within a participant (baseline values), ",
+        "but `%s` changes during follow-up for %d participant(s)."),
+        context, labels[[cc]], sum(varies)), call. = FALSE)
+    }
+    per_subject <- tapply(dat[[cc]], dat$sp_subject, `[`, 1L)
+    dat[[cc]] <- dat[[cc]] - mean(per_subject)
+  }
+  dat
 }
 
 # ---- main entry point -------------------------------------------------------
@@ -310,6 +409,22 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #'   the full structure and errors on failure. Ignored unless `healthy` is given.
 #' @param na.action Applied to the assembled model frame. Defaults to
 #'   [stats::na.omit()].
+#' @param covariates Optional one-sided formula of baseline covariates to adjust
+#'   for, e.g. `~ age + sex`. Anything [stats::model.matrix()] accepts is
+#'   allowed -- factors, interactions (`age * sex`), transformations
+#'   (`log(age)`, `I(age^2)`) and bases (`poly(age, 2)`, `splines::ns(age, 3)`)
+#'   -- as long as every resulting column is constant within a participant.
+#'   Factors and character columns use treatment contrasts, and are always
+#'   coded against an intercept, so `~ 0 + sex` is the same as `~ sex`.
+#'   `offset()` terms and `.` are refused. Every column is centred at its
+#'   mean over participants, so `slope` is the slope of a participant with
+#'   average covariate values. The returned variance components are then the
+#'   *adjusted* ones. See "Covariate adjustment" below.
+#' @param covariate_time If `TRUE` (default), also include each covariate's
+#'   interaction with time, so covariates can explain differences in slope as
+#'   well as in baseline. This is what reduces `sigma2_slope`, and so the
+#'   sample size. `FALSE` adjusts the intercept only. Ignored without
+#'   `covariates`.
 #'
 #' @details
 #' Three scenarios are supported, matching paper section 2.3:
@@ -405,11 +520,9 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #'
 #' Not included, and not obtainable by any argument to this function:
 #'
-#' * **covariate adjustment.** Age, sex, disease duration, centre and the rest
-#'   cannot be entered. `formula` takes a single time term and rejects anything
-#'   more. If the trial you are planning will adjust for prognostic covariates,
-#'   its residual variance will be smaller than the one estimated here and the
-#'   resulting sample size is conservative.
+#' * **time-varying covariates.** Baseline covariates can be entered through
+#'   `covariates` (see "Covariate adjustment"); covariates that change during
+#'   follow-up cannot. `formula` itself still takes a single time term.
 #' * **baseline as a covariate.** Baseline is part of the outcome vector, under
 #'   a common intercept for both arms (paper section 2.1). This is not the
 #'   ANCOVA-style adjustment used by many trial analyses, and the two give
@@ -426,6 +539,27 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #'   a participant.
 #' * **more than two arms, unequal allocation, or cluster-randomised, crossover
 #'   and stepped-wedge designs.** Stage two assumes two equal parallel arms.
+#'
+#' @section Covariate adjustment:
+#'
+#' With `covariates = ~ x1 + x2`, the mean in each scenario above gains
+#' \eqn{\gamma_1 x_{1i} + \gamma_2 x_{2i}}{g1 * x1[i] + g2 * x2[i]} and, when
+#' `covariate_time = TRUE`, \eqn{(\delta_1 x_{1i} + \delta_2 x_{2i}) t}{(d1 *
+#' x1[i] + d2 * x2[i]) * t}, with the covariates centred over participants. The
+#' coefficients are shared by both groups, the random effects and residuals are
+#' unchanged, and the slope and variance components are extracted exactly as
+#' before -- they are now conditional on the covariates.
+#'
+#' Two consequences. First, stage two then assumes the planned trial will be
+#' analysed with the same adjustment: using adjusted variance components to
+#' plan an unadjusted analysis overstates power. Second, because the covariate
+#' coefficients are shared across groups, the `healthy` model no longer
+#' factorises into two independent fits, so `common_variance` can now move the
+#' cases' estimates slightly.
+#'
+#' Baseline covariates are constant within a participant, so they reduce the
+#' between-participant variances (`sigma2_intercept`, and `sigma2_slope` via the
+#' time interactions) rather than `sigma2_residual`.
 #'
 #' @return An object of class `"slope_params"`. Its `$fit` component is the
 #'   fitted `"lme"` object itself, useful for `nlme`'s diagnostic plots (e.g.
@@ -452,6 +586,12 @@ fit_healthy_model <- function(dat, reduced, ctrl) {
 #' df3 <- slpower3[slpower3$id %in% c(1:6, 76:81), ]
 #' slope_params(sdmt ~ visit | id, data = df3, treated = treat)
 #'
+#' # Adjusting for a baseline covariate (simulated here for illustration).
+#' df4 <- slpower1[slpower1$id %in% 1:20, ]
+#' set.seed(1)
+#' df4$age <- ave(df4$id, df4$id, FUN = function(i) round(runif(1, 30, 60)))
+#' slope_params(sdmt ~ visit | id, data = df4, covariates = ~ age)
+#'
 #' @references
 #' Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
 #' sample-size calculations for trials that compare slopes over time:
@@ -466,7 +606,8 @@ slope_params <- function(formula, data,
                          healthy = NULL, treated = NULL,
                          origin = c("subject", "none"),
                          common_variance = NULL,
-                         na.action = stats::na.omit) {
+                         na.action = stats::na.omit,
+                         covariates = NULL, covariate_time = TRUE) {
   context <- "slope_params()"
   cl <- match.call()
   origin <- match.arg(origin)
@@ -532,6 +673,14 @@ slope_params <- function(formula, data,
                     sp_subject = factor(as.character(subject)),
                     stringsAsFactors = FALSE)
   if (!is.null(grp)) dat$sp_case <- grp
+  X <- covariate_matrix(covariates, data, context)
+  if (!is.null(X)) {
+    if (nrow(X) != n) {
+      stop(sprintf("%s: `covariates` gave %d rows but the data have %d.",
+                   context, nrow(X), n), call. = FALSE)
+    }
+    dat <- cbind(dat, X)
+  }
 
   dat <- na.action(dat)
   if (nrow(dat) < 3L) {
@@ -553,6 +702,14 @@ slope_params <- function(formula, data,
       "of %d participant(s) have more than one visit. At least 2 participants with ",
       "repeat visits are needed to identify the slope variance."),
       context, n_repeat, nlevels(dat$sp_subject)), call. = FALSE)
+  }
+
+  cov_terms <- character()
+  if (!is.null(X)) {
+    cov_cols  <- colnames(X)
+    dat       <- centre_covariates(dat, cov_cols, attr(X, "labels"), context)
+    cov_terms <- c(cov_cols,
+                   if (isTRUE(covariate_time)) paste0(cov_cols, ":sp_time"))
   }
 
   # per-subject time origin
@@ -622,14 +779,14 @@ slope_params <- function(formula, data,
   reduced_used <- FALSE
 
   if (comparator == "none") {
-    fit <- fit_none_model(dat, ctrl)
+    fit <- fit_none_model(dat, ctrl, cov_terms)
 
   } else if (comparator == "treated") {
     # Stata: mixed y time placebo#c.time || subject: time, cov(uns)
     # One common intercept (randomisation implies equal baselines), separate
     # slopes. A numeric placebo indicator keeps the coefficient mapping explicit.
     dat$sp_placebo_time <- (1 - dat$sp_case) * dat$sp_time
-    fit <- fit_treated_model(dat, ctrl)
+    fit <- fit_treated_model(dat, ctrl, cov_terms)
 
   } else {
     dat$sp_control      <- 1 - dat$sp_case
@@ -646,7 +803,7 @@ slope_params <- function(formula, data,
     fit <- NULL
     if (!isTRUE(common_variance)) {
       fit <- tryCatch(
-        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl),
+        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl, cov_terms = cov_terms),
         error = function(e) {
           if (isFALSE(common_variance)) {
             stop(sprintf(paste0("%s: the full model did not converge and ",
@@ -664,7 +821,7 @@ slope_params <- function(formula, data,
     }
     if (is.null(fit)) {
       reduced_used <- TRUE
-      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = ctrl),
+      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = ctrl, cov_terms = cov_terms),
                       error = function(e) {
                         stop(sprintf("%s: the mixed model did not converge: %s",
                                      context, conditionMessage(e)), call. = FALSE)

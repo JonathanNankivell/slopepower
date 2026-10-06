@@ -11,7 +11,9 @@ slope_params(
   treated = NULL,
   origin = c("subject", "none"),
   common_variance = NULL,
-  na.action = stats::na.omit
+  na.action = stats::na.omit,
+  covariates = NULL,
+  covariate_time = TRUE
 )
 }
 \arguments{
@@ -45,7 +47,25 @@ intercept only, equivalent to the Stata \code{nocontvar} option); \code{FALSE} f
 the full structure and errors on failure. Ignored unless \code{healthy} is given.}
 
 \item{na.action}{Applied to the assembled model frame. Defaults to
-\code{\link[stats:na.omit]{stats::na.omit()}}.}
+\code{\link[stats:na.fail]{stats::na.omit()}}.}
+
+\item{covariates}{Optional one-sided formula of baseline covariates to adjust
+for, e.g. \code{~ age + sex}. Anything \code{\link[stats:model.matrix]{stats::model.matrix()}} accepts is
+allowed -- factors, interactions (\code{age * sex}), transformations
+(\code{log(age)}, \code{I(age^2)}) and bases (\code{poly(age, 2)}, \code{splines::ns(age, 3)})
+-- as long as every resulting column is constant within a participant.
+Factors and character columns use treatment contrasts, and are always
+coded against an intercept, so \code{~ 0 + sex} is the same as \code{~ sex}.
+\code{offset()} terms and \code{.} are refused. Every column is centred at its
+mean over participants, so \code{slope} is the slope of a participant with
+average covariate values. The returned variance components are then the
+\emph{adjusted} ones. See "Covariate adjustment" below.}
+
+\item{covariate_time}{If \code{TRUE} (default), also include each covariate's
+interaction with time, so covariates can explain differences in slope as
+well as in baseline. This is what reduces \code{sigma2_slope}, and so the
+sample size. \code{FALSE} adjusts the intercept only. Ignored without
+\code{covariates}.}
 }
 \value{
 An object of class \code{"slope_params"}. Its \verb{$fit} component is the
@@ -159,11 +179,9 @@ by their variance components).
 
 Not included, and not obtainable by any argument to this function:
 \itemize{
-\item \strong{covariate adjustment.} Age, sex, disease duration, centre and the rest
-cannot be entered. \code{formula} takes a single time term and rejects anything
-more. If the trial you are planning will adjust for prognostic covariates,
-its residual variance will be smaller than the one estimated here and the
-resulting sample size is conservative.
+\item \strong{time-varying covariates.} Baseline covariates can be entered through
+\code{covariates} (see "Covariate adjustment"); covariates that change during
+follow-up cannot. \code{formula} itself still takes a single time term.
 \item \strong{baseline as a covariate.} Baseline is part of the outcome vector, under
 a common intercept for both arms (paper section 2.1). This is not the
 ANCOVA-style adjustment used by many trial analyses, and the two give
@@ -181,6 +199,29 @@ a participant.
 \item \strong{more than two arms, unequal allocation, or cluster-randomised, crossover
 and stepped-wedge designs.} Stage two assumes two equal parallel arms.
 }
+}
+
+\section{Covariate adjustment}{
+
+
+With \code{covariates = ~ x1 + x2}, the mean in each scenario above gains
+\eqn{\gamma_1 x_{1i} + \gamma_2 x_{2i}}{g1 * x1[i] + g2 * x2[i]} and, when
+\code{covariate_time = TRUE}, \eqn{(\delta_1 x_{1i} + \delta_2 x_{2i}) t}{(d1 *
+x1[i] + d2 * x2[i]) * t}, with the covariates centred over participants. The
+coefficients are shared by both groups, the random effects and residuals are
+unchanged, and the slope and variance components are extracted exactly as
+before -- they are now conditional on the covariates.
+
+Two consequences. First, stage two then assumes the planned trial will be
+analysed with the same adjustment: using adjusted variance components to
+plan an unadjusted analysis overstates power. Second, because the covariate
+coefficients are shared across groups, the \code{healthy} model no longer
+factorises into two independent fits, so \code{common_variance} can now move the
+cases' estimates slightly.
+
+Baseline covariates are constant within a participant, so they reduce the
+between-participant variances (\code{sigma2_intercept}, and \code{sigma2_slope} via the
+time interactions) rather than \code{sigma2_residual}.
 }
 
 \examples{
@@ -201,6 +242,12 @@ slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
 # subjects per arm to converge, so this excerpt keeps six per arm.
 df3 <- slpower3[slpower3$id \%in\% c(1:6, 76:81), ]
 slope_params(sdmt ~ visit | id, data = df3, treated = treat)
+
+# Adjusting for a baseline covariate (simulated here for illustration).
+df4 <- slpower1[slpower1$id \%in\% 1:20, ]
+set.seed(1)
+df4$age <- ave(df4$id, df4$id, FUN = function(i) round(runif(1, 30, 60)))
+slope_params(sdmt ~ visit | id, data = df4, covariates = ~ age)
 
 }
 \references{

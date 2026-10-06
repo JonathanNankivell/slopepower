@@ -34,6 +34,10 @@ boot_frame <- function(params, context) {
     }
     out$group <- as.integer(g$sp_case)
   }
+  # Covariate columns travel under their internal names, already numeric, so
+  # make_refitter() can hand them back to slope_params() unchanged. Each
+  # replicate recentres them on its own participants.
+  for (cc in grep("^sp_cov_[0-9]+$", names(g), value = TRUE)) out[[cc]] <- g[[cc]]
   out
 }
 
@@ -77,6 +81,15 @@ boot_frame <- function(params, context) {
 make_refitter <- function(params) {
   comparator <- params$comparator
   args <- list(formula = y ~ time | subject, data = quote(frame), origin = "none")
+  # Refit with the same adjustment the point estimate used; dropping it would
+  # bootstrap the unadjusted model and report its interval as the adjusted one.
+  b <- names(nlme::fixef(params$fit))
+  cov_cols <- unique(regmatches(b, regexpr("sp_cov_[0-9]+", b)))
+  if (length(cov_cols)) {
+    args$covariates <- stats::as.formula(paste("~", paste(cov_cols, collapse = " + ")),
+                                         env = baseenv())
+    args$covariate_time <- any(grepl("sp_cov_[0-9]+:sp_time|sp_time:sp_cov_[0-9]+", b))
+  }
   cl <- as.call(c(list(quote(slope_params)), args,
                   if (identical(comparator, "healthy")) {
                     # Only under `healthy`: slope_params() warns that
