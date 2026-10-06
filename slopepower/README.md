@@ -21,8 +21,9 @@ Each participant gets a random intercept `a[i]` and a random slope `b[i]`
 (unstructured 2×2 covariance), with independent residuals `e[ij]`. Treatment
 appears only as a difference in slopes, and the two arms share a single
 intercept — baseline is modelled as part of the outcome vector, not entered as
-a covariate. Nothing else is in the mean: no covariates, and no second level of
-clustering above the participant.
+a covariate. Nothing else is in the mean except, optionally, baseline
+covariates and their interactions with time (`covariates = ~ age + sex`), and
+there is no second level of clustering above the participant.
 
 The design matrices are fixed by the method, and they are not what you would
 write by hand in `lme4`. For a previous trial the arms share one intercept and
@@ -39,11 +40,12 @@ Supported:
 - stage-one data from a single untreated cohort, from cases plus healthy controls, or from a previous two-arm RCT;
 - arbitrary, unequally spaced visit times, on a schedule common to all participants;
 - monotone dropout, via the Dawson–Lagakos pattern mixture;
-- parameters taken from the literature instead of fitted (`slope_params_manual()`).
+- parameters taken from the literature instead of fitted (`slope_params_manual()`);
+- adjustment for baseline covariates such as age, sex or stratification factors, with or without their interactions with time (`slope_params(covariates = )`). The planned trial is assumed to be analysed with the same adjustment.
 
 Not supported:
 
-- **covariate adjustment of any kind** — age, sex, disease duration, centre. The stage-one formula takes a single time term and nothing else, and rejects anything more;
+- **time-varying covariates** — only baseline covariates, constant within a participant, can be adjusted for. The stage-one formula still takes a single time term and nothing else;
 - **multi-level / nested clustering** — visits within participants within sites, clinics or families. There is exactly one random-effects level, the participant;
 - **baseline as an ANCOVA covariate** — baseline is a correlated outcome with a common intercept across arms (paper §2.1). If your planned analysis conditions on baseline instead, this is the wrong model;
 - more than two arms, unequal allocation, cluster-randomised, crossover or stepped-wedge designs;

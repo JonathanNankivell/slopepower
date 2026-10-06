@@ -173,7 +173,8 @@ effect, and the \code{healthy} model gives each group its own residual variance,
 which \code{lme4} cannot fit at all. Included, therefore:
 \itemize{
 \item one continuous, approximately Gaussian outcome;
-\item a mean that is linear in time, and nothing else --- no other covariates;
+\item a mean that is linear in time, plus optional baseline covariates (see
+"Covariate adjustment");
 \item exactly one grouping level, the participant, whose random intercept and
 random slope have an unstructured covariance;
 \item independent residuals with a variance that is constant within a group;

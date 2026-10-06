@@ -1,0 +1,216 @@
+---
+title: "Adjusting for stratification factors"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{Adjusting for stratification factors}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 4)
+library(slopepower)
+```
+
+## The situation
+
+You are planning the sample size for a trial from a randomised trial you
+already ran. That trial stratified its randomisation on age group and sex, and
+the new trial will do the same. Its analysis will then adjust for both, as
+analyses of stratified trials should. This vignette shows how to make
+`slope_params()` estimate the variance components that the adjusted analysis
+will actually face, and why stratification makes that the right thing to do.
+
+In short: pass the stratification factors as `covariates`, use the same
+covariates the new trial's analysis model will use, and keep their
+interactions with time.
+
+## A previous trial, stratified on age group and sex
+
+The data below are simulated. There are 240 participants in four strata (age
+under or over 60, by sex), randomised in permuted blocks of four within each
+stratum, and seen at years 0, 1 and 2. Being older and being male both lower
+the baseline SDMT score and speed up its decline. That second effect is the
+one that matters for a trial whose outcome is a slope.
+
+```{r simulate}
+sim_trial <- function(n = 240, visits = c(0, 1, 2)) {
+  age_group <- factor(sample(c("<60", "60+"), n, TRUE), levels = c("<60", "60+"))
+  sex       <- factor(sample(c("F", "M"), n, TRUE))
+  stratum   <- interaction(age_group, sex)
+
+  # Stratified randomisation: permuted blocks of 4 within each stratum
+  treat <- integer(n)
+  for (s in levels(stratum)) {
+    idx <- which(stratum == s)
+    blocks <- replicate(ceiling(length(idx) / 4), sample(rep(0:1, 2)))
+    treat[idx] <- as.vector(blocks)[seq_along(idx)]
+  }
+
+  older <- age_group == "60+"
+  male  <- sex == "M"
+  G  <- matrix(c(80, 4, 4, 1.5), 2, 2)     # random intercept and slope
+  ab <- matrix(rnorm(2 * n), n, 2) %*% chol(G)
+  a  <- 45 - 6 * older - 3 * male + ab[, 1]
+  b  <- -1 - 1.6 * older - 0.6 * male + 0.4 * treat + ab[, 2]
+
+  d <- data.frame(id = rep(seq_len(n), each = length(visits)),
+                  visit = rep(visits, n))
+  d$age_group <- age_group[d$id]
+  d$sex       <- sex[d$id]
+  d$treat     <- treat[d$id]
+  d$sdmt      <- a[d$id] + b[d$id] * d$visit + rnorm(nrow(d), 0, 3)
+  d
+}
+
+set.seed(2026)
+trial <- sim_trial()
+```
+
+Because of the stratification, the arms are balanced to within one participant
+in every stratum:
+
+```{r balance}
+first <- !duplicated(trial$id)
+with(trial[first, ], table(stratum = interaction(age_group, sex), treat))
+```
+
+## Stage one: unadjusted and adjusted
+
+The previous trial had a treated arm, so we use the `treated` model, which
+gives one intercept and a separate slope for each arm. First we fit it without
+covariates, and then adjusted for the two stratification factors:
+
+```{r fit}
+unadj <- slope_params(sdmt ~ visit | id, trial, treated = treat)
+adj   <- slope_params(sdmt ~ visit | id, trial, treated = treat,
+                      covariates = ~ age_group + sex)
+adj
+```
+
+`covariates` takes a one-sided formula of *baseline* variables. A variable
+that changes within a participant is refused. Factors are dummy-coded, and
+every column is centred over participants, so `slope` remains the slope of a
+participant with this trial's average age and sex mix. By default
+(`covariate_time = TRUE`), each covariate also enters interacted with time.
+That interaction is what lets age and sex explain differences in *slope*, and
+not just in baseline level.
+
+The fitted `lme` object shows the full model, with the covariate columns
+under internal names (`sp_cov_1` is the dummy for age group `60+` and
+`sp_cov_2` is the dummy for `M`):
+
+```{r fixef}
+nlme::fixef(adj$fit)
+```
+
+The two `sp_time:sp_cov_*` terms estimate how much faster older and male
+participants decline. The simulation used -1.6 and -0.6 points per year.
+
+To see which part of the adjustment does the work, we also fit a version that
+adjusts the baseline level only:
+
+```{r compare}
+base_only <- slope_params(sdmt ~ visit | id, trial, treated = treat,
+                          covariates = ~ age_group + sex, covariate_time = FALSE)
+
+pick <- function(p) unlist(p[c("slope", "slope_comparator", "sigma2_intercept",
+                               "sigma2_slope", "sigma_cov", "sigma2_residual")])
+round(rbind(unadjusted    = pick(unadj),
+            baseline_only = pick(base_only),
+            adjusted      = pick(adj)), 3)
+```
+
+The table shows three things:
+
+* **The slopes barely move.** The arms were balanced on age group and sex, so
+  the adjustment has almost nothing to correct in the treatment comparison. In
+  a stratified trial, the adjustment changes how *precise* the estimates are,
+  not what they estimate.
+* **`sigma2_slope` falls only with the time interactions.** The variation in
+  slopes that age group and sex explain leaves the random-slope variance and
+  moves into fixed effects. Adjusting the baseline level alone shrinks
+  `sigma2_intercept` but leaves `sigma2_slope` untouched.
+* **`sigma2_residual` does not change.** Baseline covariates are constant
+  within a participant, so they can explain only between-participant
+  variation.
+
+## Stage two: the sample size
+
+The new trial runs for three years with annual visits and aims to slow decline
+by 30%:
+
+```{r design}
+design <- trial_design(c(0, 1, 2, 3))
+
+sizes <- lapply(list(unadjusted = unadj, baseline_only = base_only, adjusted = adj),
+                slope_sample_size, design = design, effectiveness = 0.3)
+data.frame(n_per_arm = vapply(sizes, `[[`, 1, "n_per_arm"),
+           var_tte   = vapply(sizes, `[[`, 1, "var_tte"))
+```
+
+The fully adjusted fit gives the smallest sample size, because the variance of
+the estimated slope is driven by `sigma2_slope` (see
+`vignette("what-is-s-star")`). Adjusting the baseline level alone gains
+nothing, and here it costs a little. The analysis model gives both arms one
+intercept, so the baseline visit carries some information about each
+participant's slope through the intercept–slope correlation. Explaining part
+of the intercept weakens that correlation (from 0.41 to 0.26 here), so less
+information is borrowed.
+
+## Which fit to plan with
+
+Plan with the stage-one model that matches the new trial's analysis model.
+
+* **The covariates must match.** Stage two returns the variance of the
+  treatment effect that the analysis will estimate. Variance components
+  adjusted for age and sex describe an analysis adjusted for age and sex. If
+  the new trial is analysed without the adjustment, these components overstate
+  its power, and the unadjusted fit is the right one.
+* **The time interactions must match too.** The outcome is a slope, so
+  "adjusting for age and sex" helps only if the analysis model includes
+  `age_group:time` and `sex:time` terms. Check the statistical analysis plan.
+  If it adjusts the baseline level only, use `covariate_time = FALSE`, and
+  expect almost no saving.
+* **The coding must match.** `~ age_group + sex` adjusts for the two factors.
+  If the analysis will adjust for the four strata as such, use
+  `~ age_group * sex` instead. In either case, use the same age bands as the
+  randomisation.
+
+Stratification is what makes the adjusted plan safe to rely on. The sample
+size formula has no term for chance imbalance between the arms. In an
+unstratified trial, the adjusted analysis loses a little precision whenever
+the arms happen to differ in age or sex. Stratifying on those same variables
+removes that imbalance by design, so the adjusted variance is the variance
+the trial will actually have. The converse also holds: a stratified trial
+analysed *without* adjusting for its stratification factors has a
+conservative test, and planning with the unadjusted fit then sizes the trial
+for an analysis it should not be running.
+
+## Caveats
+
+* **Case mix.** Age group and sex change the slope here, so the centred
+  `slope` depends on the previous trial's mix of strata. The target effect
+  under `effectiveness` is a proportion of that slope. If the new trial will
+  recruit a noticeably older or more male population, its average control-arm
+  slope, and so its target effect, will differ.
+* **Uncertainty.** `slope_bootstrap()` refits the adjusted model in every
+  replicate, so a bootstrap interval for the adjusted sample size needs no
+  extra arguments:
+  `slope_bootstrap(slope_sample_size(adj, design, effectiveness = 0.3), R = 2000)`.
+* **Small strata.** A factor level that a bootstrap resample leaves out is
+  dropped from that refit rather than making it fail. With very small strata,
+  the adjustment will vary from one replicate to the next.
+
+## Where to go next
+
+* `?slope_params`, section "Covariate adjustment", gives the model in full.
+* `vignette("introduction", package = "slopepower")` tours the three stage-one
+  scenarios.
+* `vignette("what-is-s-star", package = "slopepower")` explains why
+  `sigma2_slope`, rather than `sigma2_intercept`, drives the sample size.

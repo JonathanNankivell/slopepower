@@ -426,8 +426,10 @@ error or warning message.
 ## Where to go next
 
 * `?slope_params` sets out the three models fitted in stage one in full,
-  including what they deliberately do not support -- covariate adjustment,
-  further clustering, non-linear trajectories -- and why.
+  including what they deliberately do not support -- time-varying
+  covariates, further clustering, non-linear trajectories -- and why.
+* `vignette("stratified-covariates", package = "slopepower")` adjusts for
+  baseline covariates, using a previous trial stratified on age and sex.
 * `slope_params_manual()` builds a stage-one object by hand, for planning
   from numbers reported in a paper when no participant-level dataset is
   available to fit.

@@ -271,8 +271,9 @@ parse_slope_formula <- function(formula, context) {
   # `I(vdate / 365)` is one term -- but `time + age` is two, and without this
   # check it would be evaluated as the arithmetic sum and fitted as if it were
   # the time variable, silently returning a meaningless slope. The method of
-  # Nash et al. models the outcome as a linear function of time alone; there is
-  # no covariate adjustment, so extra terms can only be a mistake.
+  # Nash et al. models the outcome as a linear function of time alone, and
+  # covariates enter through `slope_params(covariates = )`, never here, so
+  # extra terms can only be a mistake.
   # Two checks, because they catch different things. `terms()` applies formula
   # semantics while the expression is later *evaluated* with arithmetic
   # semantics, and the two disagree: `time - age` and `offset(age)` each yield a

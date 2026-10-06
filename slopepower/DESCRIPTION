@@ -26,9 +26,9 @@ Description: An R implementation of the Stata 'slopepower' command of Nash,
     the design of a proposed trial. The model is fixed and narrow: one
     continuous outcome, a straight line in time, a random intercept and random
     slope per participant, and a treatment effect that is a difference in
-    slopes. Participants are assumed independent, so there is no adjustment for
-    covariates, no further level of clustering such as site, and no
-    randomisation scheme other than two equal parallel arms.
+    slopes, optionally adjusted for baseline covariates. Participants are
+    assumed independent, so there is no further level of clustering such as
+    site, and no randomisation scheme other than two equal parallel arms.
 License: MIT + file LICENSE
 Copyright: For details of contributions and copyright holders, see the
     'inst/COPYRIGHTS' file.

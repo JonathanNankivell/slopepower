@@ -557,7 +557,8 @@ fill_baseline_covariates <- function(dat, cols) {
 #' which `lme4` cannot fit at all. Included, therefore:
 #'
 #' * one continuous, approximately Gaussian outcome;
-#' * a mean that is linear in time, and nothing else --- no other covariates;
+#' * a mean that is linear in time, plus optional baseline covariates (see
+#'   "Covariate adjustment");
 #' * exactly one grouping level, the participant, whose random intercept and
 #'   random slope have an unstructured covariance;
 #' * independent residuals with a variance that is constant within a group;
