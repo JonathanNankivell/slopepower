@@ -36,7 +36,9 @@ boot_frame <- function(params, context) {
   }
   # Covariate columns travel under their internal names, already numeric, so
   # make_refitter() can hand them back to slope_params() unchanged. Each
-  # replicate recentres them on its own participants.
+  # replicate recentres them on its own participants, and drops any that a
+  # resample leaves constant (a rare factor level not drawn) rather than
+  # failing on a singular fit.
   for (cc in grep("^sp_cov_[0-9]+$", names(g), value = TRUE)) out[[cc]] <- g[[cc]]
   out
 }

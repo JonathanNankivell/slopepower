@@ -355,22 +355,64 @@ covariate_matrix <- function(covariates, data, context) {
 #' Time-varying covariates are refused for the same reason group membership is:
 #' every column is read row by row, and a covariate that changes during follow-up
 #' turns the time coefficient into something other than a slope.
+#'
+#' A column that does not vary *between* participants either -- the dummy for a
+#' factor level absent from the data used (an unused level, or one whose rows
+#' were all removed as missing), or one a bootstrap or jackknife resample happened
+#' to leave out -- carries nothing the intercept does not, and would make the
+#' fixed-effects design singular. It is dropped, which is the fit
+#' `droplevels()` would have given.
+#'
+#' @return A list: `dat`, with the kept columns centred, and `cols`, the names
+#'   of the columns kept.
 #' @noRd
 centre_covariates <- function(dat, cols, labels, context) {
+  kept <- character()
   for (cc in cols) {
-    # Compared with a tolerance, not exactly: basis functions such as poly()
-    # are computed through a QR decomposition, so equal inputs can come out
-    # differing in the last bit.
-    tol <- sqrt(.Machine$double.eps) * max(1, abs(dat[[cc]]))
-    varies <- tapply(dat[[cc]], dat$sp_subject, function(v) any(abs(v - v[1L]) > tol))
+    x   <- dat[[cc]]
+    tol <- covariate_tol(x)
+    varies <- tapply(x, dat$sp_subject, function(v) any(abs(v - v[1L]) > tol))
     if (any(varies)) {
       stop(sprintf(paste0(
         "%s: covariates must be constant within a participant (baseline values), ",
         "but `%s` changes during follow-up for %d participant(s)."),
         context, labels[[cc]], sum(varies)), call. = FALSE)
     }
-    per_subject <- tapply(dat[[cc]], dat$sp_subject, `[`, 1L)
-    dat[[cc]] <- dat[[cc]] - mean(per_subject)
+    per_subject <- tapply(x, dat$sp_subject, `[`, 1L)
+    if (all(abs(per_subject - per_subject[[1L]]) <= tol)) next
+    dat[[cc]] <- x - mean(per_subject)
+    kept <- c(kept, cc)
+  }
+  list(dat = dat, cols = kept)
+}
+
+#' Tolerance for comparing covariate values
+#'
+#' Compared with a tolerance, not exactly: basis functions such as poly() are
+#' computed through a QR decomposition, so equal inputs can come out differing
+#' in the last bit.
+#' @noRd
+covariate_tol <- function(x) {
+  sqrt(.Machine$double.eps) * max(1, abs(x), na.rm = TRUE)
+}
+
+#' Carry each participant's recorded covariate value to their missing visits
+#'
+#' Long-format data often record a baseline covariate on the first visit only.
+#' Left as `NA`, `na.action` would remove every follow-up visit -- leaving too
+#' little repeated data to fit, or, if some participants had the value on every
+#' row, fitting silently on those alone. A covariate has to be constant within a
+#' participant anyway, so a value recorded on any visit is that participant's
+#' value. A participant with no value recorded at all is still removed by
+#' `na.action`, and one whose recorded values differ is left for
+#' [centre_covariates()] to refuse.
+#' @noRd
+fill_baseline_covariates <- function(dat, cols) {
+  for (cc in cols) {
+    miss <- is.na(dat[[cc]])
+    if (!any(miss) || all(miss)) next
+    known <- tapply(dat[[cc]][!miss], dat$sp_subject[!miss], `[`, 1L)
+    dat[[cc]][miss] <- unname(known[as.character(dat$sp_subject[miss])])
   }
   dat
 }
@@ -416,7 +458,11 @@ centre_covariates <- function(dat, cols, labels, context) {
 #'   -- as long as every resulting column is constant within a participant.
 #'   Factors and character columns use treatment contrasts, and are always
 #'   coded against an intercept, so `~ 0 + sex` is the same as `~ sex`.
-#'   `offset()` terms and `.` are refused. Every column is centred at its
+#'   `offset()` terms and `.` are refused. A value recorded on any of a
+#'   participant's visits is used for all of them, so a covariate entered on
+#'   the baseline row only is enough; participants with no value at all are
+#'   removed by `na.action`. A column that does not vary between participants
+#'   (e.g. an unused factor level) is dropped. Every column is centred at its
 #'   mean over participants, so `slope` is the slope of a participant with
 #'   average covariate values. The returned variance components are then the
 #'   *adjusted* ones. See "Covariate adjustment" below.
@@ -679,7 +725,7 @@ slope_params <- function(formula, data,
       stop(sprintf("%s: `covariates` gave %d rows but the data have %d.",
                    context, nrow(X), n), call. = FALSE)
     }
-    dat <- cbind(dat, X)
+    dat <- fill_baseline_covariates(cbind(dat, X), colnames(X))
   }
 
   dat <- na.action(dat)
@@ -706,10 +752,17 @@ slope_params <- function(formula, data,
 
   cov_terms <- character()
   if (!is.null(X)) {
-    cov_cols  <- colnames(X)
-    dat       <- centre_covariates(dat, cov_cols, attr(X, "labels"), context)
-    cov_terms <- c(cov_cols,
-                   if (isTRUE(covariate_time)) paste0(cov_cols, ":sp_time"))
+    centred  <- centre_covariates(dat, colnames(X), attr(X, "labels"), context)
+    dat      <- centred$dat
+    cov_cols <- centred$cols
+    if (!length(cov_cols)) {
+      warning(sprintf(paste0(
+        "%s: every `covariates` column takes the same value for all participants ",
+        "in the data used, so no adjustment was made."), context), call. = FALSE)
+    } else {
+      cov_terms <- c(cov_cols,
+                     if (isTRUE(covariate_time)) paste0(cov_cols, ":sp_time"))
+    }
   }
 
   # per-subject time origin

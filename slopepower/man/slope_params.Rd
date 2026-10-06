@@ -56,7 +56,11 @@ allowed -- factors, interactions (\code{age * sex}), transformations
 -- as long as every resulting column is constant within a participant.
 Factors and character columns use treatment contrasts, and are always
 coded against an intercept, so \code{~ 0 + sex} is the same as \code{~ sex}.
-\code{offset()} terms and \code{.} are refused. Every column is centred at its
+\code{offset()} terms and \code{.} are refused. A value recorded on any of a
+participant's visits is used for all of them, so a covariate entered on
+the baseline row only is enough; participants with no value at all are
+removed by \code{na.action}. A column that does not vary between participants
+(e.g. an unused factor level) is dropped. Every column is centred at its
 mean over participants, so \code{slope} is the slope of a participant with
 average covariate values. The returned variance components are then the
 \emph{adjusted} ones. See "Covariate adjustment" below.}

@@ -85,11 +85,84 @@ test_that("bad covariate specifications are refused", {
                "could not evaluate `covariates`")
 })
 
-test_that("missing covariate values drop rows through na.action", {
+test_that("a participant with no covariate value is dropped through na.action", {
   d <- cov_data()
-  d$age[1] <- NA
+  d$age[d$id == d$id[1]] <- NA
   p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age))
-  expect_equal(p$n_obs, nrow(d) - 1L)
+  expect_equal(p$n_obs, sum(d$id != d$id[1]))
+  expect_equal(p$n_subjects, length(unique(d$id)) - 1L)
+})
+
+test_that("a covariate recorded on the baseline row only is carried to every visit", {
+  d <- cov_data()
+  full <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age + sex))
+  baseline <- !duplicated(d$id)
+  d$age[!baseline] <- NA
+  d$sex[!baseline] <- NA
+  # some participants recorded on every visit, the rest at baseline only: the
+  # fit must not quietly fall back to the fully recorded ones
+  keep <- d$id %in% unique(d$id)[1:5]
+  d$age[keep] <- cov_data()$age[keep]
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age + sex))
+  expect_equal(p$n_obs, nrow(d))
+  expect_equal(p$slope, full$slope, tolerance = 1e-10)
+  expect_equal(p$sigma2_slope, full$sigma2_slope, tolerance = 1e-10)
+})
+
+test_that("recorded covariate values that disagree within a participant are still refused", {
+  d <- cov_data()
+  rows <- which(d$id == d$id[1])
+  d$age[rows[1]] <- 40
+  d$age[rows[2]] <- 50
+  d$age[rows[-(1:2)]] <- NA
+  expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age)),
+               "`age` changes during follow-up for 1 participant")
+})
+
+test_that("an unused factor level does not make the fit singular", {
+  d <- cov_data()
+  d$site <- factor(ifelse(d$id %% 2 == 0, "A", "B"), levels = c("A", "B", "C"))
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ site))
+  d$site <- droplevels(d$site)
+  q <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ site))
+  expect_equal(p$slope, q$slope, tolerance = 1e-10)
+  expect_equal(p$sigma2_slope, q$sigma2_slope, tolerance = 1e-10)
+  expect_identical(names(nlme::fixef(p$fit)),
+                   c("(Intercept)", "sp_time", "sp_cov_1", "sp_time:sp_cov_1"))
+})
+
+test_that("a level whose rows are all removed as missing is dropped too", {
+  d <- cov_data()
+  first <- d$id == d$id[1]
+  d$site <- factor(ifelse(first, "C", ifelse(d$id %% 2 == 0, "A", "B")))
+  d$sdmt[first] <- NA
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ site))
+  expect_length(grep("^sp_cov_[0-9]+$", names(nlme::fixef(p$fit))), 1L)
+})
+
+test_that("covariates constant across all participants warn and adjust nothing", {
+  d <- cov_data()
+  d$k <- 7
+  u <- suppressMessages(slope_params(sdmt ~ visit | id, d))
+  expect_warning(p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ k)),
+                 "no adjustment was made")
+  expect_identical(names(nlme::fixef(p$fit)), c("(Intercept)", "sp_time"))
+  expect_equal(p$slope, u$slope)
+})
+
+test_that("bootstrap and jackknife refits survive a rare factor level going missing", {
+  d <- cov_data()
+  ids <- unique(d$id)
+  d$grade <- factor(ifelse(d$id == ids[1], "rare", ifelse(d$id %% 2 == 0, "A", "B")))
+  a <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ grade))
+  fr <- boot_frame(a, "test")
+  refit <- make_refitter(a)
+  # leave-one-out without the only "rare" participant, as the BCa jackknife does
+  p <- refit(fr[fr$subject != fr$subject[d$id == ids[1]][1], , drop = FALSE])
+  expect_s3_class(p, "slope_params")
+  expect_length(grep("^sp_cov_[0-9]+$", names(nlme::fixef(p$fit))), 1L)
+  b <- slope_bootstrap(a, R = 40, seed = 2)
+  expect_equal(b$n_failed, 0)
 })
 
 test_that("model.matrix-style covariate formulas are expanded as documented", {
