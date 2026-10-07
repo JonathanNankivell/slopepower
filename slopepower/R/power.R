@@ -851,7 +851,7 @@ print_data_block <- function(x) {
   show_comparator <- reference_is_comparator(comparator, x$target)
 
   if (show_comparator) {
-    cat_line("observed difference in slopes", x$slope_difference)
+    cat_line(labels$difference, x$slope_difference)
   }
   cat_line(labels$own, params$slope)
   if (show_comparator) {
@@ -906,11 +906,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
   cat_line("power", x$power)
   print_design_block(x)
   cat("\n  Estimated sample size:\n")
-  if (per_arm) {
-    cat_line("N per arm", x$n_per_arm, digits = 0L)
-  } else {
-    cat_line("N", x$n, digits = 0L)
-  }
+  cat_n_line(x, per_arm)
   cat("\n")
   invisible(x)
 }
@@ -943,11 +939,10 @@ print.slope_power <- function(x, ..., per_arm = NULL) {
     # participant -- cat_count() (utils.R) prints that decimal rather than
     # cat_line()'s digits = 0L path silently rounding it away.
     cat_count("specified N per arm", x$n_requested / 2)
-    cat_line("N per arm", x$n_per_arm, digits = 0L)
   } else {
     cat_line("specified N", x$n_requested, digits = 0L)
-    cat_line("actual N", x$n, digits = 0L)
   }
+  cat_n_line(x, per_arm, total_label = "actual N")
   print_design_block(x)
   cat("\nEstimated power:\n")
   cat_line("power", x$power)

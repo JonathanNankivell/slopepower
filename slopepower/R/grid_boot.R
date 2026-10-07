@@ -120,17 +120,6 @@ grid_boot_computes <- function(g, target, context) {
 #' @noRd
 grid_boot_flatten <- function(cc) c(cc$n, cc$tte)
 
-#' A compact row label for one cell of a bootstrap grid's printed table
-#'
-#' `g$labels_at(k)` (grid.R) names only the axes that vary -- `design` and
-#' `dropout` always, any scalar axis with more than one level besides --
-#' exactly the set [grid_cell_error()]'s messages already use. Joined by " / "
-#' rather than [cell_label()]'s `axis "value"` form, which is built for an
-#' error message naming its axes; here the axis names are already the column
-#' headers a data-frame row sits under, so only the values are needed.
-#' @noRd
-grid_boot_row_label <- function(labels) paste(labels, collapse = " / ")
-
 # ---------------------------------------------------------------------------
 # one cell's interval
 # ---------------------------------------------------------------------------
@@ -139,7 +128,10 @@ grid_boot_row_label <- function(labels) paste(labels, collapse = " / ")
 #'
 #' `col` is that statistic's column of the shared replicate matrix; `jack_col`
 #' is a zero-argument accessor into the shared jackknife, in the shape
-#' [boot_interval()] expects.
+#' [boot_interval()] expects. `statistic` names what is being bootstrapped and
+#' is passed straight to [widen_to_lattice()], which is keyed on that name --
+#' so which statistics live on the even lattice stays written in that one
+#' function, rather than being re-decided as a boolean at each call site here.
 #'
 #' Fewer than two surviving replicates is not fatal here the way it is in
 #' [run_bootstrap()] -- a grid that cost several minutes to resample must not
@@ -147,7 +139,8 @@ grid_boot_row_label <- function(labels) paste(labels, collapse = " / ")
 #' named in the warning [slope_sample_size_grid_boot()] raises once for the
 #' whole table, via [report_collected()] (grid.R).
 #' @noRd
-grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, what, lattice) {
+grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, what,
+                                statistic) {
   bad <- is.na(col)
   n_failed <- sum(bad)
   good <- col[!bad]
@@ -156,8 +149,8 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
                type = NA_character_, n_failed = n_failed, starved = TRUE))
   }
   iv <- boot_interval(good, observed, jack_col, type, probs, context, what)
-  ci <- if (lattice) widen_to_lattice(iv$ci, "n") else iv$ci
-  list(mean = mean(good), sd = stats::sd(good), ci = ci, type = iv$type,
+  list(mean = mean(good), sd = stats::sd(good), ci = widen_to_lattice(iv$ci, statistic),
+      type = iv$type,
       n_failed = n_failed, starved = FALSE)
 }
 
@@ -325,10 +318,10 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
   n_res <- vector("list", g$n_cells)
   starved <- character(0L)
   for (k in seq_len(g$n_cells)) {
-    label <- grid_boot_row_label(g$labels_at(k))
+    label <- cell_values(g$labels_at(k))
     n_res[[k]] <- grid_boot_cell_stat(mat$replicates[, k], function() jack$col(k),
                                       pts$n[k], type, probs, context,
-                                      sprintf(" for cell %s", label), lattice = TRUE)
+                                      sprintf(" for cell %s", label), statistic = "n")
     if (isTRUE(n_res[[k]]$starved)) starved <- c(starved, label)
   }
   if (length(starved) == g$n_cells) {
@@ -349,8 +342,8 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
     k <- match(j, cc$tte_of)
     grid_boot_cell_stat(mat$replicates[, ti], function() jack$col(ti),
                         pts$tte[k], type, probs, context,
-                        sprintf(" for cell %s (tte)", grid_boot_row_label(g$labels_at(k))),
-                        lattice = FALSE)
+                        sprintf(" for cell %s (tte)", cell_values(g$labels_at(k))),
+                        statistic = "tte")
   })[cc$tte_of]
 
   report_collected(context, starved, g$n_cells,
@@ -360,15 +353,21 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
 
   extract <- function(res, field, template) vapply(res, function(r) r[[field]], template)
 
+  # `ci` is always a pair, so extract()ing it gives a 2-by-cells matrix whose
+  # rows are the two endpoint columns -- the same helper as every other column
+  # rather than four more hand-written closures beside it.
+  n_ci <- extract(n_res, "ci", numeric(2L))
+  tte_ci <- extract(tte_res, "ci", numeric(2L))
+
   added <- list(
     n_mean = extract(n_res, "mean", numeric(1L)),
     n_sd = extract(n_res, "sd", numeric(1L)),
-    n_lower = vapply(n_res, function(r) r$ci[1L], numeric(1L)),
-    n_upper = vapply(n_res, function(r) r$ci[2L], numeric(1L)),
+    n_lower = n_ci[1L, ],
+    n_upper = n_ci[2L, ],
     tte_mean = extract(tte_res, "mean", numeric(1L)),
     tte_sd = extract(tte_res, "sd", numeric(1L)),
-    tte_lower = vapply(tte_res, function(r) r$ci[1L], numeric(1L)),
-    tte_upper = vapply(tte_res, function(r) r$ci[2L], numeric(1L)),
+    tte_lower = tte_ci[1L, ],
+    tte_upper = tte_ci[2L, ],
     tte_ci_type = extract(tte_res, "type", character(1L)),
     ci_type = extract(n_res, "type", character(1L)),
     n_failed = extract(n_res, "n_failed", integer(1L))
@@ -618,11 +617,8 @@ print.slope_sample_size_grid_boot <- function(x, ..., per_arm = NULL) {
       "no interval could be built for them.")), sep = "\n")
   }
 
-  straddle <- attr(x, "straddle")
-  n_used <- length(attr(x, "slope_replicates"))
-  cat(boot_note("Note", sprintf(paste0(
-    "%d/%d (%.1f%%) of replicates refit a slope on the opposite side of zero from the ",
-    "fitted one."), round(straddle * n_used), n_used, 100 * straddle)), sep = "\n")
+  cat(boot_straddle_note(attr(x, "straddle"), length(attr(x, "slope_replicates"))),
+      sep = "\n")
 
   cat(boot_note("Mean, SD", paste0(
     "each replicate of `n` is rounded up to a whole participant per arm before averaging, ",

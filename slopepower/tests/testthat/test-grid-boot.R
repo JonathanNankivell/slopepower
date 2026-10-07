@@ -179,7 +179,7 @@ test_that("grid_boot_cell_stat() reports a cell as starved rather than erroring"
   # Only one non-NA value: too few to form any interval.
   res <- grid_boot_cell_stat(c(10, NA, NA, NA), function() c(9, 11, 10), observed = 10,
                              type = "bca", probs = c(0.025, 0.975), context = "test",
-                             what = "", lattice = TRUE)
+                             what = "", statistic = "n")
   expect_true(res$starved)
   expect_true(is.na(res$mean))
   expect_true(all(is.na(res$ci)))

@@ -34,7 +34,7 @@
 #'   supplied `x`.
 #' @noRd
 coerce_binary <- function(x, name, context, meaning) {
-  if (inherits(x, "haven_labelled")) x <- as.numeric(x)
+  x <- unlabel(x)
   if (is.logical(x)) return(as.numeric(x))
   if (is.factor(x) || is.character(x)) {
     f <- if (is.factor(x)) x else factor(x)
@@ -119,12 +119,26 @@ eval_column <- function(expr, data, env, context, name) {
   out
 }
 
+#' Strip a `haven_labelled` wrapper, leaving anything else alone
+#'
+#' `haven::read_dta()` returns labelled columns, and this port's whole reason
+#' for existing is that its data arrives from Stata. Every column the package
+#' coerces has to shed the wrapper before its type can be tested, so the rule
+#' is written once here rather than inline at each of the three columns
+#' ([coerce_binary()], [coerce_time()] and the outcome in `slope_params()`).
+#' Deliberately narrower than [coerce_time()], which also unwraps `Date` and
+#' `POSIXct`: those mean something as a time and nothing as an outcome.
+#' @noRd
+unlabel <- function(x) {
+  if (inherits(x, "haven_labelled")) as.numeric(x) else x
+}
+
 #' Coerce a time vector to numeric, unwrapping Date/POSIXct
 #' @noRd
 coerce_time <- function(x, context) {
   if (inherits(x, "Date")) return(as.numeric(x))
   if (inherits(x, "POSIXct")) return(as.numeric(x) / 86400)
-  if (inherits(x, "haven_labelled")) x <- as.numeric(x)
+  x <- unlabel(x)
   if (!is.numeric(x)) {
     stop(sprintf("%s: the time variable must be numeric (or a Date).", context),
          call. = FALSE)
@@ -676,8 +690,7 @@ slope_params <- function(formula, data,
   tim     <- coerce_time(eval_column(parts$time, data, env, context, "time"), context)
   subject <- eval_column(parts$subject, data, env, context, "subject")
 
-  # Same shape as coerce_time() above, for the same problem.
-  if (inherits(y, "haven_labelled")) y <- as.numeric(y)
+  y <- unlabel(y)
   if (!is.numeric(y)) {
     stop(sprintf("%s: the outcome must be numeric.", context), call. = FALSE)
   }
@@ -1057,15 +1070,18 @@ new_slope_params <- function(slope, slope_comparator, comparator,
 #' is shown at all is a separate, per-caller decision -- `print_data_block()`
 #' hides it unless `target = "observed"` -- and stays where it is made.
 #'
-#' @return A list with `own` (the untreated / case / control-arm slope) and
-#'   `comparator`.
+#' @return A list with `own` (the untreated / case / control-arm slope),
+#'   `comparator`, and `difference` -- the label for the gap between the two,
+#'   which does not vary with the comparator but belongs with its siblings
+#'   rather than being spelled once here and once in [print_data_block()].
 #' @noRd
 slope_labels <- function(comparator) {
-  if (identical(comparator, "treated")) {
+  labs <- if (identical(comparator, "treated")) {
     list(own = "slope of control arm", comparator = "slope of experimental arm")
   } else {
     list(own = "slope of cases", comparator = "slope of healthy controls")
   }
+  c(labs, list(difference = "observed difference in slopes"))
 }
 
 #' Print stage-one slope parameters
@@ -1096,7 +1112,7 @@ print.slope_params <- function(x, ...) {
   cat_line(labels$own, x$slope)
   if (!is.na(x$slope_comparator)) {
     cat_line(labels$comparator, x$slope_comparator)
-    cat_line("observed difference in slopes", x$slope - x$slope_comparator)
+    cat_line(labels$difference, x$slope - x$slope_comparator)
   }
 
   cat("\n")

@@ -300,11 +300,7 @@ print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
   # the reader should not have to wonder which schedule produced the number.
   cat_line("visit schedule", "any (the bound holds for all)")
   cat("\n  Lower bound on sample size:\n")
-  if (per_arm) {
-    cat_line("N per arm", x$n_per_arm, digits = 0L)
-  } else {
-    cat_line("N", x$n, digits = 0L)
-  }
+  cat_n_line(x, per_arm)
   cat_line("limiting s*^2", x$var_tte)
   cat("\n")
   invisible(x)

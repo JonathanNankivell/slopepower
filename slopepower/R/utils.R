@@ -194,6 +194,26 @@ cat_count <- function(label, value, width = 39L) {
   cat_line(label, value, width = width, digits = digits)
 }
 
+#' Print the sample-size line on the chosen display basis
+#'
+#' The counterpart to [display_basis()], which resolves *which* basis to show
+#' but leaves each print method to expand what that means. Three of them spelled
+#' the same two-branch block, two character-for-character, so the rule in
+#' CONTRACT.md section 4.5 -- a per-arm basis names the count "N per arm" and
+#' reads `n_per_arm`, a total reads `n` -- had as many homes as there were
+#' result classes. Only the total's label varies between callers
+#' ([print.slope_power()] calls it "actual N", to tell it from the `specified
+#' N` line above), so that is the one thing passed in.
+#' @noRd
+cat_n_line <- function(x, per_arm, total_label = "N") {
+  if (per_arm) {
+    cat_line("N per arm", x$n_per_arm, digits = 0L)
+  } else {
+    cat_line(total_label, x$n, digits = 0L)
+  }
+  invisible(x)
+}
+
 #' The two-sided critical value, computed exactly as the Stata original does
 #'
 #' `qnorm(1 - alpha / 2)` rather than the numerically preferable

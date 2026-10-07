@@ -174,6 +174,17 @@ cell_label <- function(labels) {
   paste(sprintf('%s "%s"', names(labels), labels), collapse = ", ")
 }
 
+#' Name one cell of the grid by its axis values alone
+#'
+#' [cell_label()]'s sibling, and the other half of the same choice: both take a
+#' cell's coordinate from `labels_at()`, which names only the axes that vary.
+#' This joins the values with " / " and drops the axis names, for the places
+#' where those names are already established -- a bootstrap table's column
+#' headers, or the axes a collected warning has just listed -- where repeating
+#' them would crowd out what the line is actually reporting.
+#' @noRd
+cell_values <- function(labels) paste(labels, collapse = " / ")
+
 #' The cross product of the axes, in nested-loop order
 #'
 #' One row per cell, one column per axis, holding an index into that axis's
@@ -218,6 +229,15 @@ grid_axes <- function(visits, dropout, scalars, context) {
   n_designs <- length(visit_list) * length(drop_list)
   baseline_only <- character(0L)
 
+  # Where a (visits, dropout) pair sits in the flat `designs` list. Written
+  # once because it is written twice over: the loop below fills `designs` by
+  # this index, and `design_of` recovers it for every cell so that
+  # grid_evaluate() can look the design back up. The two have to agree for
+  # every cell and nothing else checks that they do -- reversing the nesting
+  # of the loop below would otherwise hand each cell the wrong design without
+  # any error. Vectorises, so both callers use the one expression.
+  design_index <- function(di, dj) (di - 1L) * length(drop_list) + dj
+
   # The designs are built once per visits/dropout pair rather than once per
   # cell. A sensitivity axis re-prices the same trial, so rebuilding it at every
   # level of one would both cost more and report the baseline-dropout warning
@@ -242,7 +262,7 @@ grid_axes <- function(visits, dropout, scalars, context) {
       # wording in design.R cannot silently break this. An invalid combination
       # (e.g. a `visits` element not starting at 0) is caught here too, and
       # named the same way a failure from `evaluate()` in grid_evaluate() is.
-      designs[[(di - 1L) * length(drop_list) + dj]] <- tryCatch(
+      designs[[design_index(di, dj)]] <- tryCatch(
         withCallingHandlers(
           trial_design(v, inc),
           slopepower_baseline_dropout = function(w) {
@@ -289,7 +309,7 @@ grid_axes <- function(visits, dropout, scalars, context) {
   # up again at every level.
   di <- cells$design
   dj <- cells$dropout
-  design_of <- (di - 1L) * length(drop_list) + dj
+  design_of <- design_index(di, dj)
   n_visits <- unname(lengths(visit_list))
 
   out <- list(
@@ -387,7 +407,7 @@ grid_evaluate <- function(g, evaluate, context) {
       withCallingHandlers(
         evaluate(g$designs[[g$design_of[k]]], args),
         slopepower_tte_direction = function(w) {
-          tte_direction <<- c(tte_direction, paste(g$labels_at(k), collapse = " / "))
+          tte_direction <<- c(tte_direction, cell_values(g$labels_at(k)))
           invokeRestart("muffleWarning")
         }
       ),
