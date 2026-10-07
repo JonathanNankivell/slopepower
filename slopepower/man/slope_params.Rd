@@ -29,11 +29,12 @@ express \code{visits} in \code{\link[=trial_design]{trial_design()}} in whatever
 
 \item{healthy}{Optional bare column name identifying healthy controls, coded
 \code{1} for cases (subjects with the disease) and \code{0} for healthy controls.
+Looked up in \code{data} first, then in the calling environment.
 Mutually exclusive with \code{treated}.}
 
 \item{treated}{Optional bare column name identifying the treated arm of a
 previously conducted trial, coded \code{1} for treated and \code{0} for the control
-arm. Mutually exclusive with \code{healthy}.}
+arm. Looked up as for \code{healthy}. Mutually exclusive with \code{healthy}.}
 
 \item{origin}{\code{"subject"} (default) shifts each subject's time so their first
 visit is time zero, reproducing the Stata command's behaviour and ensuring
@@ -47,7 +48,7 @@ intercept only, equivalent to the Stata \code{nocontvar} option); \code{FALSE} f
 the full structure and errors on failure. Ignored unless \code{healthy} is given.}
 
 \item{na.action}{Applied to the assembled model frame. Defaults to
-\code{\link[stats:na.fail]{stats::na.omit()}}.}
+\code{\link[stats:na.omit]{stats::na.omit()}}.}
 
 \item{covariates}{Optional one-sided formula of baseline covariates to adjust
 for, e.g. \code{~ age + sex}. Anything \code{\link[stats:model.matrix]{stats::model.matrix()}} accepts is

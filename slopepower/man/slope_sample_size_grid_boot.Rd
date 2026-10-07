@@ -77,11 +77,17 @@ same name.}
 \item{...}{Not used.}
 }
 \value{
-A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")}, one row per cell, with the fifteen columns
-\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports plus:
+A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")}, one row per cell, with the columns
+\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports -- except that both bases are kept,
+whatever \code{per_arm} says: \code{n} is always the trial total, beside
+\code{n_per_arm}, and \code{visits} is split into \code{visits_total} and
+\code{visits_per_arm}. So \code{n} here is \emph{not} the \code{n} of a
+\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} called with the default \code{per_arm = TRUE};
+compare \code{n_per_arm} with that. The table also has:
 \describe{
 \item{\code{n_mean}, \code{n_sd}, \code{n_lower}, \code{n_upper}}{The bootstrap mean, SD
-and confidence interval of that cell's sample size. The interval is
+and confidence interval of that cell's sample size, on the trial-total
+basis of \code{n}. The interval is
 widened to the nearest even sizes a trial could actually be run at,
 as a single \code{\link[=slope_bootstrap]{slope_bootstrap()}} call does for \code{statistic = "n"}.}
 \item{\code{tte_mean}, \code{tte_sd}, \code{tte_lower}, \code{tte_upper}}{The same, for the
@@ -112,10 +118,9 @@ result carries, since the slope is what the resampling actually
 perturbs and every cell's interval is a function of it. The printed
 table does not show them --- it reports the cells and, beneath them,
 \code{straddle} --- so these six attributes are where a reader who wants the
-slope's own interval finds it. Base
-\verb{[.data.frame} drops attributes it does not know, so \code{x[1:3, ]} keeps
-the class but not these; \code{\link[=print.slope_sample_size_grid_boot]{print.slope_sample_size_grid_boot()}} falls
-back to a plain data-frame print when they are absent.
+slope's own interval finds it. They describe the whole table, so a
+subset such as \code{x[1:3, ]} drops them \emph{and} the class, returning a plain
+data frame of the surviving cells, printed as one.
 }
 \description{
 The bootstrap counterpart of \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}: prices the same

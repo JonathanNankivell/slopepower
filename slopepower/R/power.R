@@ -452,6 +452,28 @@ size_per_arm <- function(scaled_effect, z_a, power) {
   list(z_sum_sq = z_sum_sq, n_per_arm = ceiling(z_sum_sq / scaled_effect^2))
 }
 
+#' Validate a target power against the alpha it is paired with
+#'
+#' [check_probability()] admits any power in (0, 1), but [size_per_arm()]'s
+#' `(z_alpha + qnorm(power))^2` is a square: it falls to zero at
+#' `power = alpha / 2` and rises again below it. There, a *lower* target power
+#' returned a *larger* trial (7 per arm at power 0.01 against 1 at 0.025, with
+#' alpha 0.05), and power exactly alpha/2 returned zero participants. Power at or
+#' below alpha/2 is what a zero effect already achieves, so no sample size is
+#' the answer to it.
+#' @noRd
+check_target_power <- function(power, alpha, context) {
+  check_probability(power, "power", context)
+  if (power <= alpha / 2) {
+    stop(sprintf(paste0(
+      "%s: `power` = %g is at or below alpha/2 = %g, the power a trial with no\n",
+      "  effect at all already has, so no sample size is needed to reach it and\n",
+      "  the formula's answer would be meaningless. Use a power above alpha/2."),
+      context, power, alpha / 2), call. = FALSE)
+  }
+  invisible(power)
+}
+
 #' The canonical `slope_result` field list, in CONTRACT.md order
 #'
 #' The one place the shape of a stage-two result is written. Both
@@ -508,7 +530,7 @@ solve_slope <- function(params, design, effectiveness,
 
   solving_for_n <- is.null(n)
   if (solving_for_n) {
-    check_probability(power, "power", context)
+    check_target_power(power, alpha, context)
   } else {
     check_whole_number(n, "n", "participants", context, lower = 2)
   }
@@ -672,7 +694,7 @@ NULL
 #' the published figure recruits a few people more than it strictly needs.
 #'
 #' @inheritParams stage_two
-#' @param power Desired power, in (0, 1). Defaults to 0.8.
+#' @param power Desired power, between `alpha / 2` and 1. Defaults to 0.8.
 #'
 #' @return An object of class `slope_sample_size`, a list with elements `n`,
 #'   `n_per_arm`, `power`, `alpha`, `effectiveness`, `target`, `tte`, `var_tte`,

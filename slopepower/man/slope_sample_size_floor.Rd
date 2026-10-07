@@ -37,7 +37,7 @@ expected to remove, in (0, 1]. Must not be supplied when
 \item{target}{\code{"effectiveness"} (the default) or \code{"observed"}. As in
 \code{\link[=slope_sample_size]{slope_sample_size()}}; see its "The reference slope" section.}
 
-\item{power}{Desired power, in (0, 1). Defaults to 0.8.}
+\item{power}{Desired power, between \code{alpha / 2} and 1. Defaults to 0.8.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 

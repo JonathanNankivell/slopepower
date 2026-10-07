@@ -348,14 +348,24 @@ restore_seed <- function(old) {
 #' knife edge onto the lattice, where a one-ulp perturbation maps a point to
 #' itself.
 #'
-#' Deliberately keyed on the statistic rather than on the values: `n`'s
-#' discreteness is a property of how [solve_slope()] builds it, not something to
-#' be rediscovered per bootstrap from replicates that happen to look integral.
+#' Deliberately keyed on the statistic, through [on_lattice()], rather than on
+#' the values: `n`'s discreteness is a property of how [solve_slope()] builds
+#' it, not something to be rediscovered per bootstrap from replicates that
+#' happen to look integral.
 #' @noRd
 widen_to_lattice <- function(ci, statistic) {
-  if (!identical(statistic, "n")) return(ci)
+  if (!on_lattice(statistic)) return(ci)
   c(2 * floor(ci[[1L]] / 2), 2 * ceiling(ci[[2L]] / 2))
 }
+
+#' Is this statistic reported on the even-participant lattice?
+#'
+#' The one place the rule is written: [widen_to_lattice()] widens by it, and
+#' [run_bootstrap()] records it as the result's `lattice` flag for the print
+#' methods. Two copies could disagree, leaving an interval widened but printed
+#' without its per-arm divisor or basis note.
+#' @noRd
+on_lattice <- function(statistic) identical(statistic, "n")
 
 #' The three arguments every bootstrap driver takes, checked once
 #'
@@ -685,8 +695,9 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # re-tested against `statistic` wherever the choice matters again -- print
   # methods included. A discrete statistic added later, or a print-side
   # refactor that misses one of several such tests, cannot silently disagree
-  # with the widening this function already did.
-  lattice <- identical(statistic, "n")
+  # with the widening this function already did -- on_lattice() being the one
+  # rule both read.
+  lattice <- on_lattice(statistic)
 
   # The slope block -- `straddle` included -- is built by the same helper the
   # bootstrapped grid uses, so the two results describe the resampling in the

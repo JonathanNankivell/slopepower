@@ -29,7 +29,7 @@ be supplied when \code{target = "observed"}, which fixes it at 1.}
 the equivalent of the Stata command's \code{usetrt} option and requires
 parameters estimated from a previous trial.}
 
-\item{power}{Desired power, in (0, 1). Defaults to 0.8.}
+\item{power}{Desired power, between \code{alpha / 2} and 1. Defaults to 0.8.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 

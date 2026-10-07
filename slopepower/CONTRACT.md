@@ -395,7 +395,8 @@ Errors (not warnings, not silent `NA`):
 
 - `slope_difference == 0`, or `effect_size == 0` — sample size is undefined. Stata returns `N = .`;
   we error with a clear message.
-- `alpha` outside (0, 1); `power` outside (0, 1); `effectiveness` outside (0, 1]
+- `alpha` outside (0, 1); `power` outside (0, 1), or at or below `alpha / 2` when solving for
+  sample size (DIVERGENCES.md §27); `effectiveness` outside (0, 1]
 - `n < 2`, or non-integer `n`
 - `n` missing from `slope_power()` (there is no default sample size), and likewise from
   `slope_power_grid()`

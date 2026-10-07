@@ -77,7 +77,11 @@ KNOWN_DIVERGENCES <- c(
   "IGN-casecon-model3", "IGN-nocontvar-model3",
   # Stata falls back to power(0.8) when neither power nor n is given. In the R
   # port that default survives only in the slopepower() compatibility wrapper.
-  "NEITHER-default", "DEFAULT-eff"
+  "NEITHER-default", "DEFAULT-eff",
+  # power(.001) is below alpha/2, where the squared numerator of the
+  # sample-size formula runs backwards: Stata returns N = 116, more than it
+  # needs at power(.025). The R port refuses it (DIVERGENCES.md section 27).
+  "POW-0.001"
 )
 
 # Rows that test Stata's own syntax validation and have no R counterpart at

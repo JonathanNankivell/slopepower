@@ -542,3 +542,69 @@ test_that("a small-scale outcome prints its parameters, not a column of zeros", 
   expect_length(shown, 5L)
   expect_false(any(grepl("= -?0\\.00", shown)))
 })
+
+test_that("near-0/1 group codes are snapped to exactly 0/1", {
+  d <- load_paper_data("slpower1")
+  d$case2 <- as.numeric(d$id %% 2)
+  exact <- slope_params(sdmt ~ time | id, d, healthy = case2)
+  d$case2[d$case2 == 1] <- 1 + 1e-10
+  fuzzy <- slope_params(sdmt ~ time | id, d, healthy = case2)
+  expect_equal(fuzzy$slope, exact$slope)
+  expect_equal(fuzzy$slope_comparator, exact$slope_comparator)
+})
+
+test_that("a target power at or below alpha/2 is refused, not sized", {
+  p <- ref_params()
+  expect_error(slope_sample_size(p, 0:3, power = 0.025), "alpha/2")
+  expect_error(slope_sample_size(p, 0:3, power = 0.01), "alpha/2")
+  expect_error(slope_sample_size_floor(p, power = 0.01), "alpha/2")
+  expect_error(slope_sample_size_grid(p, visits = 0:3, power = c(0.8, 0.01)))
+  # Just above it is still a legitimate (tiny) answer.
+  expect_true(is.finite(slope_sample_size(p, 0:3, power = 0.03)$n))
+})
+
+test_that("`healthy`/`treated` resolve in the caller's frame, not the formula's", {
+  d <- load_paper_data("slpower1")
+  fml <- sdmt ~ time | id
+  wrap <- function(fml, d, g) slope_params(fml, d, healthy = g)
+  direct <- slope_params(fml, d, healthy = as.numeric(d$id %% 2))
+  via <- wrap(fml, d, as.numeric(d$id %% 2))
+  expect_equal(via$slope, direct$slope)
+  expect_equal(via$slope_comparator, direct$slope_comparator)
+})
+
+test_that("a numeric design's errors name the stage-two function called", {
+  p <- ref_params()
+  expect_error(slope_sample_size(p, c(1, 2, 3)), "^slope_sample_size\\(\\)")
+  expect_error(slope_power(p, c(1, 2, 3), n = 100), "^slope_power\\(\\)")
+})
+
+test_that("the boot grid's shared effect size gives each cell slope_bootstrap()'s answer", {
+  subj <- local({
+    set.seed(4)
+    data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
+  })
+  d <- merge(subj, data.frame(visit = 0:3))
+  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
+  pars <- slope_params(y ~ visit | id, d)
+
+  designs <- list(annual = 0:3, half = seq(0, 3, 0.5))
+  grid <- suppressWarnings(slope_sample_size_grid_boot(
+    pars, visits = designs, power = c(0.8, 0.9), alpha = c(0.05, 0.01),
+    effectiveness = 0.33, R = 12, seed = 2))
+  for (k in seq_len(nrow(grid))) {
+    one <- suppressWarnings(slope_bootstrap(
+      slope_sample_size(pars, designs[[grid$design[k]]], effectiveness = 0.33,
+                        power = grid$power[k], alpha = grid$alpha[k]),
+      R = 12, seed = 2))
+    expect_equal(grid$n_mean[k], one$boot_mean)
+    expect_equal(c(grid$n_lower[k], grid$n_upper[k]), one$ci)
+    expect_equal(grid$n_failed[k], one$n_failed)
+  }
+})
+
+test_that("on_lattice() is the one rule for widening and the printed flag", {
+  expect_true(on_lattice("n"))
+  expect_false(on_lattice("tte"))
+  expect_false(on_lattice("slope"))
+})
