@@ -107,7 +107,7 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
   comp <- target_components(params, target, effectiveness, context)
   var_tte <- var_floor(params)
   effect_size <- comp$slope_difference / sqrt(var_tte)
-  sized <- size_per_arm(abs(effect_size) * comp$effectiveness,
+  sized <- size_per_arm(scale_effect(effect_size, comp$effectiveness),
                         z_alpha(alpha, context), power)
 
   structure(
@@ -290,9 +290,7 @@ slope_sample_size_floor.default <- function(x, ...) {
 #' @export
 print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_sample_size_floor()")
-  print_data_block(x)
-  cat("\nParameters for planned study:\n")
-  cat_line("alpha", x$alpha)
+  print_opening_blocks(x)
   cat_line("power", x$power)
   print_target_lines(x)
   # Where print.slope_sample_size() shows the schedule and its dropouts. Saying

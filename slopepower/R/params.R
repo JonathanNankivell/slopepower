@@ -178,7 +178,7 @@ extract_re <- function(fit, int_name, slope_name, context) {
 #' (sigma * delta_g)^2. `allCoef = TRUE` returns every level including the
 #' reference, named, which lets us look the level up rather than index it.
 #' @noRd
-extract_residual <- function(fit, level = NULL, context) {
+extract_residual <- function(fit, level, context) {
   s <- stats::sigma(fit)
   vs <- fit$modelStruct$varStruct
   if (is.null(vs) || is.null(level)) return(s^2)
@@ -245,30 +245,24 @@ fit_quietly <- function(expr) {
   )
 }
 
-#' Fit the single-group and trial models
+#' Fit the single-group or trial model
 #'
-#' These are one-line wrappers for a reason that is not style. A formula written
-#' in a function body captures that function's evaluation frame as its
-#' environment, and the fitted object keeps it for life. Called directly from
+#' A small helper for a reason that is not style. A formula written in a
+#' function body captures that function's evaluation frame as its environment,
+#' and the fitted object keeps it for life. Called directly from
 #' [slope_params()], `lme()` would therefore pin `slope_params()`'s frame --
 #' including the user's entire `data` argument, every column of it, used or not
 #' -- inside `params$fit`, which is a contract field retained in every
 #' `slope_sample_size` and `slope_power` result. Fitting from a small helper
 #' frame instead drops that reference: on a 379 kB input frame it took a
 #' serialized `slope_params` object from 523 kB to under 200 kB, and the saving
-#' grows with the caller's data. `fit_healthy_model()` below has always had this
-#' property by accident of being a helper; these two now have it on purpose.
+#' grows with the caller's data. The base formula is therefore written here,
+#' not passed in by the caller. `fit_healthy_model()` below has always had this
+#' property by accident of being a helper; this one has it on purpose.
 #' @noRd
-fit_none_model <- function(dat, ctrl, cov_terms = character()) {
-  fixed <- with_covariates(sp_y ~ sp_time, cov_terms)
-  eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
-                        data = dat, method = "REML", control = ctrl)))
-}
-
-#' @rdname fit_none_model
-#' @noRd
-fit_treated_model <- function(dat, ctrl, cov_terms = character()) {
-  fixed <- with_covariates(sp_y ~ sp_time + sp_placebo_time, cov_terms)
+fit_common_model <- function(dat, ctrl, treated, cov_terms = character()) {
+  base <- if (treated) sp_y ~ sp_time + sp_placebo_time else sp_y ~ sp_time
+  fixed <- with_covariates(base, cov_terms)
   eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
                         data = dat, method = "REML", control = ctrl)))
 }
@@ -283,7 +277,7 @@ fit_treated_model <- function(dat, ctrl, cov_terms = character()) {
 #' @noRd
 with_covariates <- function(f, cov_terms) {
   if (!length(cov_terms)) return(f)
-  stats::as.formula(paste(paste(deparse(f), collapse = " "), "+",
+  stats::as.formula(paste(deparse1(f), "+",
                           paste(cov_terms, collapse = " + ")),
                     env = environment(f))
 }
@@ -725,11 +719,10 @@ slope_params <- function(formula, data,
     }
   }
 
-  if (!is.null(common_variance) && comparator != "healthy") {
-    warning(sprintf("%s: `common_variance` applies only when `healthy` is supplied; ignoring it.",
-                    context), call. = FALSE)
-    common_variance <- NULL
-  }
+  common_variance <- warn_unused_arg(
+    common_variance, !is.null(common_variance) && comparator != "healthy", NULL,
+    "%s: `common_variance` applies only when `healthy` is supplied; ignoring it.",
+    context)
 
   n <- length(y)
   if (length(tim) != n || length(subject) != n) {
@@ -854,14 +847,14 @@ slope_params <- function(formula, data,
   reduced_used <- FALSE
 
   if (comparator == "none") {
-    fit <- fit_none_model(dat, ctrl, cov_terms)
+    fit <- fit_common_model(dat, ctrl, treated = FALSE, cov_terms)
 
   } else if (comparator == "treated") {
     # Stata: mixed y time placebo#c.time || subject: time, cov(uns)
     # One common intercept (randomisation implies equal baselines), separate
     # slopes. A numeric placebo indicator keeps the coefficient mapping explicit.
     dat$sp_placebo_time <- (1 - dat$sp_case) * dat$sp_time
-    fit <- fit_treated_model(dat, ctrl, cov_terms)
+    fit <- fit_common_model(dat, ctrl, treated = TRUE, cov_terms)
 
   } else {
     dat$sp_control      <- 1 - dat$sp_case
@@ -1042,22 +1035,18 @@ new_slope_params <- function(slope, slope_comparator, comparator,
                              sigma2_residual, n_obs, n_subjects,
                              common_variance, time_shifted, fit, call,
                              context) {
-  slope            <- check_scalar(slope, "slope", context)
-  sigma2_intercept <- check_variance(sigma2_intercept, "sigma2_intercept", context)
-  sigma2_slope     <- check_variance(sigma2_slope, "sigma2_slope", context)
-  sigma2_residual  <- check_variance(sigma2_residual, "sigma2_residual", context)
-  sigma_cov        <- check_scalar(sigma_cov, "sigma_cov", context)
-
-  check_re_covariance(sigma2_intercept, sigma2_slope, sigma_cov, context)
+  v <- check_param_values(list(slope = slope, sigma2_intercept = sigma2_intercept,
+                                sigma2_slope = sigma2_slope, sigma2_residual = sigma2_residual,
+                                sigma_cov = sigma_cov), context)
 
   structure(
-    list(slope            = slope,
+    list(slope            = v$slope,
          slope_comparator = slope_comparator,
          comparator       = comparator,
-         sigma2_intercept = sigma2_intercept,
-         sigma2_slope     = sigma2_slope,
-         sigma_cov        = sigma_cov,
-         sigma2_residual  = sigma2_residual,
+         sigma2_intercept = v$sigma2_intercept,
+         sigma2_slope     = v$sigma2_slope,
+         sigma_cov        = v$sigma_cov,
+         sigma2_residual  = v$sigma2_residual,
          n_obs            = n_obs,
          n_subjects       = n_subjects,
          common_variance  = common_variance,

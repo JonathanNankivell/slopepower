@@ -170,11 +170,7 @@ check_per_arm <- function(per_arm, context) {
 #' missing attribute the object was never asked to carry.
 #' @noRd
 display_basis <- function(x, per_arm, context) {
-  if (is.null(per_arm)) {
-    per_arm <- attr(x, "per_arm")
-    if (is.null(per_arm)) per_arm <- TRUE
-  }
-  check_per_arm(per_arm, context)
+  check_per_arm(per_arm %||% attr(x, "per_arm") %||% TRUE, context)
 }
 
 #' Print a labelled count that may not be a whole number
@@ -309,7 +305,7 @@ parse_slope_formula <- function(formula, context) {
   }
 
   labels <- tryCatch(
-    attr(stats::terms(stats::as.formula(paste("~", paste(deparse(rhs), collapse = " ")),
+    attr(stats::terms(stats::as.formula(paste("~", deparse1(rhs)),
                                         env = baseenv())),
          "term.labels"),
     error = function(e) NULL)
@@ -505,4 +501,19 @@ fixed_is_thin <- function(fixed, value, tol = 0.05) {
   }
   round_trip <- suppressWarnings(as.numeric(fixed))
   !is.finite(round_trip) || abs(round_trip - value) > tol * abs(value)
+}
+
+#' Warn and reset an argument that does not apply to the chosen model
+#'
+#' Shared shape of the "you supplied this, but the model you selected doesn't
+#' use it" checks in `slopepower()` (three) and `slope_params()` (one): if `condition` holds, warn in
+#' `message` (one `%s` for `context`) and answer `off_value`; otherwise leave
+#' `value` untouched. `condition` already encodes both "was this supplied"
+#' and "does the chosen model use it", since the two differ by argument
+#' (`!is.null(x)` for `casecon`/`treat`, the bare flag for `usetrt`).
+#' @noRd
+warn_unused_arg <- function(value, condition, off_value, message, context) {
+  if (!condition) return(value)
+  warning(sprintf(message, context), call. = FALSE)
+  off_value
 }
