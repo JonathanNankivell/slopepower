@@ -864,6 +864,24 @@ them.
 
 ---
 
+## 27. A target power at or below `alpha / 2` is refused
+
+**Stata** accepts any `power()` in (0, 1). The sample-size formula's numerator,
+`(invnormal(1 - alpha/2) + invnormal(power))^2`, is a square: it falls to
+zero at `power = alpha/2` and climbs again below it. So below that point a
+*lower* target power gives a *larger* trial. `stata-reference` row
+`POW-0.001` returns N = 116 (58 per arm) at `power(.001)`, where
+`power(.025)` would give 1 per arm, and `power(.025)` exactly would give 0.
+
+**R** stops with an error naming the bound (`check_target_power()`, shared by
+`slope_sample_size()`, the grids and `slope_sample_size_floor()`). Power at or
+below `alpha/2` is what a trial with no effect at all already has, so no
+sample size is the answer to it. Nobody would mean to ask for this. A row like
+`POW-0.001` is a probe of the guard, not a design, so refusing it is a
+validation fix, not a change to the method.
+
+---
+
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded

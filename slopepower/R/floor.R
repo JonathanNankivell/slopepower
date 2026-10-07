@@ -101,7 +101,7 @@ slope_var_floor <- function(params) {
 floor_result <- function(params, effectiveness, target, power, alpha, per_arm, context) {
   check_params(params, context)
   check_probability(alpha, "alpha", context)
-  check_probability(power, "power", context)
+  check_target_power(power, alpha, context)
   per_arm <- check_per_arm(per_arm, context)
 
   comp <- target_components(params, target, effectiveness, context)
@@ -163,7 +163,7 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #'   `target = "observed"`, which fixes it at 1.
 #' @param target `"effectiveness"` (the default) or `"observed"`. As in
 #'   [slope_sample_size()]; see its "The reference slope" section.
-#' @param power Desired power, in (0, 1). Defaults to 0.8.
+#' @param power Desired power, between `alpha / 2` and 1. Defaults to 0.8.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
 #' @param per_arm Which basis to print `N` on: `TRUE` (the default) for
 #'   participants per arm, `FALSE` for the trial total. Display only, as in

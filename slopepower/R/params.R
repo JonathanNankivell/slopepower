@@ -67,7 +67,9 @@ coerce_binary <- function(x, name, context, meaning) {
                  context, name, meaning,
                  paste(format(u), collapse = "/")), call. = FALSE)
   }
-  as.numeric(x)
+  # all.equal() admits codes a hair off 0/1; snap them so the `== 1` tests
+  # downstream see exactly what this check accepted.
+  as.numeric(x == u[2L])
 }
 
 #' Look up a fixed effect by name, or stop
@@ -450,10 +452,11 @@ fill_baseline_covariates <- function(dat, cols) {
 #' @param data A data frame in long format, one row per measurement.
 #' @param healthy Optional bare column name identifying healthy controls, coded
 #'   `1` for cases (subjects with the disease) and `0` for healthy controls.
+#'   Looked up in `data` first, then in the calling environment.
 #'   Mutually exclusive with `treated`.
 #' @param treated Optional bare column name identifying the treated arm of a
 #'   previously conducted trial, coded `1` for treated and `0` for the control
-#'   arm. Mutually exclusive with `healthy`.
+#'   arm. Looked up as for `healthy`. Mutually exclusive with `healthy`.
 #' @param origin `"subject"` (default) shifts each subject's time so their first
 #'   visit is time zero, reproducing the Stata command's behaviour and ensuring
 #'   the random intercept is estimated at baseline. `"none"` leaves time as
@@ -671,6 +674,11 @@ slope_params <- function(formula, data,
                          covariates = NULL, covariate_time = TRUE) {
   context <- "slope_params()"
   cl <- match.call()
+  # `healthy`/`treated` are arguments of this call, so a symbol in them that is
+  # not a column belongs to whoever wrote the call -- not to whoever built the
+  # formula, which can be a different frame entirely (a wrapper passing its
+  # own group vector alongside a formula made at top level).
+  caller <- parent.frame()
   origin <- match.arg(origin)
 
   data <- tryCatch(as.data.frame(data), error = function(e) {
@@ -708,7 +716,7 @@ slope_params <- function(formula, data,
   grp <- NULL
   if (comparator != "none") {
     gexpr <- if (comparator == "healthy") healthy_expr else treated_expr
-    graw  <- eval_column(gexpr, data, env, context, comparator)
+    graw  <- eval_column(gexpr, data, caller, context, comparator)
     grp   <- coerce_binary(graw, comparator, context,
                            meaning = if (comparator == "healthy") "case" else "treated")
     if (length(grp) != length(y)) {

@@ -41,11 +41,14 @@ grid_cell_args <- function(g) {
 #' treatment effect per distinct `effectiveness`
 #'
 #' Every cell of the grid gets its own `n` closure, a `function(p) numeric(1)`
-#' re-solving [slope_sample_size()] against one resampled replicate's refitted
-#' parameters `p` and the cell's own design and scalar values. `power` is
-#' spliced in as the fixed argument the way `bootstrap_stage_two()`
-#' (bootstrap.R) does for a single result; [resolve_args()] -- the same
-#' helper -- supplies `design`, `target`, `alpha` and `effectiveness`.
+#' giving the sample size [slope_sample_size()] would report against one
+#' resampled replicate's refitted parameters `p` and the cell's own design and
+#' scalar values. It is that function's own arithmetic -- [effect_components()]
+#' then [size_per_arm()], as [solve_slope()] (power.R) runs them -- but the
+#' effect size is shared, through [memo_scaled_effect()], by every cell with
+#' the same design and `effectiveness`: re-solving it once per `power` and
+#' `alpha` level as well made a D x P x A x E grid do D x P x A x E full
+#' solves per replicate, and per jackknife refit, where D x E would do.
 #'
 #' `tte` gets one closure per *distinct* `effectiveness` level instead of one
 #' per cell. The target treatment effect is
@@ -71,8 +74,8 @@ grid_cell_args <- function(g) {
 #' so neither has to learn that a column may serve more than one cell; the
 #' `tte_of` map below is what remembers which.
 #'
-#' Each closure closes over `slim`/`power_k`, or over one `effectiveness`
-#' level, alone -- not over `params` or the grid itself -- so a
+#' Each closure closes over its cell's design and scalar values, or over one
+#' `effectiveness` level, alone -- not over `params` or the grid itself -- so a
 #' several-hundred-replicate run does not keep the original fit, and its model
 #' frame, reachable through every closure. `lapply()` rather than a loop, so
 #' each closure captures its own values in a fresh call frame instead of the
@@ -85,13 +88,6 @@ grid_cell_args <- function(g) {
 grid_boot_computes <- function(g, target, context) {
   cell_args <- grid_cell_args(g)
 
-  n <- lapply(seq_len(g$n_cells), function(k) {
-    slim <- list(design = g$designs[[g$design_of[k]]], target = target,
-                alpha = cell_args[[k]]$alpha, effectiveness = cell_args[[k]]$effectiveness)
-    power_k <- cell_args[[k]]$power
-    function(p) do.call(slope_sample_size, c(resolve_args(p, slim), list(power = power_k)))$n
-  })
-
   # NA_real_ stands for the absent level of a grid solved for
   # `target = "observed"`, where `effectiveness` is not an axis and
   # `cell_args` carries none; match() pairs NA with NA, so every cell of such
@@ -100,12 +96,67 @@ grid_boot_computes <- function(g, target, context) {
                 function(a) if (is.null(a$effectiveness)) NA_real_ else a$effectiveness,
                 numeric(1L))
   eff_levels <- unique(eff)
+  eff_of <- match(eff, eff_levels)
+
+  # The scaled effect size depends on the design and `effectiveness` alone, so
+  # cells differing only in `power` or `alpha` share one solve per replicate.
+  pair <- paste(g$design_of, eff_of)
+  pair_levels <- unique(pair)
+  effect <- lapply(pair_levels, function(key) {
+    k <- match(key, pair)
+    eff_k <- if (is.na(eff[k])) NULL else eff[k]
+    memo_scaled_effect(g$designs[[g$design_of[k]]], eff_k, target, context)
+  })
+  pair_of <- match(pair, pair_levels)
+
+  # alpha and power were validated by the point-estimate grid already solved
+  # from these same cells, so z_alpha() is taken once here, not per replicate.
+  n <- lapply(seq_len(g$n_cells), function(k) {
+    effect_k <- effect[[pair_of[k]]]
+    z_a <- z_alpha(cell_args[[k]]$alpha, context)
+    power_k <- cell_args[[k]]$power
+    function(p) 2 * size_per_arm(effect_k(p), z_a, power_k)$n_per_arm
+  })
+
   tte <- lapply(eff_levels, function(e) {
     eff_e <- if (is.na(e)) NULL else e
     function(p) target_components(p, target, eff_e, context)$tte
   })
 
-  list(n = n, tte = tte, tte_of = match(eff, eff_levels))
+  list(n = n, tte = tte, tte_of = eff_of)
+}
+
+#' One design's scaled effect size against a replicate, remembered for the
+#' replicate
+#'
+#' [boot_replicate_matrix()] and [jackknife_values()] call every column's
+#' closure on the same `p` in turn, so the cells sharing a design and an
+#' `effectiveness` level ask for the same effect size one after another. This
+#' solves it for the first and hands it back to the rest: [effect_components()]
+#' -- the parameter check, the design's positive-definiteness check and every
+#' dropout stratum's variance -- is the whole cost of a stage-two solve, and
+#' [size_per_arm()] after it is a line of arithmetic.
+#'
+#' `identical()` is the key, so a hit is exact rather than heuristic; for the
+#' same object it returns at once on the pointer. Only a success is
+#' remembered: a replicate whose solve fails fails again for every cell
+#' asking, each one recorded as its own `NA`, exactly as before. The single
+#' replicate held between calls is the one in hand anyway.
+#'
+#' The value is `abs(effect_size) * effectiveness`, as [solve_slope()]
+#' (power.R) scales it before calling [size_per_arm()].
+#' @noRd
+memo_scaled_effect <- function(design, effectiveness, target, context) {
+  last_p <- NULL
+  last <- NULL
+  function(p) {
+    if (!identical(p, last_p)) {
+      comp <- effect_components(p, design, target, effectiveness, context)
+      last <<- abs(comp$effect_size) * comp$effectiveness
+      last_p <<- p
+    }
+    last
+  }
 }
 
 #' Flatten the compute list into the shape [boot_replicate_matrix()] and
@@ -203,11 +254,17 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'   `print(x, per_arm = ...)`.
 #'
 #' @return A data frame of class `c("slope_sample_size_grid_boot",
-#'   "data.frame")`, one row per cell, with the fifteen columns
-#'   [slope_sample_size_grid()] reports plus:
+#'   "data.frame")`, one row per cell, with the columns
+#'   [slope_sample_size_grid()] reports -- except that both bases are kept,
+#'   whatever `per_arm` says: `n` is always the trial total, beside
+#'   `n_per_arm`, and `visits` is split into `visits_total` and
+#'   `visits_per_arm`. So `n` here is *not* the `n` of a
+#'   [slope_sample_size_grid()] called with the default `per_arm = TRUE`;
+#'   compare `n_per_arm` with that. The table also has:
 #'   \describe{
 #'     \item{`n_mean`, `n_sd`, `n_lower`, `n_upper`}{The bootstrap mean, SD
-#'       and confidence interval of that cell's sample size. The interval is
+#'       and confidence interval of that cell's sample size, on the trial-total
+#'       basis of `n`. The interval is
 #'       widened to the nearest even sizes a trial could actually be run at,
 #'       as a single [slope_bootstrap()] call does for `statistic = "n"`.}
 #'     \item{`tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`}{The same, for the
@@ -238,10 +295,9 @@ grid_boot_cell_stat <- function(col, jack_col, observed, type, probs, context, w
 #'   perturbs and every cell's interval is a function of it. The printed
 #'   table does not show them --- it reports the cells and, beneath them,
 #'   `straddle` --- so these six attributes are where a reader who wants the
-#'   slope's own interval finds it. Base
-#'   `[.data.frame` drops attributes it does not know, so `x[1:3, ]` keeps
-#'   the class but not these; [print.slope_sample_size_grid_boot()] falls
-#'   back to a plain data-frame print when they are absent.
+#'   slope's own interval finds it. They describe the whole table, so a
+#'   subset such as `x[1:3, ]` drops them *and* the class, returning a plain
+#'   data frame of the surviving cells, printed as one.
 #'
 #' @examples
 #' # No comparator: fitted to all two hundred participants of `slpower1`.
@@ -348,8 +404,8 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
 
   report_collected(context, starved, g$n_cells,
                    paste0("fewer than two replicates succeeded for `n` (%s), so no interval ",
-                          "could be built for it there. Its `n_*`/`tte_*` columns are NA for ",
-                          "those rows."))
+                          "could be built for it there. Its `n_*` columns are NA for those ",
+                          "rows; its `tte_*` columns are built separately and are unaffected."))
 
   extract <- function(res, field, template) vapply(res, function(r) r[[field]], template)
 

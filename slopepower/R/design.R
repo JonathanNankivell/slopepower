@@ -275,9 +275,16 @@ expand_dropout_rate <- function(spec, visits, ctx, where = "") {
 trial_design <- function(visits,
                          dropout = NULL,
                          dropout_type = c("incremental", "cumulative")) {
-  ctx <- "trial_design()"
-  dropout_type <- match.arg(dropout_type)
+  build_trial_design(visits, dropout, match.arg(dropout_type), "trial_design()")
+}
 
+#' The body of [trial_design()], with the caller's name for its errors
+#'
+#' [as_trial_design()] builds a design from a bare vector of visit times too,
+#' and an error there belongs to the stage-two function the user called, not
+#' to a `trial_design()` they never typed.
+#' @noRd
+build_trial_design <- function(visits, dropout, dropout_type, ctx) {
   visits <- validate_visits(visits, ctx)
   n_visits <- length(visits)
   n_intervals <- n_visits - 1L
@@ -486,7 +493,8 @@ check_dropout_total <- function(dropout, name, ctx) {
 #' Coerce and validate the `design` argument of a stage-two call
 #'
 #' Accepts a `trial_design` object, or a bare numeric vector of visit times
-#' which is passed to [trial_design()]. Lives here, beside the class it
+#' which is built into one as [trial_design()] would, errors named for
+#' `context`. Lives here, beside the class it
 #' validates, rather than with the calculations that call it.
 #'
 #' The rules for `visits` and `dropout` come from the constructor's own
@@ -503,7 +511,7 @@ check_dropout_total <- function(dropout, name, ctx) {
 #' by [trial_design()].
 #' @noRd
 as_trial_design <- function(design, context) {
-  if (is.numeric(design)) design <- trial_design(visits = design)
+  if (is.numeric(design)) design <- build_trial_design(design, NULL, "incremental", context)
   if (!inherits(design, "trial_design")) {
     stop(sprintf("%s: `design` must be a `trial_design` object or a numeric vector of visit times.",
                  context), call. = FALSE)
