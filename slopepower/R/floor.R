@@ -135,13 +135,7 @@ slope_var_floor <- function(params) {
 floor_result <- function(params, effectiveness, target, alpha, per_arm, context,
                          n = NULL, power = NULL) {
   check_params(params, context)
-  check_probability(alpha, "alpha", context)
-  solving_for_n <- is.null(n)
-  if (solving_for_n) {
-    check_target_power(power, alpha, context)
-  } else {
-    check_whole_number(n, "n", "participants", context, lower = 2)
-  }
+  solving_for_n <- check_n_or_power(alpha, n, power, context)
   per_arm <- check_per_arm(per_arm, context)
 
   comp <- target_components(params, target, effectiveness, context)
@@ -154,9 +148,9 @@ floor_result <- function(params, effectiveness, target, alpha, per_arm, context,
     n_per_arm <- size_per_arm(scaled_effect, z_a, power)$n_per_arm
     cls <- "slope_sample_size_floor"
   } else {
-    # Evened down and split 1:1 exactly as slope_power() does.
-    n_per_arm <- floor(n / 2)
-    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
+    at_n <- power_at_n(scaled_effect, z_a, n)
+    n_per_arm <- at_n$n_per_arm
+    power <- at_n$power
     cls <- "slope_power_ceiling"
   }
 
@@ -167,8 +161,7 @@ floor_result <- function(params, effectiveness, target, alpha, per_arm, context,
                           alpha = alpha, var_tte = var_tte,
                           effect_size = effect_size, params = params)
   if (!solving_for_n) {
-    res <- append(res, list(n_requested = as.numeric(n)),
-                  after = match("n_per_arm", names(res)))
+    res <- add_n_requested(res, n)
   }
   structure(res, class = c(cls, "slope_result"), per_arm = per_arm)
 }
@@ -362,11 +355,7 @@ print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
 print.slope_power_ceiling <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_power_ceiling()")
   print_opening_blocks(x)
-  if (per_arm) {
-    cat_count("specified N per arm", x$n_requested / 2)
-  } else {
-    cat_line("specified N", x$n_requested, digits = 0L)
-  }
+  cat_specified_n_line(x, per_arm)
   cat_n_line(x, per_arm, total_label = "actual N")
   print_target_lines(x)
   cat_line("visit schedule", "any (the bound holds for all)")

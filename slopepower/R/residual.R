@@ -242,6 +242,15 @@ time_key <- function(t) signif(t, 10L)
 #' @noRd
 is_whole <- function(t) abs(t - round(t)) <= 1e-8 * pmax(1, abs(t))
 
+#' Position of each of `x` among `times`, to the same tolerance, or `NA`
+#' @noRd
+match_times <- function(x, times) {
+  vapply(x, function(v) {
+    hit <- which(abs(times - v) <= 1e-8 * max(1, abs(v)))
+    if (length(hit)) hit[1L] else NA_integer_
+  }, integer(1L))
+}
+
 #' Labels for the visit grid, as `varIdent()` levels and in printed output
 #' @noRd
 time_labels <- function(times) as.character(signif(times, 12L))
@@ -343,7 +352,7 @@ residual_components <- function(fit, spec, grid, comparator, context) {
   }
   cs <- fit$modelStruct$corStruct
   coefs <- if (is.null(cs)) numeric() else
-    correlation_coef(stats::coef(cs, unconstrained = FALSE), spec$correlation, length(grid))
+    correlation_coef(stats::coef(cs, unconstrained = FALSE), spec$correlation)
 
   sd_ratio <- NULL
   if (spec$by_visit) {
@@ -376,7 +385,7 @@ residual_components <- function(fit, spec, grid, comparator, context) {
 #' covariate), so they are renamed here by position, once, to the names
 #' [check_residual()] and [residual_cor()] read.
 #' @noRd
-correlation_coef <- function(x, correlation, n_times) {
+correlation_coef <- function(x, correlation) {
   x <- as.numeric(x)
   switch(correlation,
     corAR1  = ,
@@ -445,7 +454,7 @@ residual_manual <- function(correlation, weights, times, context) {
     cs <- tryCatch(nlme::Initialize(cs, dummy), error = function(e) {
       stop(sprintf("%s: invalid `correlation`: %s", context, conditionMessage(e)), call. = FALSE)
     })
-    coefs <- correlation_coef(stats::coef(cs, unconstrained = FALSE), cls, length(probe))
+    coefs <- correlation_coef(stats::coef(cs, unconstrained = FALSE), cls)
   }
 
   sd_ratio <- NULL
@@ -474,10 +483,7 @@ manual_sd_ratio <- function(weights, times, context) {
   }
   # nlme stores a varIdent's values on the log scale until it is initialised.
   ratio <- exp(as.numeric(v))
-  at <- vapply(suppressWarnings(as.numeric(names(v))), function(nm) {
-    hit <- which(abs(times - nm) <= 1e-8 * max(1, abs(nm)))
-    if (length(hit)) hit[1L] else NA_integer_
-  }, integer(1L))
+  at <- match_times(suppressWarnings(as.numeric(names(v))), times)
   if (anyNA(at)) {
     stop(sprintf("%s: `weights` names level(s) %s, which are not among `times` (%s).",
                  context, paste(sQuote(names(v)[is.na(at)]), collapse = ", "),
@@ -646,10 +652,7 @@ residual_cor <- function(residual, t, pos, context) {
 #' Positions of planned visits in a structure's visit grid, or a refusal
 #' @noRd
 grid_positions <- function(t, times, context) {
-  pos <- vapply(t, function(v) {
-    hit <- which(abs(times - v) <= 1e-8 * max(1, abs(v)))
-    if (length(hit)) hit[1L] else NA_integer_
-  }, integer(1L))
+  pos <- match_times(t, times)
   if (anyNA(pos)) {
     stop(sprintf(paste0(
       "%s: the residual structure has a parameter for each of the visit times %s, and ",
@@ -734,7 +737,6 @@ residual_note <- function(residual) {
                     sprintf(", defined at times %s only", label_numeric(residual$times)),
                   if (!residual_on_grid(residual)) "" else
                     "; planned visits must be among those times")
-  cat("\n", paste(strwrap(text, width = 72L, initial = "Note: ", prefix = "      "),
-                  collapse = "\n"), "\n", sep = "")
+  cat_note(text)
   invisible()
 }

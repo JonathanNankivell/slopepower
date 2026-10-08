@@ -533,8 +533,7 @@ covariate_note <- function(covariates) {
                   if (!isTRUE(covariates$time)) "" else
                     if (length(covariates$columns) == 1L) " and its interaction with time"
                     else ", and their interactions with time")
-  cat("\n", paste(strwrap(text, width = 72L, initial = "Note: ", prefix = "      "),
-                  collapse = "\n"), "\n", sep = "")
+  cat_note(text)
   invisible()
 }
 

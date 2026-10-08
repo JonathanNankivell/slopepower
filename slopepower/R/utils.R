@@ -185,9 +185,9 @@ display_basis <- function(x, per_arm, context) {
 #' otherwise, so a per-arm figure that happens to be exact still prints
 #' without a spurious ".0", and one that is not keeps its one decimal place.
 #' @noRd
-cat_count <- function(label, value, width = 39L) {
+cat_count <- function(label, value) {
   digits <- if (is.na(value) || value == round(value)) 0L else 1L
-  cat_line(label, value, width = width, digits = digits)
+  cat_line(label, value, digits = digits)
 }
 
 #' Print the sample-size line on the chosen display basis
@@ -208,6 +208,31 @@ cat_n_line <- function(x, per_arm, total_label = "N") {
     cat_line(total_label, x$n, digits = 0L)
   }
   invisible(x)
+}
+
+#' Print the requested (un-evened) sample size of a power-direction result
+#'
+#' The sibling of [cat_n_line()], shared by [print.slope_power()] and
+#' [print.slope_power_ceiling()]. `n_requested` has not been evened, so its
+#' per-arm figure can be a half participant -- [cat_count()] prints that
+#' decimal rather than `cat_line()`'s `digits = 0L` path rounding it away.
+#' @noRd
+cat_specified_n_line <- function(x, per_arm) {
+  if (per_arm) {
+    cat_count("specified N per arm", x$n_requested / 2)
+  } else {
+    cat_line("specified N", x$n_requested, digits = 0L)
+  }
+  invisible(x)
+}
+
+#' Print a wrapped "Note:" paragraph after a blank line
+#'
+#' Shared by `covariate_note()` and `residual_note()`, which print together.
+#' @noRd
+cat_note <- function(text) {
+  cat("\n", paste(strwrap(text, width = 72L, initial = "Note: ", prefix = "      "),
+                  collapse = "\n"), "\n", sep = "")
 }
 
 #' The two-sided critical value, computed exactly as the Stata original does
@@ -441,8 +466,8 @@ check_column_name <- function(value, name, data, context) {
 #' trailing space before every newline. That is exactly the drift `fmt_line()`
 #' was extracted to prevent, reappearing in the plumbing around it.
 #' @noRd
-cat_line <- function(label, value, width = 39L, digits = 3L) {
-  cat(fmt_line(label, value, width = width, digits = digits), "\n", sep = "")
+cat_line <- function(label, value, digits = 3L) {
+  cat(fmt_line(label, value, digits = digits), "\n", sep = "")
 }
 
 #' Format a labelled value the way the Stata command does, for print methods
@@ -454,7 +479,7 @@ cat_line <- function(label, value, width = 39L, digits = 3L) {
 #' a column of `0.000` indistinguishable from a degenerate fit. The reasoning,
 #' and the worked examples behind the 5%, are in DIVERGENCES.md section 26.
 #' @noRd
-fmt_line <- function(label, value, width = 39L, digits = 3L) {
+fmt_line <- function(label, value, digits = 3L) {
   val <- if (is.character(value)) {
     value
   } else if (is.na(value)) {
@@ -475,7 +500,7 @@ fmt_line <- function(label, value, width = 39L, digits = 3L) {
       fixed
     }
   }
-  sprintf("%s = %s", formatC(label, width = width), val)
+  sprintf("%s = %s", formatC(label, width = 39L), val)
 }
 
 #' Has a fixed-decimal rendering lost too much of a value to be worth reading?

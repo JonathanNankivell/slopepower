@@ -982,8 +982,8 @@ slope_sample_size_floor_boot <- function(params, power = 0.8, effectiveness = 0.
   ci_method <- check_boot_args(R, ci_method, level, context)
   per_arm <- check_per_arm(per_arm, context)
   x <- floor_result(params, effectiveness, target, alpha, per_arm, context, power = power)
-  bootstrap_bound(x, "power", statistic, R, ci_method, level, seed, progress, per_arm,
-                  context, "slope_sample_size_floor_boot")
+  bootstrap_stage_two(x, floor_result, "power", statistic, R, ci_method, level, seed,
+                      progress, per_arm, context, "slope_sample_size_floor_boot")
 }
 
 #' @rdname slope_sample_size_floor_boot
@@ -1015,37 +1015,8 @@ slope_power_ceiling_boot <- function(params, n, effectiveness = 0.25,
   x <- floor_result(params, effectiveness, target, alpha, per_arm, context, n = n)
   # `x$n` rather than the `n` supplied: the even number actually used, as in
   # slope_power_boot().
-  bootstrap_bound(x, "n", statistic, R, ci_method, level, seed, progress, per_arm,
-                  context, "slope_power_ceiling_boot")
-}
-
-#' Build one bound-replicate closure in an environment of its own
-#'
-#' [boot_stage_two_compute()]'s counterpart for the bounds, which have no
-#' design: the closure holds the settings and nothing else, for the reason
-#' given at that function's call site.
-#' @noRd
-boot_bound_compute <- function(slim, fixed, statistic, context) {
-  function(p) {
-    do.call(floor_result, c(list(params = p, effectiveness = slim$effectiveness,
-                                 target = slim$target, alpha = slim$alpha,
-                                 per_arm = TRUE, context = context), fixed))[[statistic]]
-  }
-}
-
-#' Shared body of the two bound bootstraps
-#'
-#' [bootstrap_stage_two()] with [floor_result()] in place of a stage-two
-#' solver: `fixed_name` is the input held fixed -- `"power"` for the floor,
-#' `"n"` for the ceiling.
-#' @noRd
-bootstrap_bound <- function(x, fixed_name, statistic, R, ci_method, level, seed,
-                            progress, per_arm, context, cls) {
-  fixed <- stats::setNames(list(x[[fixed_name]]), fixed_name)
-  slim <- x[c("target", "alpha", "effectiveness")]
-  compute <- boot_bound_compute(slim, fixed, statistic, context)
-  run_bootstrap(x$params, compute, x[[statistic]], statistic, R, ci_method, level,
-                seed, progress, per_arm, context, cls)
+  bootstrap_stage_two(x, floor_result, "n", statistic, R, ci_method, level, seed,
+                      progress, per_arm, context, "slope_power_ceiling_boot")
 }
 
 #' Bootstrap the fitted slope
@@ -1093,18 +1064,19 @@ slope_params_boot <- function(params, R = 999, ci_method = c("bca", "percentile"
 #' @noRd
 boot_stage_two_compute <- function(fn, slim, fixed, statistic, context) {
   function(p) {
-    do.call(fn, c(list(params = p, design = slim$design, target = slim$target,
-                       alpha = slim$alpha, effectiveness = slim$effectiveness,
-                       per_arm = TRUE, context = context), fixed))[[statistic]]
+    do.call(fn, c(list(params = p), slim,
+                  list(per_arm = TRUE, context = context), fixed))[[statistic]]
   }
 }
 
-#' Shared body of the two stage-two bootstrap functions
+#' Shared body of the stage-two and bound bootstrap functions
 #'
-#' [slope_sample_size_boot()] and [slope_power_boot()] differ only in which
-#' calculation is re-solved on each replicate and which of its inputs is held
-#' fixed while doing so; everything after the observed result `x` has been
-#' solved is identical.
+#' [slope_sample_size_boot()], [slope_power_boot()] and the two bound
+#' bootstraps differ only in which calculation is re-solved on each replicate
+#' (`fn`: a stage-two solver, or [floor_result()] for the bounds) and which of
+#' its inputs is held fixed while doing so -- `fixed_name`, `"power"` or `"n"`;
+#' everything after the observed result `x` has been solved is identical. A
+#' bound has no design, so `x` carries no `design` field to pass on.
 #'
 #' `effectiveness` is carried as `x` reports it -- `NA` under
 #' `target = "observed"`, where [target_components()] ignores it.
@@ -1118,7 +1090,7 @@ bootstrap_stage_two <- function(x, fn, fixed_name, statistic, R, ci_method, leve
   # the original fit and its model frame -- keeping all of it reachable through
   # the closure for as long as the closure lives, however slim the `slim` copy
   # is. R closures capture environments, not the variables named in them.
-  slim <- x[c("design", "target", "alpha", "effectiveness")]
+  slim <- x[intersect(c("design", "target", "alpha", "effectiveness"), names(x))]
   compute <- boot_stage_two_compute(fn, slim, fixed, statistic, context)
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, ci_method, level,
                 seed, progress, per_arm, context, cls)

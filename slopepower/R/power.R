@@ -496,6 +496,43 @@ size_per_arm <- function(scaled_effect, z_a, power) {
   list(z_sum_sq = z_sum_sq, n_per_arm = ceiling(z_sum_sq / scaled_effect^2))
 }
 
+#' The power a scaled effect achieves at a total sample size `n`
+#'
+#' The inverse direction of [size_per_arm()], written once for the same reason.
+#' `n` is forced even and split 1:1, so `n_per_arm` -- not the requested `n` --
+#' is what a result is built from; `stage_two_result()` reports 2 * n_per_arm.
+#' @noRd
+power_at_n <- function(scaled_effect, z_a, n) {
+  n_per_arm <- floor(n / 2)
+  list(n_per_arm = n_per_arm,
+       power = stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a))
+}
+
+#' Validate `alpha` and whichever of `n` and `power` is being supplied
+#'
+#' Returns `TRUE` when solving for `n` (i.e. `n` is `NULL`).
+#' @noRd
+check_n_or_power <- function(alpha, n, power, context) {
+  check_probability(alpha, "alpha", context)
+  if (is.null(n)) {
+    check_target_power(power, alpha, context)
+  } else {
+    check_whole_number(n, "n", "participants", context, lower = 2)
+  }
+  is.null(n)
+}
+
+#' Add `n_requested` to a power-direction result
+#'
+#' Kept separately from `n`, which is the even number actually used. Positioned
+#' by name rather than by index: CONTRACT.md section 4.2 fixes it "after
+#' n_per_arm", and `stage_two_result()` assembles that list elsewhere.
+#' @noRd
+add_n_requested <- function(res, n) {
+  append(res, list(n_requested = as.numeric(n)),
+         after = match("n_per_arm", names(res)))
+}
+
 #' Validate a target power against the alpha it is paired with
 #'
 #' [check_probability()] admits any power in (0, 1), but [size_per_arm()]'s
@@ -570,14 +607,7 @@ stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
 #' @noRd
 solve_slope <- function(params, design, effectiveness,
                         target, alpha, n, power, context) {
-  check_probability(alpha, "alpha", context)
-
-  solving_for_n <- is.null(n)
-  if (solving_for_n) {
-    check_target_power(power, alpha, context)
-  } else {
-    check_whole_number(n, "n", "participants", context, lower = 2)
-  }
+  solving_for_n <- check_n_or_power(alpha, n, power, context)
 
   comp <- effect_components(params, design, target, effectiveness, context)
 
@@ -592,10 +622,9 @@ solve_slope <- function(params, design, effectiveness,
     z_sum_sq <- sized$z_sum_sq
     n_per_arm <- sized$n_per_arm
   } else {
-    # Forced even and split 1:1, so `n_per_arm` -- not the requested `n` -- is
-    # what the result is built from; `stage_two_result()` reports 2 * n_per_arm.
-    n_per_arm <- floor(n / 2)
-    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
+    at_n <- power_at_n(scaled_effect, z_a, n)
+    n_per_arm <- at_n$n_per_arm
+    power <- at_n$power
   }
 
   # With dropout no single s*^2 applies across strata, so report the effective
@@ -975,11 +1004,7 @@ power_result <- function(params, design, n, effectiveness = NULL, target, alpha,
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
                      n = n, power = NULL, context = context)
-  # Kept separately from `n`, which is the even number actually used. Positioned
-  # by name rather than by index: CONTRACT.md section 4.2 fixes it "after
-  # n_per_arm", and solve_slope() assembles that list two hundred lines away.
-  res <- append(res, list(n_requested = as.numeric(n)),
-                after = match("n_per_arm", names(res)))
+  res <- add_n_requested(res, n)
   structure(res, class = c("slope_power", "slope_result"), per_arm = per_arm)
 }
 
@@ -1112,14 +1137,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 print.slope_power <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_power()")
   print_opening_blocks(x)
-  if (per_arm) {
-    # `n_requested` has not been evened, so its per-arm figure can be a half
-    # participant -- cat_count() (utils.R) prints that decimal rather than
-    # cat_line()'s digits = 0L path silently rounding it away.
-    cat_count("specified N per arm", x$n_requested / 2)
-  } else {
-    cat_line("specified N", x$n_requested, digits = 0L)
-  }
+  cat_specified_n_line(x, per_arm)
   cat_n_line(x, per_arm, total_label = "actual N")
   print_design_block(x)
   cat("\nEstimated power:\n")

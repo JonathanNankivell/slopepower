@@ -124,9 +124,8 @@ grid_boot_computes <- function(g, target, statistic, context) {
       power_k <- cell_args[[k]]$power
       function(p) 2 * size_per_arm(scale_effect(effect_k(p), scale_k), z_a, power_k)$n_per_arm
     } else {
-      # Evened down and split 1:1 exactly as solve_slope() does for slope_power().
-      n_per_arm_k <- floor(cell_args[[k]]$n / 2)
-      function(p) stats::pnorm(scale_effect(effect_k(p), scale_k) * sqrt(n_per_arm_k) - z_a)
+      n_k <- cell_args[[k]]$n
+      function(p) power_at_n(scale_effect(effect_k(p), scale_k), z_a, n_k)$power
     }
   })
 
@@ -556,16 +555,7 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
 
 #' @rdname sub-.slope_sample_size_grid_boot
 #' @export
-`[.slope_power_grid_boot` <- function(x, ...) {
-  out <- NextMethod()
-  if (inherits(out, "data.frame")) {
-    class(out) <- setdiff(class(out), c("slope_sample_size_grid_boot",
-                                        "slope_power_grid_boot"))
-    extra <- setdiff(names(attributes(out)), c("names", "row.names", "class"))
-    for (a in extra) attr(out, a) <- NULL
-  }
-  out
-}
+`[.slope_power_grid_boot` <- `[.slope_sample_size_grid_boot`
 
 # ---------------------------------------------------------------------------
 # printing
