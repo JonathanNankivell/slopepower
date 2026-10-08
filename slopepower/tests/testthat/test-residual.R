@@ -138,6 +138,18 @@ test_that("corSymm() and varIdent() need a shared visit schedule", {
                "shared across participants")
 })
 
+test_that("under `healthy`, varIdent() needs every visit time in each group", {
+  # Pooled over both groups every time is well attended; the cases alone have
+  # no visit 3, so their `case:3` variance does not exist.
+  d <- load_paper_data("slpower2")
+  d$visit <- stats::ave(d$time, d$id, FUN = seq_along) - 1
+  d <- d[!(d$case == 1 & d$visit == 3), ]
+  expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy",
+                                             group = case,
+                                             weights = varIdent(form = ~ 1 | visit))),
+               "Among the cases, time\\(s\\) 3 have fewer")
+})
+
 test_that("two measurements at one time within a participant are refused", {
   d <- load_paper_data("slpower1")
   d <- rbind(d, d[d$id == 1 & d$time == 1, ])
@@ -267,6 +279,14 @@ test_that("a hand-edited residual field is re-checked before use", {
   p <- manual(correlation = corSymm(c(0.3, 0.2, 0.4)), times = 0:2)
   p$residual$times <- NULL
   expect_error(slope_var(p, 0:2), "`times` must be given exactly when")
+  # residual_cor() reads the coefficients by name, so unnamed ones are refused
+  # here rather than failing there, or dropping a nugget.
+  p <- manual(correlation = corCAR1(0.5))
+  p$residual$coef <- unname(p$residual$coef)
+  expect_error(slope_var(p, 0:2), "`coef` must be named `Phi`")
+  p <- manual(correlation = corExp(c(2, 0.3), nugget = TRUE))
+  p$residual$coef <- unname(p$residual$coef)
+  expect_error(slope_var(p, 0:2), "`coef` must be named `range`, or `range` and `nugget`")
 })
 
 test_that("an object without a residual field, from before it existed, still works", {

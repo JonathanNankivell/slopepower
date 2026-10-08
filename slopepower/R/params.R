@@ -1024,7 +1024,10 @@ slope_params <- function(formula, data,
   }
   # On the times as fitted, after the origin shift: a visit grid is a set of
   # times since each participant's first visit.
-  grid <- if (!is.null(spec)) check_residual_data(spec, dat$sp_time, dat$sp_subject, context)
+  grid <- if (!is.null(spec)) {
+    check_residual_data(spec, dat$sp_time, dat$sp_subject, context,
+                        group = if (comparator == "healthy") dat$sp_case)
+  }
 
   if (comparator != "none") {
     if (length(unique(dat$sp_case)) != 2L) {

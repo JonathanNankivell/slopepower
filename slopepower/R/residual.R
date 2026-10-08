@@ -173,10 +173,14 @@ check_struct_form <- function(struct, name, parts, context) {
 #'   participants -- one parameter per distinct time means nothing when every
 #'   participant was seen on different days.
 #'
+#' Under `healthy` with `varIdent()`, the last check is also made within each
+#' group, since each group then has a variance per visit time.
+#'
+#' @param group The case indicator under `healthy`, else `NULL`.
 #' @return The sorted distinct times (the visit grid) when the structure needs
 #'   one, else `NULL`.
 #' @noRd
-check_residual_data <- function(spec, time, subject, context) {
+check_residual_data <- function(spec, time, subject, context, group = NULL) {
   if (anyDuplicated(data.frame(subject, time_key(time)))) {
     stop(sprintf(paste0(
       "%s: a residual correlation needs at most one measurement per participant at each ",
@@ -205,6 +209,27 @@ check_residual_data <- function(spec, time, subject, context) {
       context,
       if (spec$by_visit) "`weights = varIdent()`" else "corSymm()",
       sum(seen < 2L), length(grid)), call. = FALSE)
+  }
+  # Under `healthy` the `varIdent()` stratum is crossed with the group (see
+  # add_residual_columns()), so each group has to cover the whole grid on its
+  # own; the pooled count above would pass a time attended by controls only.
+  if (spec$by_visit && !is.null(group)) {
+    for (g in c(1, 0)) {
+      in_g <- group == g
+      seen_g <- tapply(subject[in_g], factor(key[in_g], levels = grid),
+                       function(s) length(unique(s)))
+      seen_g[is.na(seen_g)] <- 0L
+      if (any(seen_g < 2L)) {
+        stop(sprintf(paste0(
+          "%s: under comparator = \"healthy\", `weights = varIdent()` gives each group its own ",
+          "residual variance at every visit time, so the cases and the healthy controls each ",
+          "need at least two participants at every time. Among the %s, time(s) %s have fewer. ",
+          "Drop those visits, or use a structure that is a function of time, such as ",
+          "corCAR1() or corExp(), without `weights`."),
+          context, if (g == 1) "cases" else "healthy controls",
+          label_numeric(grid[seen_g < 2L])), call. = FALSE)
+      }
+    }
   }
   grid
 }
@@ -513,6 +538,20 @@ check_residual <- function(residual, context) {
   }
   x <- residual$coef
   if (!is.numeric(x) || any(!is.finite(x))) bad("`coef` must be finite numbers")
+  # residual_cor() reads these by name, so the names are part of the invariant:
+  # an unnamed `coef` would fail there, or silently lose its nugget.
+  named <- switch(cls,
+    corAR1  = ,
+    corCAR1 = identical(names(x), "Phi"),
+    corExp  = ,
+    corGaus = identical(names(x), "range") || identical(names(x), c("range", "nugget")),
+    TRUE)
+  if (!named) {
+    bad(sprintf("`coef` must be named %s", switch(cls,
+      corAR1  = ,
+      corCAR1 = "`Phi`",
+      "`range`, or `range` and `nugget`")))
+  }
   ok <- switch(cls,
     none    = length(x) == 0L,
     corAR1  = length(x) == 1L && abs(x[[1L]]) < 1,
