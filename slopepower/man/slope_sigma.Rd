@@ -25,6 +25,15 @@ paper, generalised to arbitrary real-valued visit times:
 \deqn{\Sigma_{ij} = \sigma^2_a + t_i t_j \sigma^2_b + (t_i + t_j)\sigma_{ab}
                     + [i = j]\sigma^2_\epsilon}
 
+With a residual structure (the \code{correlation} and \code{weights} arguments of
+\code{\link[=slope_params]{slope_params()}} and \code{\link[=slope_params_manual]{slope_params_manual()}}) the last term becomes
+\eqn{\sigma^2_\epsilon \delta_i \delta_j \rho(t_i, t_j)}, where
+\eqn{\rho} is the residual correlation between visits at times \eqn{t_i}
+and \eqn{t_j} and \eqn{\delta} the visit-specific residual SD ratios (1
+without \code{varIdent()}). A structure fitted with \code{corSymm()} or \code{varIdent()}
+is defined at the visit times of the data only, so \code{visits} must then be
+among those times.
+
 The Stata implementation builds this on the unit-integer grid
 \code{0:max(schedule)} and then selects the scheduled rows with a selection
 matrix; the two agree exactly at integer times, and this form additionally

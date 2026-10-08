@@ -54,6 +54,9 @@ check_params <- function(params, context) {
   # enough sigma2_residual masks it. So they are re-checked here, the one gate
   # every stage-two calculation funnels through, by the same helper.
   check_param_values(params, context, prefix = "params$")
+  # `residual` is not in PARAM_FIELDS: an object built before the field
+  # existed has none, and NULL is exactly the structure it was built under.
+  check_residual(params$residual, context)
 
   if (!is.character(params$comparator) || length(params$comparator) != 1L ||
       !params$comparator %in% c("none", "healthy", "treated")) {
@@ -107,6 +110,15 @@ check_visits <- function(visits, context) {
 #' \deqn{\Sigma_{ij} = \sigma^2_a + t_i t_j \sigma^2_b + (t_i + t_j)\sigma_{ab}
 #'                     + [i = j]\sigma^2_\epsilon}
 #'
+#' With a residual structure (the `correlation` and `weights` arguments of
+#' [slope_params()] and [slope_params_manual()]) the last term becomes
+#' \eqn{\sigma^2_\epsilon \delta_i \delta_j \rho(t_i, t_j)}, where
+#' \eqn{\rho} is the residual correlation between visits at times \eqn{t_i}
+#' and \eqn{t_j} and \eqn{\delta} the visit-specific residual SD ratios (1
+#' without `varIdent()`). A structure fitted with `corSymm()` or `varIdent()`
+#' is defined at the visit times of the data only, so `visits` must then be
+#' among those times.
+#'
 #' The Stata implementation builds this on the unit-integer grid
 #' \code{0:max(schedule)} and then selects the scheduled rows with a selection
 #' matrix; the two agree exactly at integer times, and this form additionally
@@ -155,7 +167,7 @@ sigma_at <- function(params, t, context) {
   sigma <- params$sigma2_intercept +
     outer(t, t) * params$sigma2_slope +
     outer(t, t, "+") * params$sigma_cov +
-    diag(params$sigma2_residual, length(t))
+    residual_cov(params, t, context)
 
   if (!is_positive_definite(sigma)) {
     stop(sprintf(paste0("%s: the implied covariance matrix is not positive definite. ",
@@ -910,8 +922,10 @@ print_data_block <- function(x) {
     cat_line(labels$comparator, params$slope_comparator)
   }
   # Carried into every stage-two result: the answer is only right for a trial
-  # analysed with the same adjustment as stage one.
+  # analysed with the same adjustment, and the same residual structure, as
+  # stage one.
   covariate_note(params$covariates)
+  residual_note(params$residual)
   invisible(x)
 }
 

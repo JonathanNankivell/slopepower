@@ -10,6 +10,8 @@
 #'
 #' @importFrom nlme fixef getData getVarCov lme lmeControl
 #' @importFrom nlme pdBlocked pdIdent pdSymm varIdent
+#' @importFrom nlme corAR1 corCAR1 corExp corGaus corSymm
+#' @importFrom nlme getCovariateFormula getGroupsFormula Initialize
 #' @importFrom stats as.formula ave coef na.omit pnorm qnorm
 #' @importFrom stats quantile setNames sigma terms vcov
 "_PACKAGE"

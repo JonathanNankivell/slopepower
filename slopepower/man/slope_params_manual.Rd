@@ -11,7 +11,10 @@ slope_params_manual(
   sigma_cov,
   sigma2_residual,
   slope_comparator = NA_real_,
-  comparator = c("none", "healthy", "treated")
+  comparator = c("none", "healthy", "treated"),
+  correlation = NULL,
+  weights = NULL,
+  times = NULL
 )
 }
 \arguments{
@@ -29,6 +32,24 @@ slope_params_manual(
 Required unless \code{comparator = "none"}.}
 
 \item{comparator}{One of \code{"none"}, \code{"healthy"} or \code{"treated"}.}
+
+\item{correlation}{Optional residual correlation, as the \code{nlme} constructor
+carrying the value to assume: \code{nlme::corAR1(0.6)}, \code{nlme::corCAR1(0.6)},
+\code{nlme::corExp(2)}, \code{nlme::corExp(c(2, 0.1), nugget = TRUE)},
+\code{nlme::corGaus(2)}, or \code{nlme::corSymm(c(...))} with the correlations in
+\code{nlme}'s order, (1,2), (1,3), ..., (2,3), .... See "Residual structures"
+in \code{\link[=slope_params]{slope_params()}} for what each means. \code{corAR1()} and \code{corCAR1()} fall
+back to \code{nlme}'s default value when none is given, so state it.}
+
+\item{weights}{Optional visit-specific residual SD ratios, as
+\code{nlme::varIdent(c("1" = 1.1, "2" = 1.3), form = ~ 1 | visit)}: named by
+visit time, relative to the first time in \code{times}, whose ratio is 1. The
+stratum in \code{form} is required by \code{nlme} and otherwise ignored.
+\code{sigma2_residual} is then the residual variance at the first time.}
+
+\item{times}{The visit times that the parameters of \code{corSymm()} and
+\code{varIdent()} belong to, strictly increasing. Required with either, and
+refused otherwise. A planned schedule must then be among these times.}
 }
 \value{
 An object of class \code{"slope_params"}.
@@ -53,6 +74,14 @@ slope_params_manual(
   sigma2_intercept = 100, sigma2_slope = 2,
   sigma_cov = 5, sigma2_residual = 10,
   comparator = "healthy"
+)
+
+# Serially correlated residuals, with correlation 0.5 between visits a
+# year apart.
+slope_params_manual(
+  slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+  sigma_cov = 5, sigma2_residual = 10,
+  correlation = nlme::corCAR1(0.5)
 )
 
 }

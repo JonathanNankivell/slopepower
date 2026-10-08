@@ -36,8 +36,16 @@ export(slope_var_floor)
 export(slopepower)
 export(trial_design)
 importFrom(nlme,
+  Initialize,
+  corAR1,
+  corCAR1,
+  corExp,
+  corGaus,
+  corSymm,
   fixef,
+  getCovariateFormula,
   getData,
+  getGroupsFormula,
   getVarCov,
   lme,
   lmeControl,

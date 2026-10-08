@@ -1,0 +1,212 @@
+---
+title: "Serially correlated and unstructured residuals"
+author: "slopepower"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    math_method: mathml
+vignette: >
+  %\VignetteIndexEntry{Serially correlated and unstructured residuals}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "")
+options(width = 88, digits = 4)
+library(slopepower)
+```
+
+## The question
+
+The model of Nash et al. (2021) gives each participant a random intercept and
+a random slope, and treats everything else -- every visit's departure from the
+participant's own straight line -- as independent noise with one variance,
+$\sigma^2_\epsilon$. That is often a good approximation. It is a poor one when
+departures persist: a participant who has a bad spell is still having it at the
+next visit, so two measurements taken close together repeat each other rather
+than each telling you something new.
+
+The sample size cares, because the thing a planned schedule buys is
+information about each participant's slope. Under independent residuals every
+extra visit adds a fresh, independent measurement, and packing visits closer
+together keeps paying. Under serial correlation it pays less. Planning a dense
+schedule from the independent model can therefore promise a smaller trial than
+the data will support.
+
+`slope_params()` takes the residual structure the way `nlme` does, so if you
+have written
+
+```r
+nlme::lme(y ~ time, random = ~ time | id, correlation = nlme::corAR1(form = ~ time | id))
+```
+
+you already know how to ask for it:
+
+```r
+slope_params(y ~ time | id, data, correlation = nlme::corAR1())
+```
+
+## The residual covariance
+
+Writing $\epsilon_i$ for participant $i$'s vector of residuals, the default is
+$\epsilon_i \sim N(0, \sigma^2_\epsilon I)$. With a structure it is
+$N(0, R_i)$, with
+
+$$
+(R_i)_{jk} = \sigma^2_\epsilon \, \delta_j \delta_k \, \rho(t_{ij}, t_{ik}),
+$$
+
+in `nlme`'s notation: $\rho$ the correlation between two of the participant's
+visits, and $\delta$ the visit-specific SD ratios of `varIdent()` (1 without
+it). The structures supported, with $d = |s - t|$:
+
+| Structure | `correlation =` | $\rho(s, t)$ | Stata `mixed` |
+|---|---|---|---|
+| independent (default) | `NULL` | 0 | `residuals(independent)` |
+| AR(1) | `nlme::corAR1()` | $\phi^d$, integer times only | `residuals(ar 1, t())` |
+| continuous-time AR(1) | `nlme::corCAR1()` | $\phi^d$ | `residuals(exponential, t())` |
+| exponential | `nlme::corExp()` | $(1 - n)\, e^{-d / r}$ | |
+| Gaussian | `nlme::corGaus()` | $(1 - n)\, e^{-(d / r)^2}$ | |
+| unstructured | `nlme::corSymm()` | one per pair of visit times | |
+
+Here $r$ is the range and $n$ the nugget, zero unless `nugget = TRUE`. Adding
+`weights = nlme::varIdent(form = ~ 1 | time)`, with the time variable of the
+formula as the stratum, gives each visit time its own variance; with
+`corSymm()` that is the fully unstructured residual covariance, Stata's
+`residuals(unstructured, t())`.
+
+The `form` is the one thing set for you. A residual correlation here is always
+within a participant and a function of the formula's time variable, because
+that is what stage two needs in order to evaluate it at a schedule you are
+planning. `nlme`'s own default for `corAR1()`, the order of observation,
+miscounts the lag across a missed visit, so it is not used.
+
+## An example with serial correlation
+
+The data below are simulated: 300 participants seen every six months for three
+years, with a random intercept and slope, a serially correlated residual that
+halves in about nine months, and some pure measurement error on top -- the
+classic random effects, serial correlation and measurement error model of
+Diggle and colleagues.
+
+```{r simulate}
+set.seed(2026)
+sim <- function(n = 300, visits = seq(0, 3, by = 0.5)) {
+  G  <- matrix(c(100, 3, 3, 1.5), 2, 2)               # random intercept and slope
+  ab <- matrix(rnorm(2 * n), n, 2) %*% chol(G)
+  R  <- 12 * 0.4^abs(outer(visits, visits, "-")) +   # serial part, correlation 0.4 at 1 year
+        diag(3, length(visits))                      # measurement error
+  e  <- matrix(rnorm(n * length(visits)), n) %*% chol(R)
+  y  <- 40 + ab[, 1] + outer(ab[, 2] - 1.5, visits) + e
+  data.frame(id = rep(seq_len(n), each = length(visits)),
+             years = rep(visits, n),
+             score = as.vector(t(y)))
+}
+d <- sim()
+```
+
+Fit it twice: as the paper does, and with an exponential correlation and a
+nugget, which is that model.
+
+```{r fit}
+independent <- slope_params(score ~ years | id, d)
+serial <- slope_params(score ~ years | id, d,
+                       correlation = nlme::corExp(nugget = TRUE))
+serial
+```
+
+The fitted range of about 1.7 years is a correlation of $0.84 e^{-1/1.7}
+\approx 0.47$ between visits a year apart, against 0.4 in the simulation. The
+two fits are ordinary `nlme` objects, so they can be compared the usual way:
+
+```{r aic}
+AIC(independent$fit, serial$fit)
+```
+
+Now price five schedules over the same three years, from a baseline and a
+final visit to monthly visits. The `truth` row uses the simulation's own
+parameters, through `slope_params_manual()`, which takes the same constructors
+with the values stated:
+
+```{r schedules}
+truth <- slope_params_manual(
+  slope = -1.5, sigma2_intercept = 100, sigma2_slope = 1.5, sigma_cov = 3,
+  sigma2_residual = 15,
+  correlation = nlme::corExp(c(-1 / log(0.4), 3 / 15), nugget = TRUE))
+
+schedules <- list("0, 3" = c(0, 3), "yearly" = 0:3, "6-monthly" = seq(0, 3, 0.5),
+                  "quarterly" = seq(0, 3, 0.25), "monthly" = seq(0, 3, 1 / 12))
+per_arm <- sapply(list(independent = independent, serial = serial, truth = truth),
+                  function(p) sapply(schedules, function(v)
+                    slope_sample_size(p, v, effectiveness = 0.3)$n_per_arm))
+per_arm
+```
+
+Read down the columns rather than across them -- each fit is from one sample
+of 300, so the absolute numbers carry sampling error. Going from two visits to
+monthly ones, the independent model promises the trial gets about
+`r round(100 * (1 - per_arm["monthly", "independent"] / per_arm["0, 3", "independent"]))`%
+smaller. The model with serial correlation promises
+`r round(100 * (1 - per_arm["monthly", "serial"] / per_arm["0, 3", "serial"]))`%,
+and the truth is
+`r round(100 * (1 - per_arm["monthly", "truth"] / per_arm["0, 3", "truth"]))`%.
+Thirty-seven visits a participant are being sold on the strength of independence
+the data do not have.
+
+The floor of the "What s\* is" vignette still applies under a serial
+correlation, because the correlation dies away with the time between visits:
+a long enough schedule still averages the residual out. It is just approached
+more slowly, since dense visits repeat each other.
+
+## An unstructured residual covariance
+
+`corSymm()` estimates a separate correlation for every pair of visit times, and
+with `varIdent()` a separate variance for every time, so it imposes no shape at
+all. On `slpower1`, seen yearly for three years:
+
+```{r unstructured}
+un <- slope_params(sdmt ~ visit | id, data = slpower1,
+                   correlation = nlme::corSymm(),
+                   weights = nlme::varIdent(form = ~ 1 | visit))
+un
+```
+
+The price of imposing no shape is that the structure exists only at the four
+times it was estimated at. A schedule among them is fine; one that is not is
+refused, because nothing was estimated about a visit at six months:
+
+```{r unstructured-schedules, error = TRUE}
+slope_sample_size(un, c(0, 1, 3), effectiveness = 0.33)$n
+slope_sample_size(un, c(0, 0.5, 1), effectiveness = 0.33)
+```
+
+For the same reason it needs the participants to share a schedule: with visit
+times recorded as dates, as in `slpower2`, every participant has their own
+times, and there is nothing to estimate a correlation *between visit 2 and
+visit 3* from. Use a structure that is a function of time there, such as
+`corCAR1()` or `corExp()`.
+
+There is a second price, which the printed object notes. An unstructured
+correlation can absorb any covariance the random effects would otherwise
+explain, so the random-intercept variance, the random-slope variance and the
+residual variance are no longer separately identified -- the fit is one point
+on a ridge of equally good decompositions. What *is* identified is the total
+covariance they imply at the visit times, and that is all a sample size
+depends on. For the same reason `slope_var_floor()`, which is built from the
+random-effects variances alone, is refused.
+
+## What stage two assumes
+
+The sample size for a structured residual is the sample size for a trial
+*analysed* with that structure: a mixed model whose residual covariance is
+specified the same way. Every stage-two print says so in a note, as it does
+for covariate adjustment. Planning with one structure and analysing with
+another is a different calculation, and not one this package makes.
+
+Two structures are refused outright. `corCompSymm()`, an exchangeable
+correlation, adds the same covariance to every pair of a participant's visits,
+which is exactly what the random intercept already does; the two cannot be
+told apart. And `corAR1()` is defined by `nlme` on integer times only, so it
+is refused on data with fractional times and for a planned schedule with them;
+`corCAR1()` is the same correlation, $\phi^{|s - t|}$, at any times.

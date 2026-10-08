@@ -18,7 +18,9 @@ y[ij] = mean(t[ij]) + a[i] + b[i] * t[ij] + e[ij]
 ```
 
 Each participant gets a random intercept `a[i]` and a random slope `b[i]`
-(unstructured 2×2 covariance), with independent residuals `e[ij]`. Treatment
+(unstructured 2×2 covariance), with independent residuals `e[ij]` by default,
+or residuals correlated within a participant — AR(1), exponential, fully
+unstructured — specified the way `nlme` specifies them. Treatment
 appears only as a difference in slopes, and the two arms share a single
 intercept — baseline is modelled as part of the outcome vector, not entered as
 a covariate. Nothing else is in the mean except, optionally, baseline
@@ -42,6 +44,7 @@ Supported:
 - monotone dropout, via the Dawson–Lagakos pattern mixture;
 - parameters taken from the literature instead of fitted (`slope_params_manual()`);
 - adjustment for baseline covariates such as age, sex or stratification factors, with or without their interactions with time (`slope_params(covariates = )`). The planned trial is assumed to be analysed with the same adjustment.
+- structured residuals within a participant, in `nlme`'s notation: `correlation = nlme::corAR1()`, `corCAR1()`, `corExp()`, `corGaus()` or `corSymm()`, and visit-specific variances with `weights = nlme::varIdent(form = ~ 1 | visit)` — `corSymm()` with that `varIdent()` is the fully unstructured residual covariance. Stated values work too: `slope_params_manual(..., correlation = nlme::corCAR1(0.5))`. The planned trial is assumed to be analysed with the same residual structure.
 
 Not supported:
 
@@ -51,7 +54,7 @@ Not supported:
 - more than two arms, unequal allocation, cluster-randomised, crossover or stepped-wedge designs;
 - non-linear trajectories — quadratic time, splines, change points — or any estimand that is not a slope difference;
 - non-Gaussian outcomes: binary, ordinal, count or time-to-event endpoints;
-- residual structures beyond independent errors, e.g. AR(1) or other serial correlation;
+- residual structures other than those above: compound symmetry (`corCompSymm()`, which is the random intercept over again), ARMA, other spatial structures, and variance functions other than `varIdent()` by visit;
 - intermittent or non-monotone missingness, and participant-specific visit schedules in the planned trial: dropout is assumed to truncate a common schedule.
 
 ## Installing
@@ -341,6 +344,7 @@ Both need the package to have been installed *with* its vignettes — see
 | `introduction` | A tour of the three stage-one situations `slope_params()` handles, worked through the three example datasets, ending in a full sample-size and power calculation |
 | `from-stata` | A migration guide for existing Stata `slopepower` users: what maps directly, what changed, and what to watch for |
 | `harmful-previous-trial` | What to reuse from a trial in which the treatment made things worse, why `target = "observed"` is the wrong tool there, and how much of the resulting sample size is bias rather than signal |
+| `residual-structures` | Serially correlated and unstructured residuals in `nlme`'s notation: how much a dense schedule is overpriced when persistent deviations are treated as independent noise, and what an unstructured residual covariance can and cannot price |
 | `what-is-s-star` | What the "two-person trial" standard error actually is, why two is the minimum and not an approximation, the `s*/sqrt(N)` scaling derived rather than asserted, and a closed form that yields a floor on sample size no visit schedule can beat |
 
 Vignettes are `rmarkdown::html_vignette`, so building them needs **pandoc** on

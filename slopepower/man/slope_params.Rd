@@ -13,7 +13,9 @@ slope_params(
   common_variance = NULL,
   na.action = stats::na.omit,
   covariates = NULL,
-  covariate_time = TRUE
+  covariate_time = TRUE,
+  correlation = NULL,
+  weights = NULL
 )
 }
 \arguments{
@@ -76,9 +78,36 @@ interaction with time, so covariates can explain differences in slope as
 well as in baseline. This is what reduces \code{sigma2_slope}, and so the
 sample size. \code{FALSE} adjusts the intercept only. Ignored without
 \code{covariates}.}
+
+\item{correlation}{Optional residual correlation structure, as an \code{nlme}
+\code{corStruct} exactly as it would be passed to \code{\link[nlme:lme]{nlme::lme()}}:
+\code{\link[nlme:corAR1]{nlme::corAR1()}}, \code{\link[nlme:corCAR1]{nlme::corCAR1()}}, \code{\link[nlme:corExp]{nlme::corExp()}},
+\code{\link[nlme:corGaus]{nlme::corGaus()}} or \code{\link[nlme:corSymm]{nlme::corSymm()}}. \code{NULL} (default) keeps the
+independent residuals of Nash et al. (2021). The correlation is always
+within a participant and a function of the time term of \code{formula}, so the
+\code{form} is set for you: leave it out, or write the equivalent
+\code{form = ~ time | subject} with the names used in \code{formula}. A starting
+value, a nugget (\code{corExp(nugget = TRUE)}) and \code{fixed = TRUE} are honoured
+as in \code{nlme}. See "Residual structures" below.}
+
+\item{weights}{Optional visit-specific residual variances, written
+\code{nlme::varIdent(form = ~ 1 | time)} with the time term of \code{formula} as the
+stratum. Together with \code{correlation = nlme::corSymm()} this is the fully
+unstructured residual covariance. No other variance function is
+supported.}
 }
 \value{
-An object of class \code{"slope_params"}. Its \verb{$fit} component is the
+An object of class \code{"slope_params"}. Its \verb{$residual} component is
+\code{NULL} for independent residuals, or else a list: \code{correlation}, the
+\code{nlme} class name (\code{"none"} with \code{varIdent()} alone); \code{coef}, the fitted
+correlation parameters on their natural scale (\code{Phi}; \code{range} and any
+\code{nugget}; or \code{corSymm()}'s correlations in \code{nlme}'s order); \code{fixed};
+\code{times}, the visit times a \code{corSymm()} or \code{varIdent()} structure is
+defined at, else \code{NULL}; and \code{sd_ratio}, the residual SD at each of those
+times relative to the first, else \code{NULL}. When \code{sd_ratio} is set,
+\code{sigma2_residual} is the residual variance at the first time.
+
+Its \verb{$fit} component is the
 fitted \code{"lme"} object itself, useful for \code{nlme}'s diagnostic plots (e.g.
 \code{plot(fit)}, \code{qqnorm(fit)}) -- note that these must reference the
 internal column names (\code{sp_y}, \code{sp_time}, \code{sp_subject}, ...) described
@@ -134,10 +163,11 @@ independent residuals:
 
 where \eqn{G}{G} is an unstructured 2 by 2 matrix with diagonal
 \eqn{\sigma^2_a}{sigma2_intercept}, \eqn{\sigma^2_b}{sigma2_slope} and
-off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. Residuals are independent across
-visits and across participants; there is no serial correlation term. Only the
-mean \eqn{\mu}{mu} and the number of variance parameters differ between the
-scenarios.
+off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. By default residuals are
+independent across visits and across participants; \code{correlation} and
+\code{weights} replace that with a structured residual covariance within each
+participant (see "Residual structures"). Only the mean \eqn{\mu}{mu} and the
+number of variance parameters differ between the scenarios.
 
 \describe{
 \item{Neither \code{healthy} nor \code{treated}}{
@@ -186,7 +216,9 @@ which \code{lme4} cannot fit at all. Included, therefore:
 "Covariate adjustment");
 \item exactly one grouping level, the participant, whose random intercept and
 random slope have an unstructured covariance;
-\item independent residuals with a variance that is constant within a group;
+\item residuals independent between participants, and within a participant
+either independent with a variance that is constant within a group (the
+default) or structured through \code{correlation} and \code{weights};
 \item at most two groups, distinguished only by their slope (and, for \code{healthy},
 by their variance components).
 }
@@ -208,8 +240,10 @@ here will be too small.
 \item \strong{non-linear trajectories} --- quadratic time, splines, change points ---
 and any estimand that is not a difference in slopes.
 \item \strong{non-Gaussian outcomes}: binary, ordinal, count or time-to-event.
-\item \strong{structured residuals}, such as AR(1) or other serial correlation within
-a participant.
+\item \strong{residual structures other than those listed under "Residual
+structures"}: compound symmetry (\code{corCompSymm()}, which the random
+intercept already is), ARMA, spatial structures other than the exponential
+and Gaussian, and variance functions other than \code{varIdent()} by visit.
 \item \strong{more than two arms, unequal allocation, or cluster-randomised, crossover
 and stepped-wedge designs.} Stage two assumes two equal parallel arms.
 }
@@ -248,6 +282,60 @@ between-participant variances (\code{sigma2_intercept}, and \code{sigma2_slope} 
 time interactions) rather than \code{sigma2_residual}.
 }
 
+\section{Residual structures}{
+
+
+With \code{correlation} and \code{weights} the residual term above becomes
+\eqn{\epsilon_i \sim N(0, R_i)}{e[i] ~ N(0, R[i])} with
+\deqn{(R_i)_{jk} = \sigma^2_\epsilon \, \delta_j \delta_k \,
+      \rho(t_{ij}, t_{ik}),}{
+      R[i][j, k] = sigma2_residual * delta[j] * delta[k] * rho(t[ij], t[ik]),}
+the notation of \code{nlme}: \eqn{\rho}{rho} is the correlation and
+\eqn{\delta}{delta} the residual SD ratios of \code{varIdent()}, 1 without it.
+The structures, and the arguments that give them:\tabular{llll}{
+   Structure \tab Argument \tab \eqn{\rho(s, t)}{rho(s, t)}, \eqn{d = |s - t|}{d = |s - t|} \tab Stata \code{mixed} \cr
+   independent (default) \tab \code{correlation = NULL} \tab 0 \tab \code{residuals(independent)} \cr
+   AR(1) \tab \code{nlme::corAR1()} \tab \eqn{\phi^d}{Phi^d}, integer times only \tab \verb{residuals(ar 1, t())} \cr
+   continuous-time AR(1) \tab \code{nlme::corCAR1()} \tab \eqn{\phi^d}{Phi^d} \tab \code{residuals(exponential, t())} \cr
+   exponential \tab \code{nlme::corExp()} \tab \eqn{(1 - n) e^{-d/r}}{(1 - n) exp(-d / r)} \tab  \cr
+   Gaussian \tab \code{nlme::corGaus()} \tab \eqn{(1 - n) e^{-(d/r)^2}}{(1 - n) exp(-(d / r)^2)} \tab  \cr
+   unstructured correlation \tab \code{nlme::corSymm()} \tab one per pair of visit times \tab  \cr
+   unstructured covariance \tab \code{corSymm()} plus \code{weights} \tab one per pair, and a variance per time \tab \code{residuals(unstructured, t())} \cr
+}
+
+
+Here \eqn{r}{r} is the range and \eqn{n}{n} the nugget, 0 unless
+\code{nugget = TRUE}; a nugget splits the residual into measurement error and a
+serially correlated part. \code{corAR1()} and \code{corCAR1()} agree wherever both
+are defined; the first is \code{nlme}'s discrete-time process and so needs
+integer times, both in the data and in any schedule planned from it. The
+unstructured covariance adds \code{weights = nlme::varIdent(form = ~ 1 | time)},
+a variance for each visit time, to \code{corSymm()}.
+
+The fitted values are returned in \verb{$residual} (see the "Value" section) and
+used by every stage-two function, which then plans for a trial analysed
+with the same residual structure. Three consequences:
+\itemize{
+\item \code{corSymm()} and \code{varIdent()} have a parameter for every distinct visit
+time, so they need the participants to share a visit schedule -- record
+time as the scheduled visit, not the date it took place -- and a planned
+schedule can only use those times. A structure that is a function of
+time (\code{corCAR1()}, \code{corExp()}, \code{corGaus()}) can price any schedule.
+\item Under \code{corSymm()} the random-effects variances and the residual variance
+are not separately identified: an unstructured correlation can absorb any
+covariance the random effects imply. The covariance they imply together
+at the visit times is identified, and that is the only thing stage two
+uses, but the individual components printed are one point on a ridge of
+equally good fits, and \code{\link[=slope_var_floor]{slope_var_floor()}} is refused.
+\item Under \code{healthy} the correlation parameters are shared by cases and
+controls -- \code{nlme} estimates one correlation structure per model -- while
+the residual variances, and with \code{varIdent()} the per-visit variances, stay
+separate per group. So the model no longer factorises into two per-group
+fits, and \code{common_variance} can move the cases' estimates slightly, as it
+can with covariates.
+}
+}
+
 \examples{
 # Neither `healthy` nor `treated`: a single group of untreated subjects.
 # Four of the two hundred participants of `slpower1`, kept small so the
@@ -272,6 +360,17 @@ df4 <- slpower1[slpower1$id \%in\% 1:20, ]
 set.seed(1)
 df4$age <- ave(df4$id, df4$id, FUN = function(i) round(runif(1, 30, 60)))
 slope_params(sdmt ~ visit | id, data = df4, covariates = ~ age)
+
+# Serially correlated residuals: a continuous-time AR(1), on the first 50
+# participants of `slpower1`.
+df5 <- slpower1[slpower1$id \%in\% 1:50, ]
+slope_params(sdmt ~ visit | id, data = df5, correlation = nlme::corCAR1())
+
+# A fully unstructured residual covariance, as `residuals(unstructured)`
+# in Stata's `mixed`.
+slope_params(sdmt ~ visit | id, data = df5,
+             correlation = nlme::corSymm(),
+             weights = nlme::varIdent(form = ~ 1 | visit))
 
 }
 \references{

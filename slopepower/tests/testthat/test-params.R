@@ -14,9 +14,9 @@ test_that("slope_params_manual() returns exactly the contract fields", {
   expect_s3_class(p, "slope_params")
   expect_setequal(names(p), c(
     "slope", "slope_comparator", "comparator", "sigma2_intercept",
-    "sigma2_slope", "sigma_cov", "sigma2_residual", "n_obs", "n_subjects",
+    "sigma2_slope", "sigma_cov", "sigma2_residual", "residual", "n_obs", "n_subjects",
     "common_variance", "time_shifted", "covariates", "fit", "call"))
-  expect_length(names(p), 14L)
+  expect_length(names(p), 15L)
 })
 
 test_that("manually supplied parameters are stored unchanged", {

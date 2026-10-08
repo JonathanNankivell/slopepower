@@ -20,7 +20,23 @@
 #' runs and which `check_params()` re-runs on hand-built ones -- so there is no
 #' zero or negative branch to guard here.
 #' @noRd
-var_floor <- function(params) {
+var_floor <- function(params, context) {
+  if (residual_on_grid(params$residual)) {
+    unstructured <- identical(params$residual$correlation, "corSymm")
+    stop(sprintf(paste0(
+      "%s: the residual structure (%s) is defined only at the visit times %s, so there is ",
+      "no floor over all schedules to report: the schedules it can price are subsets of ",
+      "those times%s. The smallest treatment-effect variance it allows is at all of them: ",
+      "slope_var(params, c(%s))."),
+      context,
+      paste(c(if (unstructured) "corSymm()",
+              if (!is.null(params$residual$sd_ratio)) "varIdent()"), collapse = " with "),
+      label_numeric(params$residual$times),
+      if (unstructured) paste0(", and under corSymm() the variance components the floor ",
+                               "is built from are not separately identified") else "",
+      label_numeric(params$residual$times)),
+      call. = FALSE)
+  }
   2 * (params$sigma2_slope - params$sigma_cov^2 / params$sigma2_intercept)
 }
 
@@ -49,11 +65,27 @@ var_floor <- function(params) {
 #'
 #' # It is an infimum, not a minimum
 #'
-#' No finite schedule attains it. Writing \eqn{\Sigma = \Sigma_0 + \sigma^2_\epsilon I},
-#' every contrast \eqn{c} has \eqn{c^{\mathsf T}\Sigma c > c^{\mathsf T}\Sigma_0 c},
-#' so `slope_var(params, visits)` is strictly greater than this value for any
+#' No finite schedule attains it. Writing \eqn{\Sigma = \Sigma_0 + R}, with
+#' \eqn{R} the residual covariance (\eqn{\sigma^2_\epsilon I} for independent
+#' residuals), every contrast \eqn{c} has
+#' \eqn{c^{\mathsf T}\Sigma c > c^{\mathsf T}\Sigma_0 c}, so
+#' `slope_var(params, visits)` is strictly greater than this value for any
 #' `visits`, however long or however dense. The gap closes as the number of
 #' visits grows without bound.
+#'
+#' # Residual structures
+#'
+#' The value is the same with a serially correlated residual -- `corAR1()`,
+#' `corCAR1()`, `corExp()` or `corGaus()` in [slope_params()] -- because each
+#' of those correlations dies away with the time between visits, so a long
+#' enough schedule still averages the residual out. It is approached more
+#' slowly: visits packed close together are correlated and repeat each other,
+#' so density alone gains less than it would with independent residuals.
+#'
+#' A structure with a parameter per visit, `corSymm()` or `varIdent()`, has
+#' no floor and is refused: it is defined only at the visit times it was
+#' fitted at, so the schedules it can price are subsets of those, and the
+#' smallest variance among them is simply `slope_var()` at all of them.
 #'
 #' Lengthening a schedule is not enough on its own. Two visits a distance
 #' \eqn{t} apart converge, as \eqn{t \to \infty}, on
@@ -83,7 +115,7 @@ var_floor <- function(params) {
 slope_var_floor <- function(params) {
   context <- "slope_var_floor()"
   check_params(params, context)
-  var_floor(params)
+  var_floor(params, context)
 }
 
 # ---------------------------------------------------------------------------
@@ -105,7 +137,7 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
   per_arm <- check_per_arm(per_arm, context)
 
   comp <- target_components(params, target, effectiveness, context)
-  var_tte <- var_floor(params)
+  var_tte <- var_floor(params, context)
   effect_size <- comp$slope_difference / sqrt(var_tte)
   sized <- size_per_arm(scale_effect(effect_size, comp$effectiveness),
                         z_alpha(alpha, context), power)
