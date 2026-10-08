@@ -50,7 +50,7 @@ test_that("nocontvar leaves the cases' parameters alone", {
   d <- load_paper_data("slpower2")
   full <- paper_fit("slpower2")
   reduced <- suppressMessages(
-    slope_params(sdmt ~ time | id, d, healthy = case, common_variance = TRUE))
+    slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case, common_variance = TRUE))
 
   # Stata, scale(365), full vs nocontvar:
   #   var(tcase)  2.259091  vs 2.259092
@@ -86,16 +86,17 @@ test_that("nocontvar leaves the cases' parameters alone", {
 test_that("a dropout list of the wrong length is refused, as in Stata", {
   # Stata: schedule(1 2 3) dropouts(0.05 0.05) -> 198,
   #        "Dropout list must correspond with visit schedule"
-  expect_error(trial_design(c(0, 1, 2, 3), c(0.05, 0.05)), "dropout")
+  p <- ref_params()
+  expect_error(slope_sample_size(p, c(0, 1, 2, 3), c(0.05, 0.05)), "dropout")
   # Stata: schedule(1 2) dropouts(0.05 0.05 0.05) -> 198
-  expect_error(trial_design(c(0, 1, 2), c(0.05, 0.05, 0.05)), "dropout")
+  expect_error(slope_sample_size(p, c(0, 1, 2), c(0.05, 0.05, 0.05)), "dropout")
 
   # The well-formed call. It warns, because dropout[1] > 0 means some
   # participants attend baseline only -- Stata skips that stratum silently and
   # the port says so -- but it must not error. Stata gives N = 484 here.
-  expect_warning(des <- trial_design(c(0, 1, 2, 3), c(0.05, 0.05, 0.05)),
+  expect_warning(r <- slope_sample_size(p, c(0, 1, 2, 3), c(0.05, 0.05, 0.05)),
                  "baseline")
-  expect_equal(length(des$dropout), 3)
+  expect_equal(length(r$design$dropout), 3)
 })
 
 test_that("a dropout list summing to exactly 1 in decimal is accepted", {
@@ -112,13 +113,14 @@ test_that("a dropout list summing to exactly 1 in decimal is accepted", {
   # ".7" and `.7 - 0.3' stores as ".4", not 0.39999999999999997. The residue
   # lands on exactly 0. See stata-reference/07_open_questions_2.do Q3d, which
   # prints the same arithmetic done both ways and gets different answers.
-  des <- suppressWarnings(trial_design(c(0, 1, 2, 3), c(0.3, 0.3, 0.4)))
+  p <- ref_params()
+  des <- suppressWarnings(slope_sample_size(p, c(0, 1, 2, 3), c(0.3, 0.3, 0.4)))$design
   expect_equal(sum(des$dropout), 1)
   expect_equal(des$dropout, c(0.3, 0.3, 0.4))
-  expect_no_error(suppressWarnings(trial_design(c(0, 1, 2, 3),
-                                                c(0.25, 0.25, 0.5))))
+  expect_no_error(suppressWarnings(slope_sample_size(p, c(0, 1, 2, 3),
+                                                     c(0.25, 0.25, 0.5))))
   # Over one is refused by both: Stata's "Dropouts cannot exceed 100%", rc 198.
-  expect_error(trial_design(c(0, 1, 2, 3), c(0.4, 0.4, 0.4)))
+  expect_error(slope_sample_size(p, c(0, 1, 2, 3), c(0.4, 0.4, 0.4)), "exceeds 1")
 })
 
 test_that("treat() with observational data warns and continues, as in Stata", {
@@ -155,8 +157,8 @@ test_that("everyone dropping out at the first visit is an error, not a number", 
   # stratum but the completers is the baseline-only stratum, which carries no
   # slope information, and the completer stratum has weight 0. A silent missing
   # is a worse answer than an error, so the port errors. CONTRACT.md 6.
-  des <- suppressWarnings(trial_design(c(0, 1, 2, 3), c(1, 0, 0)))
-  expect_error(slope_sample_size(p, des, effectiveness = 0.33), "drop out")
+  expect_error(suppressWarnings(
+    slope_sample_size(p, c(0, 1, 2, 3), c(1, 0, 0), effectiveness = 0.33)), "drop out")
 })
 
 # ---------------------------------------------------------------------------
@@ -167,7 +169,8 @@ test_that("var_tte stays finite where Stata's back-solve goes missing", {
   p <- paper_fit("slpower1")
   # The baseline-only warning is asserted where it belongs, above; here it is
   # incidental to the design under test.
-  des <- suppressWarnings(trial_design(c(0, 1, 2, 3), c(0.05, 0.05, 0.05)))
+  v <- c(0, 1, 2, 3)
+  des <- c(0.05, 0.05, 0.05)
 
   # Solving for power with dropout, Stata reports var_tte by inverting the
   # sample size formula through the power it has just computed. Once power
@@ -175,11 +178,11 @@ test_that("var_tte stays finite where Stata's back-solve goes missing", {
   # Observed: finite at n = 2000 (9.391673916773652), missing from n = 10000.
   # The port uses the algebraically equivalent closed form, which has no
   # n_per_arm in it and so cannot degenerate.
-  small <- slope_power(p, des, n = 2000, effectiveness = 0.33)
+  small <- suppressWarnings(slope_power(p, v, des, n = 2000, effectiveness = 0.33))
   expect_equal(small$var_tte, 9.391673916773652, tolerance = 1e-3)
 
   for (nn in c(10000, 40000, 200000, 1e6)) {
-    r <- slope_power(p, des, n = nn, effectiveness = 0.33)
+    r <- suppressWarnings(slope_power(p, v, des, n = nn, effectiveness = 0.33))
     expect_equal(r$power, 1)
     expect_true(is.finite(r$var_tte))
     expect_gt(r$var_tte, 0)
@@ -236,16 +239,17 @@ test_that("visit schedules Stata's numlist refuses are refused here too", {
   # schedule(numlist ascending integer >=1) with baseline 0 implied, so on the
   # R side the equivalent statements are about `visits`. The rc values are the
   # ones Stata actually returned.
-  expect_error(trial_design(c(0, 0, 1, 2)))    # rc 124, elements out of order
-  expect_error(trial_design(c(0, 1, 2, 2)))    # rc 124, SCHED-repeat
-  expect_error(trial_design(c(0, 3, 2, 1)))    # rc 124, SCHED-descending
-  expect_error(trial_design(c(0)))             # no follow-up visit at all
-  expect_error(trial_design(c(1, 2, 3)))       # must start at baseline 0
+  p <- ref_params()
+  expect_error(slope_sample_size(p, c(0, 0, 1, 2)))    # rc 124, elements out of order
+  expect_error(slope_sample_size(p, c(0, 1, 2, 2)))    # rc 124, SCHED-repeat
+  expect_error(slope_sample_size(p, c(0, 3, 2, 1)))    # rc 124, SCHED-descending
+  expect_error(slope_sample_size(p, c(0)))             # no follow-up visit at all
+  expect_error(slope_sample_size(p, c(1, 2, 3)))       # must start at baseline 0
 
   # What Stata cannot express and the port can: a non-integer schedule. Stata
   # returns rc 126 ("noninteger elements") for schedule(1 1.5 2) and can only
   # reach such times through scale(). CONTRACT.md 5.1.
-  expect_silent(trial_design(c(0, 1, 1.5, 2)))
+  expect_silent(slope_sample_size(p, c(0, 1, 1.5, 2)))
 })
 
 test_that("scale() has an exact analogue in real-valued visit times", {

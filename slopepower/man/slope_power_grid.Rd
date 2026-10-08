@@ -8,6 +8,7 @@ slope_power_grid(
   params,
   visits,
   dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
   n,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
@@ -21,8 +22,13 @@ slope_power_grid(
 \item{visits}{A numeric vector of visit times, or a named list of such vectors.
 Each must begin at 0.}
 
-\item{dropout}{\code{NULL}, a numeric vector of incremental proportions, a
-\code{\link[=dropout_rate]{dropout_rate()}} object, or a named list mixing any of these.}
+\item{dropout}{\code{NULL}, a numeric vector of proportions, a \code{\link[=dropout_rate]{dropout_rate()}}
+object, or a named list mixing any of these.}
+
+\item{dropout_scale}{How every numeric vector in \code{dropout} is written:
+\code{"incremental"} (the default) or \code{"cumulative"}, as in
+\code{\link[=slope_sample_size]{slope_sample_size()}}. It applies to every vector in the list, and cannot
+be \code{"cumulative"} if the list holds a \code{\link[=dropout_rate]{dropout_rate()}}.}
 
 \item{n}{Total number of participants. Required. A single value is held
 constant across the grid; several make it another axis.}
@@ -51,7 +57,7 @@ or the trial total under \code{per_arm = FALSE}. \code{visits} is \code{n} times
 expected number of visits one participant attends -- \code{scheduled_visits}
 itself when \code{dropout_total} is zero, less otherwise, since a participant
 who withdraws still contributes the visits attended before doing so (see
-\code{\link[=trial_design]{trial_design()}}'s "How dropout enters the calculation"). Cells are
+the "Dropout" section of \code{\link[=slope_sample_size]{slope_sample_size()}}). Cells are
 listed with \code{design} varying slowest, then \code{dropout}, then any further
 axes in the order the arguments are declared above.
 }
@@ -68,7 +74,8 @@ cannot describe the same withdrawal behaviour across designs with different
 numbers of visits. Use \code{\link[=dropout_rate]{dropout_rate()}} to state the rate once and have it
 expanded correctly for each schedule. However the proportions are arrived at,
 each cell of the grid handles them exactly as \code{\link[=slope_power]{slope_power()}} does, by the
-Dawson and Lagakos (1991, 1993) pattern mixture described in \code{\link[=trial_design]{trial_design()}}.
+Dawson and Lagakos (1991, 1993) pattern mixture described in the "Dropout"
+section of \code{\link[=slope_sample_size]{slope_sample_size()}}.
 
 Use \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} for the converse table: the sample size each
 design needs to reach a target power.
@@ -124,7 +131,8 @@ slope_power_grid(
 # Case/healthy-control comparator: two cases and two healthy controls, a
 # subset of `slpower2` whose visits are calendar dates converted to years.
 df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
-pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+                      comparator = "healthy", group = case)
 slope_power_grid(
   pars2, n = 40, effectiveness = 0.33,
   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
@@ -135,7 +143,8 @@ slope_power_grid(
 # only the trial's original two follow-up visits against a denser one, at
 # the effect size the trial actually found, fitted to all one hundred and
 # fifty participants of `slpower3`.
-pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+                      comparator = "treated", group = treat)
 slope_power_grid(
   pars3, n = 396, target = "observed",
   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
@@ -145,6 +154,6 @@ slope_power_grid(
 }
 \seealso{
 \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}, \code{\link[=dropout_rate]{dropout_rate()}},
-\code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} for a bootstrapped interval around the
-converse table -- the sample size each design needs
+\code{\link[=slope_power_grid_boot]{slope_power_grid_boot()}} for a bootstrapped interval around every cell
+of this table, sharing one set of replicates across the whole grid
 }

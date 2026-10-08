@@ -196,10 +196,11 @@ test_that("slope_sample_size() and slope_power() invert each other", {
 
 test_that("the round trip holds under dropout and a non-default alpha too", {
   p <- ref_params()
-  d <- trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
+  v <- c(0, 1, 2, 5)
+  d <- c(0, 0, 0.1)
   for (a in c(0.01, 0.05, 0.10)) {
-    rn <- slope_sample_size(p, d, effectiveness = 0.33, power = 0.9, alpha = a)
-    rp <- slope_power(p, d, n = rn$n, effectiveness = 0.33, alpha = a)
+    rn <- slope_sample_size(p, v, d, effectiveness = 0.33, power = 0.9, alpha = a)
+    rp <- slope_power(p, v, d, n = rn$n, effectiveness = 0.33, alpha = a)
     expect_gte(rp$power, 0.9)
     expect_lt(rp$power - 0.9, 0.005)
 
@@ -218,9 +219,9 @@ test_that("var_tte from slope_power() is exact, and free of n", {
   # and the n_per_arm in the numerator cancels: the same design must report the
   # same effective variance at every sample size.
   p <- ref_params()
-  d <- trial_design(c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
   vals <- vapply(c(100, 328, 1000, 5000),
-                 function(nn) slope_power(p, d, n = nn, effectiveness = 0.33)$var_tte,
+                 function(nn) slope_power(p, c(0, 1, 2, 5), c(0, 0, 0.1), n = nn,
+                                          effectiveness = 0.33)$var_tte,
                  numeric(1L))
   expect_equal(vals, rep(vals[1L], length(vals)), tolerance = 1e-10)
 })
@@ -267,7 +268,7 @@ test_that("n is always twice n_per_arm", {
 test_that("dropout increases the required sample size", {
   p <- ref_params()
   no_drop <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$n
-  drop    <- slope_sample_size(p, trial_design(c(0, 1, 2), c(0, 0.2)),
+  drop    <- slope_sample_size(p, c(0, 1, 2), c(0, 0.2),
                                effectiveness = 0.33)$n
   expect_gt(drop, no_drop)
 })
@@ -275,7 +276,7 @@ test_that("dropout increases the required sample size", {
 test_that("a zero dropout vector matches no dropout at all", {
   p <- ref_params()
   a <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
-  b <- slope_sample_size(p, trial_design(c(0, 1, 2), c(0, 0)), effectiveness = 0.33)
+  b <- slope_sample_size(p, c(0, 1, 2), c(0, 0), effectiveness = 0.33)
   expect_equal(a$n, b$n)
   expect_equal(a$effect_size, b$effect_size)
 })
@@ -283,8 +284,7 @@ test_that("a zero dropout vector matches no dropout at all", {
 test_that("baseline-only dropouts contribute nothing to the effect size", {
   # Stratum j = 1 is skipped: a single measurement carries no slope information.
   p <- ref_params()
-  d <- suppressWarnings(trial_design(c(0, 1, 2), c(0.2, 0)))
-  r <- suppressWarnings(slope_sample_size(p, d, effectiveness = 0.33))
+  r <- suppressWarnings(slope_sample_size(p, c(0, 1, 2), c(0.2, 0), effectiveness = 0.33))
   full <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   # 20% contribute zero, so the squared effect size is 80% of the complete one
   expect_equal(r$effect_size^2, 0.8 * full$effect_size^2)
@@ -300,8 +300,7 @@ test_that("var_tte equals slope_var when there is no dropout", {
 
 test_that("var_tte under dropout back-solves the effective variance", {
   p <- ref_params()
-  d <- trial_design(c(0, 1, 2), c(0, 0.1))
-  r <- slope_sample_size(p, d, effectiveness = 0.33)
+  r <- slope_sample_size(p, c(0, 1, 2), c(0, 0.1), effectiveness = 0.33)
   z <- stats::qnorm(1 - r$alpha / 2) + stats::qnorm(r$power)
   expect_equal(r$var_tte, r$n_per_arm * r$tte^2 / z^2)
   # and it sits between the complete-case and worst-stratum variances
@@ -310,10 +309,11 @@ test_that("var_tte under dropout back-solves the effective variance", {
 
 test_that("total dropout errors rather than returning a missing sample size", {
   p <- ref_params()
-  d <- suppressWarnings(trial_design(c(0, 1, 2), c(1, 0)))
-  expect_error(suppressWarnings(slope_sample_size(p, d, effectiveness = 0.33)),
+  expect_error(suppressWarnings(slope_sample_size(p, c(0, 1, 2), c(1, 0),
+                                                 effectiveness = 0.33)),
                "effect size is zero")
-  expect_error(suppressWarnings(slope_power(p, d, n = 400, effectiveness = 0.33)),
+  expect_error(suppressWarnings(slope_power(p, c(0, 1, 2), c(1, 0), n = 400,
+                                           effectiveness = 0.33)),
                "effect size is zero")
 })
 
@@ -414,7 +414,7 @@ test_that("as.data.frame() column names are stable across every scenario", {
     slope_sample_size(ref_params("treated", -1.852, -1.104), c(0, 2, 3), target = "observed"),
     slope_power(ref_params("none"), c(0, 1, 2), n = 450, effectiveness = 0.33),
     slope_power(ref_params("treated", -1.852, -1.104), c(0, 2, 3), n = 450, target = "observed"),
-    slope_sample_size(ref_params("none"), trial_design(c(0, 1, 2), c(0, 0.1)),
+    slope_sample_size(ref_params("none"), c(0, 1, 2), c(0, 0.1),
                       effectiveness = 0.33)
   )
   frames <- lapply(scenarios, as.data.frame)
@@ -428,10 +428,11 @@ test_that("as.data.frame() column names are stable across every scenario", {
 
 test_that("slope_effect_size() agrees with the value inside both entry points", {
   p <- ref_params()
-  d <- trial_design(c(0, 1, 2), c(0, 0.1))
-  es <- slope_effect_size(p, d)
-  expect_equal(es, slope_sample_size(p, d, effectiveness = 0.33)$effect_size)
-  expect_equal(es, slope_power(p, d, n = 400, effectiveness = 0.33)$effect_size)
+  v <- c(0, 1, 2)
+  d <- c(0, 0.1)
+  es <- slope_effect_size(p, v, d)
+  expect_equal(es, slope_sample_size(p, v, d, effectiveness = 0.33)$effect_size)
+  expect_equal(es, slope_power(p, v, d, n = 400, effectiveness = 0.33)$effect_size)
 })
 
 test_that("the effect size takes the sign of the slope difference", {
@@ -504,18 +505,18 @@ test_that("the printed schedule renders the dropout at each follow-up visit", {
   p <- ref_params("healthy", -1.715, 0.975)
 
   # The design of the paper's p.593 power example: 5% of the randomised cohort
-  # withdraws after each of two annual visits. trial_design() warns because
+  # withdraws after each of two annual visits. slope_power() warns because
   # dropout[1] covers baseline-only attenders (CONTRACT.md 5.4) -- expected for
   # a flat rate, and not what is under test here.
-  d593 <- suppressWarnings(trial_design(c(0, 1, 2), c(0.05, 0.05)))
-  expect_identical(schedule_of(slope_power(p, d593, n = 200, effectiveness = 0.33)),
+  expect_identical(schedule_of(suppressWarnings(
+    slope_power(p, c(0, 1, 2), c(0.05, 0.05), n = 200, effectiveness = 0.33))),
                    "1 (0.05), 2 (0.05)")
 
   # A zero keeps its "(0)" rather than the visit being dropped from the list --
   # ado:288 is an explicit else branch for exactly that. This is the p.588
   # extended design, where only the final visit loses anyone.
   expect_identical(
-    schedule_of(slope_sample_size(p, trial_design(c(0, 1, 2, 5), c(0, 0, 0.1)),
+    schedule_of(slope_sample_size(p, c(0, 1, 2, 5), c(0, 0, 0.1),
                                   effectiveness = 0.33)),
     "1 (0), 2 (0), 5 (0.1)")
 
@@ -523,9 +524,9 @@ test_that("the printed schedule renders the dropout at each follow-up visit", {
   # assembled on a unit grid; this port carries real visit times (CONTRACT.md
   # 5.1), so the six-monthly row of Table 1, p.595 prints half-year times rather
   # than 1..6.
-  d_half <- suppressWarnings(trial_design(seq(0, 3, 0.5), rep(0.025, 6)))
   expect_identical(
-    schedule_of(suppressWarnings(slope_power(p, d_half, n = 450, effectiveness = 0.33))),
+    schedule_of(suppressWarnings(slope_power(p, seq(0, 3, 0.5), rep(0.025, 6), n = 450,
+                                             effectiveness = 0.33))),
     "0.5 (0.025), 1 (0.025), 1.5 (0.025), 2 (0.025), 2.5 (0.025), 3 (0.025)")
 
   # Without dropout the parenthesised rates vanish entirely -- ado:248-252 uses

@@ -35,7 +35,7 @@ works in years, dividing the elapsed days by 365.
 # Dates to years, as on p.590, then the paper's fit: slope -1.715.
 d <- slpower2
 d$time <- as.numeric(d$vdate) / 365
-slope_params(sdmt ~ time | id, data = d, healthy = case)
+slope_params(sdmt ~ time | id, data = d, comparator = "healthy", group = case)
 
 }
 \references{

@@ -108,14 +108,21 @@ per group — the same consequence covariates have.
 
 ## 3. `trial_design` object (`R/design.R`)
 
+Internal: there is **no exported constructor**. Every stage-two function takes the proposed
+trial as `visits`, `dropout` and `dropout_scale` directly, and builds this object with
+`build_trial_design()` -- the one validator, so every entry point applies the same rules in the
+same words. Results keep it as their `design` field (section 4), and `print.trial_design()` is
+registered so that field prints readably. Do not reintroduce a design argument: passing
+`visits`/`dropout` directly is the harmonised interface.
+
 S3 class `"trial_design"`, a list with **exactly** these fields:
 
 ```r
 list(
-  visits       = <dbl vector>,  # sorted, strictly increasing, visits[1] == 0, length >= 2
-  dropout      = <dbl vector>,  # length == length(visits) - 1, INCREMENTAL, each >= 0
-  has_dropout  = <lgl>,         # TRUE iff any(dropout > 0)
-  dropout_type = <chr>          # "incremental" or "cumulative", as supplied by the user
+  visits        = <dbl vector>,  # sorted, strictly increasing, visits[1] == 0, length >= 2
+  dropout       = <dbl vector>,  # length == length(visits) - 1, INCREMENTAL, each >= 0
+  has_dropout   = <lgl>,         # TRUE iff any(dropout > 0)
+  dropout_scale = <chr>          # "incremental" or "cumulative", as supplied by the user
 )
 ```
 
@@ -126,15 +133,18 @@ list(
 - `sum(dropout) <= 1`, with tolerance `1e-8`
 - completers proportion = `1 - sum(dropout)`
 
-`dropout_type = "cumulative"` input is converted to incremental on construction via
+`dropout_scale = "cumulative"` input is converted to incremental on construction via
 `diff(c(0, cumulative))`; the cumulative vector must be non-decreasing and bounded by 1.
 `dropout = NULL` means no dropout and yields a zero vector.
 
-A `dropout_rate(rate, per)` object may be supplied in place of the vector; `trial_design()`
-expands it to `(rate / per) * diff(visits)` before the checks above. The expansion is the
-constructor's, not the grid's, so `trial_design()` and `slope_*_grid()` cannot expand the same
-rate differently. It yields incremental proportions by construction and is therefore rejected
-alongside `dropout_type = "cumulative"`. The **stored field is always the expanded numeric
+A `dropout_rate(rate, per, pattern)` object may be supplied in place of the vector; the validator
+expands it before the checks above -- to `(rate / per) * diff(visits)` under `pattern = "linear"`,
+or to the per-interval drops in `(1 - rate)^(visits / per)` under `pattern = "geometric"`. The
+expansion (`expand_dropout_rate()`) is shared with the grids, so a single design and a grid cell
+cannot expand the same rate differently. It yields incremental proportions by construction and is
+therefore rejected alongside `dropout_scale = "cumulative"`. The two vocabularies are kept apart
+on purpose: `pattern` is how withdrawal behaves over time, `dropout_scale` how a vector was
+written, and neither reuses the other's words. The **stored field is always the expanded numeric
 vector** — a `dropout_rate` is never a legal value of `dropout` in the object above.
 
 ---
@@ -145,11 +155,18 @@ Sample size and power are **two exported functions, not one function with a mode
 take different inputs, answer different questions, and return differently shaped objects:
 
 ```r
-slope_sample_size(params, design, effectiveness = 0.25, target, power = 0.8, alpha = 0.05)
-slope_power(params, design, n, effectiveness = 0.25, target, alpha = 0.05)
+slope_sample_size(params, visits, dropout = NULL, dropout_scale, power = 0.8,
+                  effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)
+slope_power(params, visits, dropout = NULL, dropout_scale, n,
+            effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)
 ```
 
-`n` is `slope_power()`'s third argument and is **required** — there is no default sample size to
+Every stage-two function -- these two, `slope_effect_size()`, the two grids and the four
+bootstraps -- opens with the same `params, visits, dropout, dropout_scale`, then the input held
+fixed (`power` or `n`), then `effectiveness, target, alpha`, then anything of its own. Keep new
+entry points to that order.
+
+`n` is `slope_power()`'s fixed input and is **required** — there is no default sample size to
 fall back on. `power` is an ordinary argument of `slope_sample_size()` with its default in the
 signature. Neither accepts the other's input: `slope_sample_size(..., n = 450)` and
 `slope_power(..., power = 0.8)` are "unused argument" errors from R's own argument matching, so
@@ -203,31 +220,40 @@ There is no `design` because there is no design: the value bounds every schedule
 rule, for the same reason, as `slope_effect_size()`'s refusal of `effectiveness`. An argument the
 answer does not depend on can only be ignored.
 
-It is a **generic**, unlike the two stage-two entry points, with methods on `slope_params` (which
-takes `effectiveness`, `target`, `power` and `alpha`, exactly as `slope_sample_size()` does) and on
-`slope_result` (which reads all four off the object, so the floor and the design it bounds are
-guaranteed comparable). `...` exists only because the generic has it and is rejected by
-`reject_dots()`; a silently ignored `design =` would make the result look design-specific.
+It is an **ordinary function, not a generic**: `slope_sample_size_floor(params, power = 0.8,
+effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)` — the arguments of
+`slope_sample_size()` in its order, minus the design. It used to be a generic that also accepted a
+stage-two result and reused its settings; that second route was dropped so that every stage-two
+function takes `params` first. With no `...`, a stray `visits =` is an "unused argument" error from
+R's own matching rather than something that could be silently ignored.
 
-The `slope_result` method refuses a `slope_power` object whose `power` has saturated at exactly 1,
-where `qnorm(1)` is `Inf` — the same double-precision edge that section 5.6 handles for `var_tte`.
+`slope_power_ceiling(params, n, effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)` is its
+power counterpart — `slope_power()`'s arguments minus the design — returning S3 class
+`c("slope_power_ceiling", "slope_result")` with `slope_power`'s fields minus `design` (13, with
+`n_requested`). Its `power` is the *upper* bound over all schedules at that `n`, computed from the
+same limiting variance by the same `floor_result()`, so the two are exact inverses up to
+`ceiling()`. It is named for what it bounds — the variance's floor is the power's ceiling — and
+`as.data.frame()` labels its row `solve_for = "power_ceiling"` to match.
 
 `as.data.frame()` gains two consequences: `solve_for` is `"n_floor"`, and `n_follow_up` is
 `NA_integer_` rather than a count, because the row belongs to no schedule. The 4.1/4.2 guarantee
 that column *names* are identical across classes is unaffected.
 
-### 4.4 `slope_sample_size_grid_boot` (`R/grid_boot.R`)
+### 4.4 `slope_sample_size_grid_boot` and `slope_power_grid_boot` (`R/grid_boot.R`)
 
-Not a `slope_result` subclass — a grid was always a data frame rather than a `slope_result`, and
-this is a grid. S3 class `c("slope_sample_size_grid_boot", "data.frame")`: the fifteen columns
-`grid_evaluate()` computes for a grid cell — both `n`/`n_per_arm` and both
-`visits_total`/`visits_per_arm`, unreduced — plus eleven more: `n_mean`, `n_sd`, `n_lower`,
-`n_upper`, `tte_mean`, `tte_sd`, `tte_lower`, `tte_upper`, `tte_ci_type`, `ci_type`, `n_failed`.
-(`slope_sample_size_grid()` itself returns thirteen of those fifteen — see "Display basis" below —
-so this object's own data frame carries two more columns than that function's return value, not
-the same fifteen.) `ci_type` and `tte_ci_type` are separate because the two intervals have separate
-bias corrections and separate jackknife columns: either can fall back from BCa to percentile
-without the other, and the printed table marks each column with the method it actually used.
+Not `slope_result` subclasses — a grid was always a data frame rather than a `slope_result`, and
+these are grids. S3 class `c("slope_sample_size_grid_boot", "data.frame")` or
+`c("slope_power_grid_boot", "data.frame")`: the fifteen columns `grid_evaluate()` computes for a
+grid cell — both `n`/`n_per_arm` and both `visits_total`/`visits_per_arm`, unreduced — plus eleven
+more: `<s>_mean`, `<s>_sd`, `<s>_lower`, `<s>_upper`, `tte_mean`, `tte_sd`, `tte_lower`,
+`tte_upper`, `tte_ci_method`, `ci_method`, `n_failed`, where `<s>` is the solved-for statistic,
+`n` or `power`. (The plain grids themselves return thirteen of those fifteen — see "Display
+basis" below — so this object's own data frame carries two more columns than that function's
+return value, not the same fifteen.) `ci_method` and `tte_ci_method` are separate because the two
+intervals have separate bias corrections and separate jackknife columns: either can fall back
+from BCa to percentile without the other, and the printed table marks each column with the
+method it actually used. Only `n` is on the even-participant lattice; a power interval is neither
+widened nor halved for display.
 
 `tte` depends on `effectiveness` alone — not the visit schedule, the dropout pattern, `power` or
 `alpha` — so it is resampled once per distinct `effectiveness` level rather than once per cell,
@@ -235,17 +261,17 @@ and cells sharing a level share one interval exactly rather than merely agreeing
 The printed target-effect frame is keyed by `effectiveness` for the same reason: one row per
 level, not one per cell.
 
-What every cell shares — `R`, `type`, `level`, `se`, `n_refit_failed`, `straddle`, and the same six
-`slope_*` fields `slope_bootstrap()` itself returns — is carried as **attributes**, not columns: a
-value that never varies across rows does not belong in one. `[.slope_sample_size_grid_boot()`
-strips them (and the class) on every subset, since a value describing the whole table becomes
+What every cell shares — `R`, `ci_method`, `statistic`, `level`, `se`, `n_refit_failed`,
+`straddle`, and the same six `slope_*` fields a single-design bootstrap returns — is carried as
+**attributes**, not columns: a value that never varies across rows does not belong in one. The
+`[` methods strip them (and the class) on every subset, since a value describing the whole table becomes
 false, not merely stale, the moment the table it describes changes shape.
 
 Every cell shares one set of resampled replicates: the resampling scheme (`R/bootstrap.R`'s
 `boot_setup()`, `boot_replicate_matrix()`, `jackknife_values()`) depends only on `params`, never on
 the design being priced, so `R` replicates refit once price every cell rather than `R` refits *per
 cell*. A cell with fewer than two surviving replicates reports `NA` in its own row rather than
-aborting the whole grid the way `slope_bootstrap()` aborts a single result (section 6) — a grid
+aborting the whole grid the way a single-design bootstrap aborts (section 6) — a grid
 that took several minutes to resample must not be discarded over one bad cell.
 
 ### 4.5 Display basis: `per_arm`
@@ -354,7 +380,7 @@ effect_size = sign(slope_difference) * sqrt(eff2)
 
 Skipping `j = 1` is correct: a participant with only a baseline measurement yields a singular
 design matrix and contributes zero information, i.e. an infinite stratum-specific sample size and
-a zero contribution to the sum. `trial_design()` warns when `dropout[1] > 0`.
+a zero contribution to the sum. The design validator warns when `dropout[1] > 0`.
 
 ### 5.5 Sample size and power
 
@@ -432,7 +458,7 @@ Three facts, each load-bearing for how it is documented:
   documentation says "infimum, not minimum", and `test-floor.R` asserts the strict inequality over
   random schedules rather than an approximate equality.
 - **Dropout can only raise it**, so the bound holds over designs *and* dropout patterns. That is
-  why `slope_sample_size_floor()` needs no `design`, not merely why it has none.
+  why `slope_sample_size_floor()` needs no `visits` or `dropout`, not merely why it has none.
 - **Length alone does not reach it.** Two visits a distance `t` apart converge as `t -> Inf` on
   `2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`, strictly larger
   whenever `sigma_cov != 0`: only repeated measurement recovers the whole baseline correction. Do
@@ -478,7 +504,7 @@ Warnings:
 - `tte` points away from benefit (i.e. treatment would need to make the slope more extreme)
 - `dropout[1] > 0` (those participants contribute nothing)
 - any subject's time origin had to be shifted (`slope_params()`)
-- `abs(slope) / se(slope) < 2.5` in `slope_bootstrap()` (paper §2.6)
+- `abs(slope) / se(slope) < 2.5` in every bootstrap function (paper §2.6)
 - fewer than two replicates succeed for one cell of `slope_sample_size_grid_boot()` — that cell's
   interval columns are `NA` (collected into one warning naming every such cell); the call errors
   only if every cell is starved

@@ -52,14 +52,14 @@ test_that("covariates work with treated and healthy comparators", {
   set.seed(3)
   t3 <- slpower3
   t3$x <- stats::ave(t3$id, t3$id, FUN = function(i) stats::rnorm(1))
-  p <- slope_params(sdmt ~ visit | id, t3, treated = treat, covariates = ~ x)
+  p <- slope_params(sdmt ~ visit | id, t3, comparator = "treated", group = treat, covariates = ~ x)
   expect_true(all(c("sp_cov_1", "sp_time:sp_cov_1") %in% names(nlme::fixef(p$fit))))
   expect_false(is.na(p$slope_comparator))
 
   h2 <- slpower2
   h2$x <- stats::ave(h2$id, h2$id, FUN = function(i) stats::rnorm(1))
   q <- suppressMessages(slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, h2,
-                                     healthy = case, covariates = ~ x))
+                                     comparator = "healthy", group = case, covariates = ~ x))
   expect_equal(q$comparator, "healthy")
   expect_false(is.na(q$slope_comparator))
 })
@@ -161,7 +161,7 @@ test_that("bootstrap and jackknife refits survive a rare factor level going miss
   p <- refit(fr[fr$subject != fr$subject[d$id == ids[1]][1], , drop = FALSE])
   expect_s3_class(p, "slope_params")
   expect_length(grep("^sp_cov_[0-9]+$", names(nlme::fixef(p$fit))), 1L)
-  b <- slope_bootstrap(a, R = 40, seed = 2)
+  b <- slope_params_boot(a, R = 40, seed = 2)
   expect_equal(b$n_failed, 0)
 })
 
@@ -203,7 +203,7 @@ healthy_cov_data <- function(seed = 7) {
 
 test_that("the reduced-structure note does not claim case estimates are unaffected under covariates", {
   h <- healthy_cov_data()
-  p <- suppressMessages(slope_params(sdmt ~ t | id, h, healthy = case,
+  p <- suppressMessages(slope_params(sdmt ~ t | id, h, comparator = "healthy", group = case,
                                      covariates = ~ age, common_variance = TRUE))
   out <- capture.output(print(p))
   expect_false(any(grepl("Case estimates are unaffected", out, fixed = TRUE)))
@@ -241,7 +241,7 @@ test_that("a covariate aliased with the group or another covariate is named, not
   h <- healthy_cov_data()
   h$case_copy <- h$case
   expect_error(suppressWarnings(suppressMessages(
-    slope_params(sdmt ~ t | id, h, healthy = case, covariates = ~ case_copy))),
+    slope_params(sdmt ~ t | id, h, comparator = "healthy", group = case, covariates = ~ case_copy))),
     "fixed by `healthy`")
   d <- cov_data()
   d$age2 <- 2 * d$age + 1
@@ -252,7 +252,7 @@ test_that("a covariate aliased with the group or another covariate is named, not
 
 test_that("under healthy, covariates are centred on the cases", {
   h <- healthy_cov_data()
-  p <- suppressMessages(slope_params(sdmt ~ t | id, h, healthy = case, covariates = ~ age))
+  p <- suppressMessages(slope_params(sdmt ~ t | id, h, comparator = "healthy", group = case, covariates = ~ age))
   g <- nlme::getData(p$fit)
   first <- !duplicated(g$sp_subject)
   expect_equal(mean(g$sp_cov_1[first & g$sp_case == 1]), 0, tolerance = 1e-10)

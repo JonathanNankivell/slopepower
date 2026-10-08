@@ -53,13 +53,13 @@ test_that("slope_sigma() is nlme's marginal covariance for every structure", {
 
 test_that("the structure is matched under `healthy`, with per-group variances kept", {
   d <- load_paper_data("slpower2")
-  p <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  p <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                      correlation = corCAR1()))
   expect_matches_nlme(p, as.character(d$id[d$case == 1][1L]))
 
   # A shared visit grid, so visit-specific variances can be fitted too.
   d$visit <- stats::ave(d$time, d$id, FUN = seq_along) - 1
-  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, healthy = case,
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case,
                                      correlation = corCAR1(),
                                      weights = varIdent(form = ~ 1 | visit)))
   expect_matches_nlme(p, as.character(d$id[d$case == 1][1L]))
@@ -69,7 +69,7 @@ test_that("the structure is matched under `healthy`, with per-group variances ke
 
 test_that("the structure is matched under `treated`, on unequally spaced visits", {
   d <- load_paper_data("slpower3")
-  p <- slope_params(sdmt ~ visit | id, d, treated = treat, correlation = corSymm(),
+  p <- slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat, correlation = corSymm(),
                     weights = varIdent(form = ~ 1 | visit))
   expect_matches_nlme(p, "1")
   expect_equal(p$residual$times, c(0, 0.5, 2))
@@ -124,16 +124,16 @@ test_that("slope_params() refuses structures it cannot use, saying why", {
 
 test_that("corAR1() is refused on non-integer times, pointing to corCAR1()", {
   d <- load_paper_data("slpower3")
-  expect_error(slope_params(sdmt ~ visit | id, d, treated = treat, correlation = corAR1()),
+  expect_error(slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat, correlation = corAR1()),
                "corCAR1")
 })
 
 test_that("corSymm() and varIdent() need a shared visit schedule", {
   d <- load_paper_data("slpower2")   # visits recorded as dates
-  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                              correlation = corSymm())),
                "shared across participants")
-  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                              weights = varIdent(form = ~ 1 | time))),
                "shared across participants")
 })
@@ -168,7 +168,7 @@ test_that("dropout strata slice the structured covariance correctly", {
   p <- residual_fit("un")
   visits <- c(0, 1, 3)
   drop <- c(0, 0.2)
-  es <- slope_effect_size(p, trial_design(visits, dropout = drop))
+  es <- slope_effect_size(p, visits, dropout = drop)
   d <- p$slope
   manual <- sqrt((1 - sum(drop)) * d^2 / slope_var(p, visits) +
                  drop[2] * d^2 / slope_var(p, visits[1:2]))

@@ -6,7 +6,9 @@
 \usage{
 slope_power(
   params,
-  design,
+  visits,
+  dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
   n,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
@@ -18,8 +20,25 @@ slope_power(
 \item{params}{A \code{slope_params} object, from \code{\link[=slope_params]{slope_params()}} fitted to
 previously collected longitudinal data or from \code{\link[=slope_params_manual]{slope_params_manual()}}.}
 
-\item{design}{A \code{trial_design} object, from \code{\link[=trial_design]{trial_design()}}, or a numeric
-vector of visit times beginning at 0.}
+\item{visits}{Numeric vector of the planned trial's visit times,
+\strong{including the baseline visit at time 0}, strictly increasing, of length
+at least 2, in the units of the \code{time} variable used to estimate \code{params}.
+Times may be any real values --- \code{c(0, 0.5, 1, 1.5, 2)} is valid. See
+"The visit schedule" below.}
+
+\item{dropout}{Optional expected dropout. Either a numeric vector of
+proportions, one per follow-up visit (\code{length(visits) - 1}), read as
+\code{dropout_scale} says, or a \code{\link[=dropout_rate]{dropout_rate()}} object giving a constant rate
+per unit of time, which is expanded to one proportion per interval of
+\code{visits}. \code{NULL} (the default) means no dropout. See "Dropout" below.}
+
+\item{dropout_scale}{How a numeric \code{dropout} vector is written.
+\code{"incremental"} (the default) means element \code{j} is the proportion of
+participants whose \strong{last attended visit is \code{visits[j]}}. \code{"cumulative"}
+means element \code{j} is the proportion who have withdrawn by \code{visits[j + 1]},
+i.e. who fail to attend it. A \code{\link[=dropout_rate]{dropout_rate()}} produces incremental
+proportions by construction, so it cannot be combined with
+\code{"cumulative"}.}
 
 \item{n}{Total number of participants across both arms. Required: it is the
 quantity whose power is being evaluated. Odd values are reduced by one so
@@ -85,22 +104,65 @@ Stata command's default behaviour for trial data.}
 }
 }
 
+\section{The visit schedule}{
+
+
+Stata's \code{schedule()} option lists follow-up visits only and assumes an
+implicit baseline at time 0. This port requires baseline to be given
+explicitly in \code{visits}, because the implicit convention is a common source
+of off-by-one design errors. A \code{visits} vector that does not start at 0 is
+rejected with a suggested correction rather than silently repaired.
+
+Stata also restricts \code{schedule()} to ascending integers of at least 1 and
+provides a \code{scale()} option to compensate, because it builds the covariance
+matrix on a unit-integer grid. This port builds it directly at the requested
+times, so \code{scale()} is unnecessary and has no equivalent: express \code{visits}
+in whatever units the fitted slope uses.
+}
+
 \section{Dropout}{
 
 
-When \code{design} carries a dropout pattern, the calculation is adjusted by the
-pattern-mixture method of Dawson and Lagakos (1991, 1993), following section
-2.5 of Nash et al. (2021). Participants are stratified by the visits they
-attend, each stratum is sized as though the whole trial followed that pattern,
-and the strata are combined as the reciprocal of the weighted mean of the
-reciprocals of those sizes. Withdrawers thus still contribute the visits they
-attended, which is less conservative than dividing a completers-only sample
-size by the completion rate, and is the right adjustment when the trial will
-be analysed with a mixed model on all observed measurements. Only monotone
-dropout from a schedule common to all participants is modelled, and every
-stratum is assumed to share the same variance components, so withdrawal is
-taken to be unrelated to a participant's own trajectory. See \code{\link[=trial_design]{trial_design()}}
-for the full account and for how the \code{dropout} vector itself is read.
+The two \code{dropout_scale}s describe the same strata from opposite ends, and
+confusing them changes the trial design materially. A participant counted in
+\code{dropout[j]} (incremental) attends \code{visits[1:j]} and misses everything after,
+so their last attended visit is \code{visits[j]} and the first they miss is
+\code{visits[j + 1]}. The result's \verb{$design} field stores the vector as
+incremental whichever was supplied, and prints both columns so the reading
+is never ambiguous.
+
+Participants whose last attended visit is baseline contribute no follow-up
+measurement and therefore no information about the slope. They are excluded
+from the calculation entirely, with a warning when \code{dropout[1]} is non-zero
+so that this is visible rather than silent.
+
+The calculation is adjusted by the pattern-mixture method of Dawson and
+Lagakos (1991, 1993), which is what section 2.5 of Nash et al. (2021) adopts
+and what the Stata command's \code{dropouts()} option does. Participants are
+divided into strata by the visits they attend: stratum \code{j} attends
+\code{visits[1:j]} and nothing after, and the completers --- a proportion
+\code{1 - sum(dropout)} --- attend everything. Each stratum is sized as though
+the entire trial followed that one visit pattern, and the strata are
+combined as the reciprocal of the weighted mean of the reciprocals of those
+stratum-specific sample sizes, the weights being the incremental \code{dropout}.
+Equivalently, and this is how it is actually computed, the squared
+standardised effect sizes are averaged with those weights; see
+\code{\link[=slope_effect_size]{slope_effect_size()}}.
+
+Withdrawers therefore still contribute the visits they did attend. That
+makes the adjustment less conservative than inflating a completers-only
+sample size by \code{1 / (1 - sum(dropout))}, and it is the appropriate one when
+the trial will be analysed with a mixed model fitted to all observed
+measurements, as in \code{\link[=slope_params]{slope_params()}}. If the planned analysis instead
+discards partial records, this will understate the sample size needed.
+
+Two assumptions come with it. Dropout is monotone and truncates a schedule
+common to every participant: withdrawal is permanent, and intermittent
+missingness --- a visit missed and follow-up resumed --- has no
+representation here, as in the Stata original. And every stratum is given
+the same slope difference and the same variance components, so withdrawal is
+assumed unrelated to a participant's own trajectory; dropout driven by how
+fast someone is declining is outside the model.
 
 One field of the result changes meaning under dropout. No single \eqn{s^{*2}}
 applies across strata, so \code{var_tte} reports the effective value obtained by
@@ -118,13 +180,15 @@ slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
 # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 # are calendar dates and so are converted to years in the formula.
 df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
-pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+                      comparator = "healthy", group = case)
 slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
 
 # Randomised-trial comparator, target = "observed": what power would a
 # repeat trial have to detect the same effect the trial actually found,
 # fitted to all one hundred and fifty participants of `slpower3`.
-pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+                      comparator = "treated", group = treat)
 slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
 
 }
@@ -137,14 +201,19 @@ Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
 repeated measures data. \emph{Biometrics} 49: 1022--1032.
 \doi{10.2307/2532244}
 
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+clinical trials where the outcome is a rate. Can estimating a baseline rate in
+a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+3717--3731. \doi{10.1002/sim.3280}
+
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
 \doi{10.1177/1536867X211045512}
 }
 \seealso{
-\code{\link[=trial_design]{trial_design()}} to build the \code{design} argument,
+\code{\link[=dropout_rate]{dropout_rate()}} to state dropout once for any schedule,
 \code{\link[=slope_sample_size]{slope_sample_size()}} for the \code{n} a target power needs,
 \code{\link[=slope_power_grid]{slope_power_grid()}} to compare many designs at once,
-\code{\link[=slope_bootstrap]{slope_bootstrap()}} for an interval around the result.
+\code{\link[=slope_power_boot]{slope_power_boot()}} for an interval around the result.
 }

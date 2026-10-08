@@ -7,8 +7,8 @@
 slope_params(
   formula,
   data,
-  healthy = NULL,
-  treated = NULL,
+  comparator = c("none", "healthy", "treated"),
+  group = NULL,
   origin = c("subject", "none"),
   common_variance = NULL,
   na.action = stats::na.omit,
@@ -25,18 +25,20 @@ in years when visits are recorded as dates. Choose units on the order of the
 study duration: fitting on a badly scaled axis (days over several years, say)
 leaves the random-slope variance near zero and the REML optimiser converges
 less precisely. There is no \code{scale()} argument as there is in Stata --
-express \code{visits} in \code{\link[=trial_design]{trial_design()}} in whatever units are used here.}
+express \code{visits} in stage two in whatever units are used here.}
 
 \item{data}{A data frame in long format, one row per measurement.}
 
-\item{healthy}{Optional bare column name identifying healthy controls, coded
-\code{1} for cases (subjects with the disease) and \code{0} for healthy controls.
-Looked up in \code{data} first, then in the calling environment.
-Mutually exclusive with \code{treated}.}
+\item{comparator}{What, if anything, the untreated group in \code{data} is
+compared with: \code{"none"} (the default), \code{"healthy"} for observational data
+with healthy controls, or \code{"treated"} for data from a previous trial with
+a treated arm. See Details.}
 
-\item{treated}{Optional bare column name identifying the treated arm of a
-previously conducted trial, coded \code{1} for treated and \code{0} for the control
-arm. Looked up as for \code{healthy}. Mutually exclusive with \code{healthy}.}
+\item{group}{Bare column name identifying the two groups, required unless
+\code{comparator = "none"} and refused with it. Under \code{"healthy"}, coded \code{1}
+for cases (subjects with the disease) and \code{0} for healthy controls; under
+\code{"treated"}, \code{1} for the treated arm and \code{0} for the control arm. Looked
+up in \code{data} first, then in the calling environment.}
 
 \item{origin}{\code{"subject"} (default) shifts each subject's time so their first
 visit is time zero, reproducing the Stata command's behaviour and ensuring
@@ -47,7 +49,8 @@ supplied.}
 controls. \code{NULL} (default) fits the full model and falls back automatically
 if it fails to converge; \code{TRUE} forces the reduced structure (a random
 intercept only, equivalent to the Stata \code{nocontvar} option); \code{FALSE} forces
-the full structure and errors on failure. Ignored unless \code{healthy} is given.}
+the full structure and errors on failure. Ignored unless
+\code{comparator = "healthy"}.}
 
 \item{na.action}{Applied to the assembled model frame. Defaults to
 \code{\link[stats:na.omit]{stats::na.omit()}}.}
@@ -67,7 +70,7 @@ one row per participant, so a basis's knots or scaling do not depend on
 how many visits each participant has. A column that does not vary between
 participants (e.g. an unused factor level) is dropped. Every column is
 centred at its mean over participants -- over the cases only when
-\code{healthy} is given -- so \code{slope} is the slope of a participant with those
+\code{comparator = "healthy"} -- so \code{slope} is the slope of a participant with those
 average covariate values. The returned variance components are then the
 \emph{adjusted} ones, and the object records the adjustment in \verb{$covariates}.
 A covariate that is an exact linear combination of the group indicator or
@@ -122,21 +125,23 @@ slope(s) and the between- and within-subject variance components that
 \details{
 Three scenarios are supported, matching paper section 2.3:
 \itemize{
-\item neither \code{healthy} nor \code{treated}: a single group of untreated subjects with
+\item \code{comparator = "none"}: a single group of untreated subjects with
 the disease. The target treatment effect will be measured toward a slope of
 zero.
-\item \code{healthy}: observational data containing both cases and healthy controls.
+\item \code{comparator = "healthy"}: observational data containing both cases and
+healthy controls.
 The target effect will be measured toward the healthy-control slope.
-\item \code{treated}: data from a previous trial. The observed treatment effect is
+\item \code{comparator = "treated"}: data from a previous trial. The observed
+treatment effect is
 available via \code{target = "observed"} in \code{\link[=slope_sample_size]{slope_sample_size()}} and
 \code{\link[=slope_power]{slope_power()}}.
 }
 
 The returned variance components are always those of the \strong{untreated / case}
-group. When \code{healthy} is supplied the controls contribute only their slope;
+group. Under \code{comparator = "healthy"} the controls contribute only their slope;
 their variance components are estimated and discarded, per paper section 2.3.
 
-Note that for the \code{healthy} scenario without covariates the model factorises
+Note that for the \code{"healthy"} scenario without covariates the model factorises
 exactly into two independent fits, one per group: the fixed effects
 \code{y ~ case * time} span the same column space as separate per-group intercepts
 and slopes, the random-effects blocks are independent, and the residual
@@ -170,12 +175,12 @@ participant (see "Residual structures"). Only the mean \eqn{\mu}{mu} and the
 number of variance parameters differ between the scenarios.
 
 \describe{
-\item{Neither \code{healthy} nor \code{treated}}{
+\item{\code{comparator = "none"}}{
 \deqn{\mu(t) = \beta_0 + \beta_1 t}{mu(t) = b0 + b1 * t}
 with one \eqn{G}{G} and one \eqn{\sigma^2_\epsilon}{sigma2_residual}. The
 returned slope is \eqn{\beta_1}{b1}. Equivalent to
 \code{nlme::lme(y ~ t, random = ~ t | id)}.}
-\item{\code{healthy = g}, with \eqn{g_i = 1}{g[i] = 1} for cases}{
+\item{\verb{comparator = "healthy", group = g}, with \eqn{g_i = 1}{g[i] = 1} for cases}{
 \deqn{\mu(t) = \beta_0 + \beta_g g_i + (\beta_1 + \beta_{1g} g_i) t}{
           mu(t) = b0 + bg * g[i] + (b1 + b1g * g[i]) * t}
 and, in addition, a \strong{separate} \eqn{G}{G} and a \strong{separate}
@@ -184,7 +189,7 @@ cases is \eqn{\beta_1 + \beta_{1g}}{b1 + b1g} and that of the controls
 \eqn{\beta_1}{b1}; the variance components returned are the cases'.
 Without covariates the model factorises into two independent per-group
 fits (see above).}
-\item{\code{treated = z}, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
+\item{\verb{comparator = "treated", group = z}, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
 \deqn{\mu(t) = \beta_0 + \beta_1 t + \beta_p (1 - z_i) t}{
           mu(t) = b0 + b1 * t + bp * (1 - z[i]) * t}
 with one \eqn{G}{G} and one
@@ -207,8 +212,8 @@ difference in slopes and the arms again share an intercept.
 
 The design matrices above are fixed by the method and are not what you would
 write by hand in \code{lme4}. Both comparator models depart from the obvious
-\code{y ~ group * time + (time | id)}: the \code{treated} model drops the group main
-effect, and the \code{healthy} model gives each group its own residual variance,
+\code{y ~ group * time + (time | id)}: the \code{"treated"} model drops the group main
+effect, and the \code{"healthy"} model gives each group its own residual variance,
 which \code{lme4} cannot fit at all. Included, therefore:
 \itemize{
 \item one continuous, approximately Gaussian outcome;
@@ -219,7 +224,7 @@ random slope have an unstructured covariance;
 \item residuals independent between participants, and within a participant
 either independent with a variance that is constant within a group (the
 default) or structured through \code{correlation} and \code{weights};
-\item at most two groups, distinguished only by their slope (and, for \code{healthy},
+\item at most two groups, distinguished only by their slope (and, for \code{"healthy"},
 by their variance components).
 }
 
@@ -260,11 +265,11 @@ coefficients are shared by both groups, the random effects and residuals are
 unchanged, and the slope and variance components are extracted exactly as
 before -- they are now conditional on the covariates.
 
-Under \code{healthy} the covariates are centred at the mean of the \strong{cases}, not
+Under \code{comparator = "healthy"} the covariates are centred at the mean of the \strong{cases}, not
 of everyone, because the planned trial enrols cases: \code{slope} is the slope of
 a case with the cases' average covariate values, and \code{slope_comparator} that
 of a healthy control with the same values. Their difference does not depend
-on where the covariates are centred. Under \code{treated} both arms come from the
+on where the covariates are centred. Under \code{comparator = "treated"} both arms come from the
 trial population, so everyone is used.
 
 Two consequences. First, stage two then assumes the planned trial will be
@@ -273,7 +278,7 @@ plan an unadjusted analysis overstates power. The adjustment is recorded in
 the returned object's \verb{$covariates} -- a list of the \code{columns} adjusted for
 and whether their interactions with \code{time} were included, or \code{NULL} -- and
 is printed with the parameters and with every stage-two result. Second,
-because the covariate coefficients are shared across groups, the \code{healthy}
+because the covariate coefficients are shared across groups, the \code{"healthy"}
 model no longer factorises into two independent fits, so \code{common_variance}
 can now move the cases' estimates slightly.
 
@@ -327,7 +332,7 @@ covariance the random effects imply. The covariance they imply together
 at the visit times is identified, and that is the only thing stage two
 uses, but the individual components printed are one point on a ridge of
 equally good fits, and \code{\link[=slope_var_floor]{slope_var_floor()}} is refused.
-\item Under \code{healthy} the correlation parameters are shared by cases and
+\item Under \code{comparator = "healthy"} the correlation parameters are shared by cases and
 controls -- \code{nlme} estimates one correlation structure per model -- while
 the residual variances, and with \code{varIdent()} the per-visit variances, stay
 separate per group. So the model no longer factorises into two per-group
@@ -337,23 +342,26 @@ can with covariates.
 }
 
 \examples{
-# Neither `healthy` nor `treated`: a single group of untreated subjects.
+# No comparator: a single group of untreated subjects.
 # Four of the two hundred participants of `slpower1`, kept small so the
 # example runs quickly -- see `slpower1` for the paper's fit on the full data.
 df <- slpower1[slpower1$id \%in\% 1:4, ]
 slope_params(sdmt ~ visit | id, data = df)
 
-# `healthy`: two cases and two healthy controls, a subset of `slpower2`.
+# comparator = "healthy": two cases and two healthy controls, a subset of
+# `slpower2`.
 # Visits are recorded as calendar dates there, so the time term converts
 # them to years.
 df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
-slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+             comparator = "healthy", group = case)
 
-# `treated`: data from a completed trial, a subset of `slpower3`. Fitting the
+# comparator = "treated": data from a completed trial, a subset of
+# `slpower3`. Fitting the
 # random-effects structure shared by both arms needs more than a couple of
 # subjects per arm to converge, so this excerpt keeps six per arm.
 df3 <- slpower3[slpower3$id \%in\% c(1:6, 76:81), ]
-slope_params(sdmt ~ visit | id, data = df3, treated = treat)
+slope_params(sdmt ~ visit | id, data = df3, comparator = "treated", group = treat)
 
 # Adjusting for a baseline covariate (simulated here for illustration).
 df4 <- slpower1[slpower1$id \%in\% 1:20, ]
@@ -382,5 +390,5 @@ Introducing the slopepower command. \emph{The Stata Journal} 21(3): 575--601.
 \seealso{
 \code{\link[=slope_params_manual]{slope_params_manual()}} to supply parameters directly,
 \code{\link[=slope_sample_size]{slope_sample_size()}} and \code{\link[=slope_power]{slope_power()}} for stage two,
-\code{\link[=slope_bootstrap]{slope_bootstrap()}} for an interval around the fitted slope.
+\code{\link[=slope_params_boot]{slope_params_boot()}} for an interval around the fitted slope.
 }

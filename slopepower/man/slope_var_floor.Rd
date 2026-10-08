@@ -30,8 +30,8 @@ proportional to \eqn{s^{*2}}, this is where the sample-size floor
 There is deliberately none. The bound does not depend on the visit schedule
 --- that is the whole content of it --- and it does not depend on the dropout
 pattern either, since dropout can only ever raise the variance. So the value
-returned bounds every design \code{\link[=trial_design]{trial_design()}} can express, not just the ones
-without withdrawal.
+returned bounds every design the stage-two functions can express, not just
+the ones without withdrawal.
 }
 
 \section{It is an infimum, not a minimum}{
@@ -84,6 +84,11 @@ AIDS clinical trials. \emph{Journal of Acquired Immune Deficiency Syndromes}
 Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
 repeated measures data. \emph{Biometrics} 49: 1022--1032.
 \doi{10.2307/2532244}
+
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+clinical trials where the outcome is a rate. Can estimating a baseline rate in
+a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+3717--3731. \doi{10.1002/sim.3280}
 
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the

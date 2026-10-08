@@ -51,8 +51,8 @@ local({
   slpower3$time <- slpower3$visit
   got <- c(
     slpower1 = fit(slpower1)$slope,
-    slpower2 = suppressMessages(fit(slpower2, healthy = case))$slope,
-    slpower3 = fit(slpower3, treated = treat)$slope
+    slpower2 = suppressMessages(fit(slpower2, comparator = "healthy", group = case))$slope,
+    slpower3 = fit(slpower3, comparator = "treated", group = treat)$slope
   )
   # "Still prints as the paper's figure", which is a bound of half a unit in the
   # last printed place. slpower1 is pinned one digit further out for the reason

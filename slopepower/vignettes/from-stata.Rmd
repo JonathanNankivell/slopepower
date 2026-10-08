@@ -64,7 +64,7 @@ str(slope_lme_control()[c("maxIter", "msMaxIter", "opt", "tolerance")])
 
 More iterations than `nlme`'s defaults, `opt = "optim"`, and tighter tolerances,
 chosen because the stock settings converged less precisely on the two-block
-random-effects structure fitted for `healthy`. It is exported so the settings
+random-effects structure fitted for `comparator = "healthy"`. It is exported so the settings
 behind a published number can be inspected and reproduced from outside the
 package -- **not** so they can be overridden from inside it. The model this
 package fits is fixed (see `?slope_params`), and a tunable optimiser would let
@@ -76,14 +76,14 @@ why.
 | Stata | R |
 |---|---|
 | `obs` + `nocontrols` | `slope_params(y ~ t \| id, data)` |
-| `obs` + `casecon(v)` | `slope_params(y ~ t \| id, data, healthy = v)` |
-| `rct` + `treat(v)` | `slope_params(y ~ t \| id, data, treated = v)` |
-| `schedule(1 2 3)` | `trial_design(c(0, 1, 2, 3))` -- baseline explicit |
-| `schedule(1 2 3 4) scale(0.5)` | `trial_design(seq(0, 2, by = 0.5))` -- no `scale` |
-| `dropouts(.05 .05)` | `trial_design(..., dropout = c(0.05, 0.05))` |
-| *(no equivalent)* | `dropout_type = "cumulative"`, `dropout_rate()` |
-| `power(0.8)` | `slope_sample_size(params, design, power = 0.8)` |
-| `n(450)` | `slope_power(params, design, n = 450)` |
+| `obs` + `casecon(v)` | `slope_params(y ~ t \| id, data, comparator = "healthy", group = v)` |
+| `rct` + `treat(v)` | `slope_params(y ~ t \| id, data, comparator = "treated", group = v)` |
+| `schedule(1 2 3)` | `visits = c(0, 1, 2, 3)` -- baseline explicit |
+| `schedule(1 2 3 4) scale(0.5)` | `visits = seq(0, 2, by = 0.5)` -- no `scale` |
+| `dropouts(.05 .05)` | `dropout = c(0.05, 0.05)` |
+| *(no equivalent)* | `dropout_scale = "cumulative"`, `dropout_rate()` |
+| `power(0.8)` | `slope_sample_size(params, visits, power = 0.8)` |
+| `n(450)` | `slope_power(params, visits, n = 450)` |
 | `effectiveness(0.33)` | `effectiveness = 0.33` |
 | `usetrt` | `target = "observed"` |
 | `nocontvar` | `common_variance = TRUE` |
@@ -110,28 +110,29 @@ The R port makes each of those states unwritable instead of checked.
 
 ```{r two-functions, error = TRUE}
 pars1 <- slope_params(sdmt ~ visit | id, data = slpower1)
-design <- trial_design(c(0, 1, 2))
-slope_power(pars1, design, n = 200, power = 0.8)
+slope_power(pars1, c(0, 1, 2), n = 200, power = 0.8)
 ```
 
 That is R's own argument matching, not a check the package wrote. The ambiguity
 Stata resolves with a run-time branch is a type error at the call site.
 
-**The model is inferred from the data, not declared alongside it.** There is no
-`obs`/`rct`/`nocontrols` argument. The scenario simply *is* which grouping
-argument you supplied:
+**The model is declared once, with the column it needs.** There are no
+`obs`/`rct`/`nocontrols` flags to combine. `comparator` names the scenario and
+`group` the column that tells its two groups apart:
 
 ```r
 slope_params(y ~ t | id, data)                    # Stata's obs nocontrols
-slope_params(y ~ t | id, data, healthy = case)    # Stata's obs casecon()
-slope_params(y ~ t | id, data, treated = treat)   # Stata's rct treat()
+slope_params(y ~ t | id, data, comparator = "healthy", group = case)    # Stata's obs casecon()
+slope_params(y ~ t | id, data, comparator = "treated", group = treat)   # Stata's rct treat()
 ```
 
-Of Stata's six model-consistency checks, exactly one survives, because it is the
-only inconsistent state you can still express:
+Of Stata's six model-consistency checks, two survive, because they are the only
+inconsistent states you can still express -- a column with no scenario, or a
+scenario with no column:
 
 ```{r one-check, error = TRUE}
-slope_params(sdmt ~ visit | id, data = slpower3, healthy = treat, treated = treat)
+slope_params(sdmt ~ visit | id, data = slpower3, group = treat)
+slope_params(sdmt ~ visit | id, data = slpower3, comparator = "treated")
 ```
 
 **Fields are named for what they are.** Stata names its return scalars after the
@@ -144,18 +145,18 @@ treated arm (`NA_real_` where there is none), with a separate `comparator` field
 (`"none"`, `"healthy"`, `"treated"`) carrying the model identity instead of the
 names doing it.
 
-## Trial designs are objects, and richer ones
+## Richer trial designs
 
 ### Baseline is explicit
 
 Stata's `schedule()` lists follow-up visits only; visit 0 is inserted silently.
-`trial_design()` requires you to write it:
+Every stage-two function's `visits` requires you to write it:
 
 ```{r baseline, error = TRUE}
-trial_design(c(1, 2))
+slope_sample_size(pars1, c(1, 2))
 ```
 
-`schedule(1 2)` becomes `trial_design(c(0, 1, 2))`. The implicit convention is a
+`schedule(1 2)` becomes `visits = c(0, 1, 2)`. The implicit convention is a
 common source of off-by-one design errors, and Stata's users have to remember it
 rather than see it.
 
@@ -168,8 +169,7 @@ axis. This port builds Σ directly at whatever real times you supply, so
 fractional spacing is written down directly and `scale()` has no equivalent:
 
 ```{r spacing}
-slope_sample_size(pars1, trial_design(seq(0, 2, by = 0.5)),
-                  effectiveness = 0.33)$n
+slope_sample_size(pars1, seq(0, 2, by = 0.5), effectiveness = 0.33)$n
 ```
 
 620, which is exactly what Stata returns for `schedule(1 2 3 4) scale(0.5)` on
@@ -179,26 +179,30 @@ the same fit -- the equivalence is pinned against Stata's own output.
 
 Stata accepts only incremental dropout fractions (the proportion whose *last*
 attended visit is visit *i*). Converting an attrition curve to that form is left
-to you. `trial_design()` will do it:
+to you. `dropout_scale = "cumulative"` will do it:
 
 ```{r cumulative}
-trial_design(c(0, 1, 2, 3), dropout = c(0, 0.10, 0.15),
-             dropout_type = "cumulative")
+ss_cum <- slope_sample_size(pars1, c(0, 1, 2, 3), dropout = c(0, 0.10, 0.15),
+                            dropout_scale = "cumulative", effectiveness = 0.33)
+ss_cum$design
 ```
 
-The stored `dropout` field is always incremental whichever form you supplied,
-and the cumulative vector is checked for being non-decreasing and bounded by 1.
+The design a result carries always stores `dropout` incrementally whichever
+form you supplied, and the cumulative vector is checked for being non-decreasing
+and bounded by 1.
 
 `dropout_rate()` goes further and has no Stata counterpart at all. "5% a year
 over three years" has to be hand-converted to `dropouts(0.15)`,
 `dropouts(.05 .05 .05)` or `dropouts(.025 ...)` depending on which schedule you
 are comparing, with the arithmetic redone for every row of a comparison table.
-`dropout_rate(0.05)` is expanded per schedule automatically by `trial_design()`,
+`dropout_rate(0.05)` is expanded against whichever schedule it is paired with,
 so the same object serves a single design
 
 ```{r rate-one}
-trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05))$dropout
-trial_design(seq(0, 3, by = 0.5), dropout = dropout_rate(0.05))$dropout
+slope_sample_size(pars1, c(0, 1, 2, 3), dropout = dropout_rate(0.05),
+                  effectiveness = 0.33)$design$dropout
+slope_sample_size(pars1, seq(0, 3, by = 0.5), dropout = dropout_rate(0.05),
+                  effectiveness = 0.33)$design$dropout
 ```
 
 The warning is expected rather than a sign of trouble: any non-zero rate puts
@@ -238,15 +242,14 @@ data currently in memory" -- the whole Stata command is a `program` operating on
 the loaded dataset, with `preserve`/`restore` to undo its own mutations.
 `slope_var()`, `slope_sigma()`, `slope_effect_size()`, `slope_sample_size()`,
 `slope_power()` and the grid functions are pure functions of a `slope_params`
-object and a `trial_design` object. They can be called with no dataset loaded at
-all:
+object and a visit schedule. They can be called with no dataset loaded at all:
 
 ```{r manual}
 pars_published <- slope_params_manual(
   slope = -1.6, sigma2_intercept = 100, sigma2_slope = 2,
   sigma_cov = 5, sigma2_residual = 10
 )
-slope_sample_size(pars_published, design, effectiveness = 0.33)$n
+slope_sample_size(pars_published, c(0, 1, 2), effectiveness = 0.33)$n
 ```
 
 `slope_params_manual()` is how you plan from variance components reported in a
@@ -265,7 +268,7 @@ flat <- slope_params_manual(slope = -1.6, slope_comparator = -1.6,
                             comparator = "treated",
                             sigma2_intercept = 100, sigma2_slope = 2,
                             sigma_cov = 5, sigma2_residual = 10)
-slope_sample_size(flat, design, target = "observed")
+slope_sample_size(flat, c(0, 1, 2), target = "observed")
 ```
 
 The same applies to a singular information matrix, a non-positive-definite
@@ -274,16 +277,15 @@ implied covariance, a non-PD random-effects matrix on a hand-built
 silently switches to solving for sample size at 80% power:
 
 ```{r missing-n, error = TRUE}
-slope_power(pars1, design, n = NULL)
+slope_power(pars1, c(0, 1, 2), n = NULL)
 ```
 
 Supplying `effectiveness` alongside `target = "observed"` is an error too, where
 `slopepower.ado` quietly overwrites it to 1:
 
 ```{r target-eff, error = TRUE}
-pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
-slope_sample_size(pars3, trial_design(c(0, 2, 3)),
-                  target = "observed", effectiveness = 0.5)
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, comparator = "treated", group = treat)
+slope_sample_size(pars3, c(0, 2, 3), target = "observed", effectiveness = 0.5)
 ```
 
 What the two *report* afterwards still agrees: under `target = "observed"` the
@@ -307,7 +309,8 @@ string-matching:
 
 ```{r condition}
 withCallingHandlers(
-  design_d <- trial_design(c(0, 1, 2), dropout = c(0.05, 0.05)),
+  ss_d <- slope_sample_size(pars1, c(0, 1, 2), dropout = c(0.05, 0.05),
+                            effectiveness = 0.33),
   slopepower_baseline_dropout = function(w) {
     cat("caught:", class(w)[1], "\n")
     invokeRestart("muffleWarning")
@@ -332,7 +335,7 @@ console output:
 ```{r shift}
 d2 <- slpower2
 d2$time <- as.numeric(d2$vdate) / 365
-pars2 <- slope_params(sdmt ~ time | id, data = d2, healthy = case)
+pars2 <- slope_params(sdmt ~ time | id, data = d2, comparator = "healthy", group = case)
 pars2$time_shifted
 ```
 
@@ -356,14 +359,14 @@ pars2$common_variance
 ### Invariants are re-checked at every use
 
 Stata validates once, in the `syntax` block, coupled to that call's arguments;
-there is no persisted object to revalidate. Here `slope_params` and
-`trial_design` are real objects whose invariants -- positive-definite Σ and *G*,
-dropout length and total, finite visits -- are re-checked at the boundary of
-every stage-two call, not only where the constructors ran. That closes the gap
+there is no persisted object to revalidate. Here `slope_params` is a real object
+whose invariants -- positive-definite Σ and *G* -- are re-checked at the
+boundary of every stage-two call, not only where the constructor ran, and the
+design -- dropout length and total, finite visits -- is validated by every
+stage-two call from the `visits` and `dropout` it is given. That closes the gap
 for objects the constructors never saw: a hand-assembled `slope_params` with a
 non-PD random-effects matrix masked by a large residual variance would otherwise
-return a plausible, wrong, large *N*, and a `trial_design` whose `$dropout` was
-edited after construction would escape the baseline-dropout warning entirely.
+return a plausible, wrong, large *N*.
 
 ### Variance components are extracted by name
 
@@ -389,7 +392,8 @@ the fits used here.
 The paper's bootstrap recipe (§2.6, §4.1.2) is not built into the Stata command:
 you assemble `cluster()`, `idcluster()`, `strata()` and `jack()` yourself, with a
 caveat that it assumes no observations were excluded. Four things to get wrong,
-with no structural guard. `slope_bootstrap()` has no equivalent options at all:
+with no structural guard. `slope_sample_size_boot()` and its siblings have no
+equivalent options at all:
 subjects are always the resampling unit, replicate identifiers are always
 regenerated (so a subject drawn twice counts as two people rather than
 colliding), and stratification by group is automatic whenever
@@ -458,7 +462,7 @@ a calculation that otherwise succeeded. (An earlier literal transcription here
 reported 0, `qnorm(1)` being `Inf`.) The stable form still reports:
 
 ```{r saturated}
-pw <- slope_power(pars1, trial_design(c(0, 1, 2), dropout = c(0, 0.1)),
+pw <- slope_power(pars1, c(0, 1, 2), dropout = c(0, 0.1),
                   n = 10000, effectiveness = 0.33)
 c(power = pw$power, var_tte = pw$var_tte)
 ```
@@ -475,7 +479,7 @@ previously observed effect scales *N* by *p*<sup>-2</sup>, and quotes 1,272 for
 *N*, which magnifies the rounding. Rounding last gives 1,266:
 
 ```{r published}
-ss3 <- slope_sample_size(pars3, trial_design(c(0, 2, 3), dropout = c(0.2, 0.1)),
+ss3 <- slope_sample_size(pars3, c(0, 2, 3), dropout = c(0.2, 0.1),
                          target = "observed")
 p <- 0.5
 c(paper   = ss3$n * 4,

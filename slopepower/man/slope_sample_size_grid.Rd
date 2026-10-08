@@ -8,6 +8,7 @@ slope_sample_size_grid(
   params,
   visits,
   dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
   power = 0.8,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
@@ -21,8 +22,13 @@ slope_sample_size_grid(
 \item{visits}{A numeric vector of visit times, or a named list of such vectors.
 Each must begin at 0.}
 
-\item{dropout}{\code{NULL}, a numeric vector of incremental proportions, a
-\code{\link[=dropout_rate]{dropout_rate()}} object, or a named list mixing any of these.}
+\item{dropout}{\code{NULL}, a numeric vector of proportions, a \code{\link[=dropout_rate]{dropout_rate()}}
+object, or a named list mixing any of these.}
+
+\item{dropout_scale}{How every numeric vector in \code{dropout} is written:
+\code{"incremental"} (the default) or \code{"cumulative"}, as in
+\code{\link[=slope_sample_size]{slope_sample_size()}}. It applies to every vector in the list, and cannot
+be \code{"cumulative"} if the list holds a \code{\link[=dropout_rate]{dropout_rate()}}.}
 
 \item{power}{Target power. Defaults to 0.8. A single value is held constant
 across the grid; several make it another axis.}
@@ -54,8 +60,8 @@ this is the same exploration read the other way round.
 }
 \details{
 Dropout is handled cell by cell exactly as in \code{\link[=slope_sample_size]{slope_sample_size()}}, by the
-Dawson and Lagakos (1991, 1993) pattern mixture described in \code{\link[=trial_design]{trial_design()}}.
-Use \code{\link[=dropout_rate]{dropout_rate()}} rather than a fixed vector when the schedules being
+Dawson and Lagakos (1991, 1993) pattern mixture described in its "Dropout"
+section. Use \code{\link[=dropout_rate]{dropout_rate()}} rather than a fixed vector when the schedules being
 compared have different numbers of visits.
 }
 \examples{
@@ -101,7 +107,8 @@ slope_sample_size_grid(
 # Case/healthy-control comparator: two cases and two healthy controls, a
 # subset of `slpower2` whose visits are calendar dates converted to years.
 df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
-pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+                      comparator = "healthy", group = case)
 slope_sample_size_grid(
   pars2, power = 0.8, effectiveness = 0.33,
   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
@@ -112,7 +119,8 @@ slope_sample_size_grid(
 # to detect the same effect the trial actually found, comparing its
 # original visit schedule against a denser one, fitted to all one hundred
 # and fifty participants of `slpower3`.
-pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+                      comparator = "treated", group = treat)
 slope_sample_size_grid(
   pars3, power = 0.8, target = "observed",
   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),

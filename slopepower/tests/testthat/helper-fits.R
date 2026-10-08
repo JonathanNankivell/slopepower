@@ -20,8 +20,8 @@ paper_fit <- function(which) {
   fit <- switch(
     which,
     slpower1 = slope_params(sdmt ~ time | id, d),
-    slpower2 = suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case)),
-    slpower3 = slope_params(sdmt ~ time | id, d, treated = treat)
+    slpower2 = suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case)),
+    slpower3 = slope_params(sdmt ~ time | id, d, comparator = "treated", group = treat)
   )
   cache[[which]] <- fit
   fit

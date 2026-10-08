@@ -5,23 +5,23 @@
 \alias{print.dropout_rate}
 \title{A constant dropout rate per unit of time}
 \usage{
-dropout_rate(rate, per = 1, type = c("linear", "cumulative"))
+dropout_rate(rate, per = 1, pattern = c("linear", "geometric"))
 
 \method{print}{dropout_rate}(x, ...)
 }
 \arguments{
 \item{rate}{Expected proportion withdrawing per \code{per} units of time. For
-\code{type = "linear"}, a proportion of the original randomised sample and so
+\code{pattern = "linear"}, a proportion of the original randomised sample and so
 non-negative with no upper bound of its own (the total across all visits
-is what is capped at 1). For \code{type = "cumulative"}, a proportion of
+is what is capped at 1). For \code{pattern = "geometric"}, a proportion of
 whoever remains and so restricted to \verb{[0, 1]}.}
 
 \item{per}{Length of time \code{rate} refers to, in the units of the \code{time} variable
 used to estimate the slope parameters. Defaults to 1, i.e. \code{rate} is a
 per-unit-time rate.}
 
-\item{type}{Which withdrawal pattern \code{rate} describes: \code{"linear"} (the
-default) or \code{"cumulative"}. See Details.}
+\item{pattern}{Which withdrawal pattern \code{rate} describes: \code{"linear"} (the
+default) or \code{"geometric"}. See Details.}
 
 \item{x}{A \code{dropout_rate} object.}
 
@@ -31,25 +31,27 @@ default) or \code{"cumulative"}. See Details.}
 An object of class \code{dropout_rate}.
 }
 \description{
-Dropout proportions are supplied to \code{\link[=trial_design]{trial_design()}} per visit, so the same
-underlying withdrawal rate needs a different vector for every candidate visit
+Dropout proportions are otherwise supplied per visit, so the same underlying
+withdrawal rate needs a different vector for every candidate visit
 schedule: "5\% per year" over three years is \code{0.15} for a trial with a single
 final visit, \code{rep(0.05, 3)} with annual visits, and \code{rep(0.025, 6)} with
-six-monthly visits. \code{dropout_rate()} expresses the rate once and lets
-\code{\link[=trial_design]{trial_design()}} expand it correctly for whichever schedule it is given ---
-which is what makes it useful to the grid functions, where one object drives
-every row of a table of competing schedules.
+six-monthly visits. \code{dropout_rate()} expresses the rate once and is expanded
+correctly for whichever schedule it is paired with --- which is what makes it
+useful to the grid functions, where one object drives every row of a table
+of competing schedules. It is accepted as the \code{dropout} argument of every
+stage-two function.
 }
 \details{
-\code{type} chooses which of two withdrawal patterns \code{rate} describes:
+\code{pattern} chooses which of two withdrawal patterns \code{rate} describes:
 \itemize{
 \item \code{"linear"} (the default) applies \code{rate} to the \emph{original randomised
 cohort}, matching the worked example in section 4.2 of Nash et al. (2021):
 the proportion whose last attended visit is \code{visits[j]} is
 \code{rate * (visits[j + 1] - visits[j]) / per}. The same number withdraw in
-every equal-length interval regardless of how many have already left, and
-the increments sum to \code{rate * total_duration / per}.
-\item \code{"cumulative"} applies \code{rate} as the proportion of \emph{whoever is still in
+every equal-length interval regardless of how many have already left, so
+the proportion still in follow-up falls linearly, and the increments sum
+to \code{rate * total_duration / per}.
+\item \code{"geometric"} applies \code{rate} as the proportion of \emph{whoever is still in
 follow-up} who withdraws per \code{per} units of time, so the same proportion
 of the remaining participants drops out at every visit rather than the
 same proportion of the original cohort. The fraction still being followed
@@ -62,17 +64,16 @@ never exceeds 1 however long the trial runs, and \code{rate} --- itself a
 proportion of the remaining sample --- is restricted to \verb{[0, 1]}.
 }
 
-Because both expansions produce incremental proportions by construction, a
-\code{dropout_rate} cannot be combined with \code{dropout_type = "cumulative"}; see
-\code{\link[=trial_design]{trial_design()}}. That argument is a different, unrelated choice --- how the
-\emph{vector itself} was written down --- from this object's \code{type}, which
-describes how withdrawal behaves over time; the shared word is coincidence,
-not the same idea twice.
+Both patterns expand to incremental proportions by construction, so a
+\code{dropout_rate} cannot be combined with \code{dropout_scale = "cumulative"}, which
+describes how a numeric \code{dropout} \emph{vector} was written down. The two are
+named apart deliberately: \code{pattern} is how withdrawal behaves over time,
+\code{dropout_scale} how a vector of proportions is to be read.
 
 This object only produces the per-visit proportions. What the calculation then
 does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
-what it assumes about why people withdraw --- is described in
-\code{\link[=trial_design]{trial_design()}}.
+what it assumes about why people withdraw --- is described in the "Dropout"
+section of \code{\link[=slope_sample_size]{slope_sample_size()}}.
 }
 \section{Methods (by generic)}{
 \itemize{
@@ -82,13 +83,15 @@ what it assumes about why people withdraw --- is described in
 \examples{
 dropout_rate(0.05)              # 5\% of the original cohort per unit time
 dropout_rate(0.10, per = 12)    # 10\% per 12 months, if time is in months
-dropout_rate(0.05, type = "cumulative")  # 5\% of those remaining, per unit time
+dropout_rate(0.05, pattern = "geometric")  # 5\% of those remaining, per unit time
 
-# The same rate, expanded for two different schedules
-trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05))$dropout
-trial_design(c(0, 1.5, 3), dropout = dropout_rate(0.05))$dropout
+# The same rate, priced against two different schedules
+pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+slope_sample_size(pars, c(0, 1, 2, 3), dropout = dropout_rate(0.05))
+slope_sample_size(pars, c(0, 1.5, 3), dropout = dropout_rate(0.05))
 
 }
 \seealso{
-\code{\link[=trial_design]{trial_design()}}, \code{\link[=slope_power_grid]{slope_power_grid()}}, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}
+\code{\link[=slope_sample_size]{slope_sample_size()}}, \code{\link[=slope_power]{slope_power()}}, \code{\link[=slope_power_grid]{slope_power_grid()}},
+\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}
 }

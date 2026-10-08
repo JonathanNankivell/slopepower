@@ -2,37 +2,39 @@
 % Please edit documentation in R/grid_boot.R
 \name{[.slope_sample_size_grid_boot}
 \alias{[.slope_sample_size_grid_boot}
+\alias{[.slope_power_grid_boot}
 \title{Subsetting drops the grid-wide summary, not just the class}
 \usage{
 \method{[}{slope_sample_size_grid_boot}(x, ...)
+
+\method{[}{slope_power_grid_boot}(x, ...)
 }
 \arguments{
-\item{x}{A \code{slope_sample_size_grid_boot} object to subset.}
+\item{x}{A \code{slope_sample_size_grid_boot} or \code{slope_power_grid_boot} object to
+subset.}
 
 \item{...}{Passed on to \verb{[.data.frame}.}
 }
 \description{
-Every attribute \code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} adds -- \code{R}, the slope
-block, \code{named} and the rest -- describes the \emph{whole table}: \code{R} replicates
-were drawn once for every cell, \code{slope_replicates} holds the ones that
-priced all \code{nrow(x)} of them, and \code{named} says which axes vary across the
-lot. A \code{[} subset can change which cells are present, or how many, or
-leave only one level of an axis standing, without changing any of that --
-and base \verb{[.data.frame} does not reliably strip attributes it does not
-recognise, so, empirically, those become stale rather than absent:
-\code{slope_replicates} still summarised the resampling behind cells a row
-subset had dropped. So this method strips them itself, on every subset,
-along with the class -- explicitly, rather than relying on incidental
-attribute-dropping \code{\link[=print.slope_sample_size_grid_boot]{print.slope_sample_size_grid_boot()}} could not safely
-assume.
+Every attribute \code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}} and \code{\link[=slope_power_grid_boot]{slope_power_grid_boot()}}
+add -- \code{R}, the slope block, \code{named} and the rest -- describes the \emph{whole
+table}: \code{R} replicates were drawn once for every cell, \code{slope_replicates}
+holds the ones that priced all \code{nrow(x)} of them, and \code{named} says which axes
+vary across the lot. A \code{[} subset can change which cells are present, or how
+many, or leave only one level of an axis standing, without changing any of
+that -- and base \verb{[.data.frame} does not reliably strip attributes it does
+not recognise, so, empirically, those become stale rather than absent:
+\code{slope_replicates} still summarised the resampling behind cells a row subset
+had dropped. So this method strips them itself, on every subset, along with
+the class -- explicitly, rather than relying on incidental attribute-dropping
+the print method could not safely assume.
 }
 \details{
 Every attribute \emph{but} the base data-frame ones (\code{names}, \code{row.names},
-\code{class}) is stripped, rather than naming each of \code{\link[=slope_sample_size_grid_boot]{slope_sample_size_grid_boot()}}'s
-own attributes here too -- the second list that could drift from the
-first if one gained an attribute the other forgot, the same hazard
-\code{stage_two_result()} (power.R) exists to avoid for the result classes'
-field lists.
+\code{class}) is stripped, rather than naming each of the grid's own attributes
+here too -- the second list that could drift from the first if one gained
+an attribute the other forgot, the same hazard \code{stage_two_result()}
+(power.R) exists to avoid for the result classes' field lists.
 
 A subsetted table is then unambiguously a plain data frame: still every
 cell that survived the subset, just no longer carrying a summary that no

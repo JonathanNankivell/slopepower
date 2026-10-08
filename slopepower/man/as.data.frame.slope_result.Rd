@@ -7,8 +7,8 @@
 \method{as.data.frame}{slope_result}(x, row.names = NULL, optional = FALSE, ...)
 }
 \arguments{
-\item{x}{A \code{slope_sample_size}, \code{slope_power} or \code{slope_sample_size_floor}
-object.}
+\item{x}{A \code{slope_sample_size}, \code{slope_power}, \code{slope_sample_size_floor} or
+\code{slope_power_ceiling} object.}
 
 \item{row.names, optional}{Passed on for consistency with the generic; ignored.}
 
@@ -27,11 +27,13 @@ its slope columns depending on which model was fitted.
 \details{
 \code{solve_for} records which question produced the row --- \code{"n"} for
 \code{\link[=slope_sample_size]{slope_sample_size()}}, \code{"power"} for \code{\link[=slope_power]{slope_power()}}, \code{"n_floor"} for
-\code{\link[=slope_sample_size_floor]{slope_sample_size_floor()}}. It is derived from the object's class, and
+\code{\link[=slope_sample_size_floor]{slope_sample_size_floor()}} and \code{"power_ceiling"} for \code{\link[=slope_power_ceiling]{slope_power_ceiling()}}.
+It is derived from the object's class, and
 exists so that a bound table stays interpretable; the functions themselves
 have no such switch.
 
-A \code{"n_floor"} row has \code{n_follow_up = NA}, because the bound it reports holds
+A \code{"n_floor"} or \code{"power_ceiling"} row has \code{n_follow_up = NA}, because the
+bound it reports holds
 for every visit schedule and so is attached to none of them.
 }
 \examples{

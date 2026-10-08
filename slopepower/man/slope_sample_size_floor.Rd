@@ -2,33 +2,22 @@
 % Please edit documentation in R/floor.R
 \name{slope_sample_size_floor}
 \alias{slope_sample_size_floor}
-\alias{slope_sample_size_floor.slope_params}
-\alias{slope_sample_size_floor.slope_result}
-\alias{slope_sample_size_floor.default}
 \title{Smallest sample size any trial design can need}
 \usage{
-slope_sample_size_floor(x, ...)
-
-\method{slope_sample_size_floor}{slope_params}(
-  x,
+slope_sample_size_floor(
+  params,
+  power = 0.8,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
-  power = 0.8,
   alpha = 0.05,
-  per_arm = TRUE,
-  ...
+  per_arm = TRUE
 )
-
-\method{slope_sample_size_floor}{slope_result}(x, per_arm = TRUE, ...)
-
-\method{slope_sample_size_floor}{default}(x, ...)
 }
 \arguments{
-\item{x}{A \code{slope_params} object, or a result from \code{\link[=slope_sample_size]{slope_sample_size()}} or
-\code{\link[=slope_power]{slope_power()}} whose settings should be reused.}
+\item{params}{A \code{slope_params} object, from \code{\link[=slope_params]{slope_params()}} or
+\code{\link[=slope_params_manual]{slope_params_manual()}}.}
 
-\item{...}{Not used; passing anything here is an error rather than being
-silently ignored.}
+\item{power}{Desired power, between \code{alpha / 2} and 1. Defaults to 0.8.}
 
 \item{effectiveness}{Proportion of the slope difference the treatment is
 expected to remove, in (0, 1]. Must not be supplied when
@@ -36,8 +25,6 @@ expected to remove, in (0, 1]. Must not be supplied when
 
 \item{target}{\code{"effectiveness"} (the default) or \code{"observed"}. As in
 \code{\link[=slope_sample_size]{slope_sample_size()}}; see its "The reference slope" section.}
-
-\item{power}{Desired power, between \code{alpha / 2} and 1. Defaults to 0.8.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
@@ -73,23 +60,8 @@ is what has to change.
 The bound is a property of the disease and the target effect, through
 \eqn{\sigma^2_b} and \eqn{\sigma_{ab}/\sigma^2_a} --- not of the trial.
 }
-\section{Methods (by class)}{
-\itemize{
-\item \code{slope_sample_size_floor(slope_params)}: Compute the floor from fitted or
-supplied parameters.
-
-\item \code{slope_sample_size_floor(slope_result)}: Compute the floor for a result already
-in hand, reusing its \code{effectiveness}, \code{target}, \code{power} and \code{alpha} so
-that the two numbers are comparable. For a \code{\link[=slope_power]{slope_power()}} result the
-power reused is the one that design achieves, so the answer is the
-smallest sample size that could reach the same power.
-
-\item \code{slope_sample_size_floor(default)}: Reject anything else, with a pointer to
-what is accepted.
-
-}}
 \section{No design argument}{
-Deliberately none, in either method. The bound holds for every visit
+Deliberately none. The bound holds for every visit
 schedule, and for every dropout pattern too, since dropout only ever raises
 the sample size. Passing a design would be passing something the answer does
 not depend on --- the same reason \code{\link[=slope_effect_size]{slope_effect_size()}} refuses an
@@ -97,8 +69,8 @@ not depend on --- the same reason \code{\link[=slope_effect_size]{slope_effect_s
 }
 
 \section{How tight it is}{
-\code{slope_sample_size(params, design, ...)$n} is greater than or equal to this
-for every \code{design}, strictly so before rounding. The bound is approached as
+\code{slope_sample_size(params, visits, dropout, ...)$n} is greater than or equal
+to this for every \code{visits} and \code{dropout}, strictly so before rounding. The bound is approached as
 the schedule becomes long and dense, and after \code{ceiling()} a long enough
 schedule reaches it exactly: on \code{slpower1} at the paper's 33\% effectiveness
 the floor is 236, and a fifty-year trial with visits every five weeks needs
@@ -134,10 +106,10 @@ Stata command's default behaviour for trial data.}
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 slope_sample_size_floor(pars, effectiveness = 0.33)
 
-# Reuse a result's own effectiveness, power and alpha, and see how much
-# of the sample size is the design's doing rather than the disease's.
+# How much of a design's sample size is the design's doing rather than the
+# disease's: the same settings, with and without a schedule.
 ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
-flr <- slope_sample_size_floor(ss)
+flr <- slope_sample_size_floor(pars, effectiveness = 0.33)
 c(design = ss$n, floor = flr$n, ratio = ss$n / flr$n)
 
 }
@@ -149,6 +121,11 @@ AIDS clinical trials. \emph{Journal of Acquired Immune Deficiency Syndromes}
 Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
 repeated measures data. \emph{Biometrics} 49: 1022--1032.
 \doi{10.2307/2532244}
+
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+clinical trials where the outcome is a rate. Can estimating a baseline rate in
+a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+3717--3731. \doi{10.1002/sim.3280}
 
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the

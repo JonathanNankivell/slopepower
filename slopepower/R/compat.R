@@ -2,8 +2,8 @@
 #
 # This exists so that an existing Stata script can be ported mechanically, and so
 # that the worked examples in Nash et al. (2021) can be run verbatim as a parity
-# check. New code should prefer slope_params() + trial_design() +
-# slope_sample_size() or slope_power().
+# check. New code should prefer slope_params() followed by slope_sample_size()
+# or slope_power().
 
 #' Sample size or power using the Stata command's interface
 #'
@@ -14,8 +14,8 @@
 #' element with `schedule`, and the data type is declared with `obs`/`rct` rather
 #' than by which grouping variable is supplied.
 #'
-#' New code should use [slope_params()], [trial_design()] and then
-#' [slope_sample_size()] or [slope_power()] directly. Those separate the two
+#' New code should use [slope_params()] and then [slope_sample_size()] or
+#' [slope_power()] directly. Those separate the two
 #' stages of the calculation, so the mixed model is fitted once and any number of
 #' designs evaluated against it; they express the visit schedule in real time
 #' rather than through the `scale` workaround; and they ask one question each,
@@ -57,9 +57,9 @@
 #'   --- `schedule[j - 1]`, or the implicit baseline at time 0 when `j` is 1.
 #'   `dropouts[1]` therefore describes participants seen at baseline only, who
 #'   contribute nothing to a slope; that alignment is the Stata original's, and
-#'   [trial_design()] prints both readings side by side. They are handled by the
-#'   Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata original;
-#'   see [trial_design()].
+#'   the result's `$design` prints both readings side by side. They are handled
+#'   by the Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata
+#'   original; see the "Dropout" section of [slope_sample_size()].
 #' @param scale Number of `time` units in one `schedule` unit. Defaults to 1.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
 #' @param power,n Supply one, as in Stata. `n` gives the power that sample size
@@ -176,7 +176,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   # Built now, before the (potentially slow) stage-one fit below, so that a
   # purely syntactic problem with `dropouts` -- the wrong length, or a total
   # over 1 -- is reported without paying for a REML fit first.
-  design <- trial_design(c(0, schedule), dropout = dropouts)
+  design <- build_trial_design(c(0, schedule), dropouts, "incremental", context)
 
   # ---- fit stage one -------------------------------------------------------
   work <- data
@@ -210,12 +210,20 @@ slopepower <- function(data, depvar, subject, time, schedule,
   env <- new.env(parent = environment())
   assign(".slopepower_data", work, envir = env)
   call_args <- list(quote(slope_params), formula = fml, data = quote(.slopepower_data))
-  if (!is.null(group$arg)) call_args[[group$arg]] <- as.name(group$col)
+  if (!is.null(group$arg)) {
+    call_args$comparator <- group$arg
+    call_args$group <- as.name(group$col)
+  }
   params <- eval(as.call(c(call_args, list(...))), env)
 
   # ---- stage two -----------------------------------------------------------
+  # The bodies of slope_power() and slope_sample_size() rather than the
+  # functions themselves, because the design is already built: passing its
+  # visits and dropout back through the exported functions would validate it,
+  # and warn about baseline-only dropout, a second time. Errors still name the
+  # function whose calculation failed, as they did when this called it.
   args <- list(params = params, design = design, alpha = alpha,
-               target = if (usetrt) "observed" else "effectiveness")
+               target = if (usetrt) "observed" else "effectiveness", per_arm = TRUE)
   # Whether `effectiveness` may be passed alongside the chosen target is
   # maybe_add_effectiveness()'s rule to state, not this shim's to restate.
   args <- maybe_add_effectiveness(args, effectiveness %||% 0.25, args$target)
@@ -231,8 +239,9 @@ slopepower <- function(data, depvar, subject, time, schedule,
       "  size that reaches it."), context), call. = FALSE)
   }
   if (!is.null(n)) {
-    do.call(slope_power, c(args, list(n = n)))
+    do.call(power_result, c(args, list(n = n, context = "slope_power()")))
   } else {
-    do.call(slope_sample_size, c(args, list(power = power %||% 0.8)))
+    do.call(sample_size_result,
+            c(args, list(power = power %||% 0.8, context = "slope_sample_size()")))
   }
 }

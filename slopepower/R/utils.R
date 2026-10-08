@@ -141,8 +141,8 @@ check_whole_number <- function(x, name, noun, context, lower) {
 #' Validate the `per_arm` display-basis argument
 #'
 #' A single non-`NA` logical, shared by every entry point that accepts
-#' `per_arm` -- the two plain grids, `slope_sample_size_grid_boot()`,
-#' `slope_bootstrap()`, `slope_sample_size()`, `slope_power()` and
+#' `per_arm` -- the plain and bootstrapped grids, the single-design
+#' bootstraps, `slope_sample_size()`, `slope_power()` and
 #' `slope_sample_size_floor()` -- so the check cannot read differently at two
 #' of them. `check_scalar()` does not fit: it is written for a finite numeric,
 #' and `TRUE == 1` would make a stray `per_arm = 2` pass silently.
@@ -225,8 +225,6 @@ cat_n_line <- function(x, per_arm, total_label = "N") {
 #' finite and unremarkable (7,584 at alpha = 1e-16 on the reference parameters,
 #' against 712 at alpha = 0.05). Stata degenerates the same way and reports
 #' N as missing; per CONTRACT.md section 6 the port says so instead.
-#' [slope_sample_size_floor.slope_result()] guards the identical `qnorm(1)`
-#' degeneracy on the power side.
 #' @noRd
 z_alpha <- function(alpha, context) {
   z <- stats::qnorm(1 - alpha / 2)
@@ -389,8 +387,8 @@ resolve_fixef_name <- function(b, parts) {
 #' [check_target_effectiveness()] rejects the two supplied together. Anything
 #' that rebuilds a stage-two call must therefore omit `effectiveness` under
 #' that target rather than supply it -- the rule belongs here once, rather than
-#' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`,
-#' [slopepower()] and both grid functions use this directly.
+#' being re-expressed at each call site: [slopepower()] and the grid functions
+#' use this directly.
 #' @noRd
 maybe_add_effectiveness <- function(args, effectiveness, target) {
   if (!identical(target, "observed")) args$effectiveness <- effectiveness
@@ -399,9 +397,9 @@ maybe_add_effectiveness <- function(args, effectiveness, target) {
 
 #' Reject `effectiveness` alongside target = "observed"
 #'
-#' The one place this rule is enforced, called by each of the four entry points
-#' that can be handed both -- [slope_sample_size()], [slope_power()] and the two
-#' grid wrappers -- immediately after `match.arg()`ing `target`. It has to sit at
+#' The one place this rule is enforced, called by each of the entry points
+#' that can be handed both -- [slope_sample_size()], [slope_power()], the grid
+#' wrappers and the bootstraps of all four -- immediately after `match.arg()`ing `target`. It has to sit at
 #' that boundary rather than deeper in the calculation: "did the caller type an
 #' `effectiveness`?" is a `missing()` question, and `missing()` can only be asked
 #' of the function whose argument it is.

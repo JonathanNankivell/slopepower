@@ -1,4 +1,5 @@
-# Layer 3 (continued) -- the limit of the layer-3 calculation over all designs.
+# Layer 3 (continued) -- the limit of the layer-3 calculation over all designs:
+# the sample-size floor and the power ceiling.
 #
 # Everything in power.R answers "what does *this* schedule cost?". This file
 # answers "what does the best conceivable schedule cost?", which turns out to
@@ -60,8 +61,8 @@ var_floor <- function(params, context) {
 #' There is deliberately none. The bound does not depend on the visit schedule
 #' --- that is the whole content of it --- and it does not depend on the dropout
 #' pattern either, since dropout can only ever raise the variance. So the value
-#' returned bounds every design [trial_design()] can express, not just the ones
-#' without withdrawal.
+#' returned bounds every design the stage-two functions can express, not just
+#' the ones without withdrawal.
 #'
 #' # It is an infimum, not a minimum
 #'
@@ -119,38 +120,57 @@ slope_var_floor <- function(params) {
 }
 
 # ---------------------------------------------------------------------------
-# the sample-size floor
+# the sample-size floor and the power ceiling
 # ---------------------------------------------------------------------------
 
 #' Assemble a floor result from validated inputs
 #'
 #' The `effect_size` is the no-dropout `effect_components()` formula
 #' -- `sign(d) * sqrt((d / sqrt(var))^2)`, i.e. `d / sqrt(var)` -- evaluated at
-#' the limiting variance, and the sample size comes from `size_per_arm()`, the
-#' same equation (6) `solve_slope()` uses. Nothing here is a second
-#' implementation of anything.
+#' the limiting variance. Exactly one of `n` and `power` is supplied, as for
+#' `solve_slope()`: the sample size comes from `size_per_arm()`, equation (6),
+#' and the power from the same normal tail `solve_slope()` uses, both at the
+#' limiting variance. Nothing here is a second implementation of anything.
 #' @noRd
-floor_result <- function(params, effectiveness, target, power, alpha, per_arm, context) {
+floor_result <- function(params, effectiveness, target, alpha, per_arm, context,
+                         n = NULL, power = NULL) {
   check_params(params, context)
   check_probability(alpha, "alpha", context)
-  check_target_power(power, alpha, context)
+  solving_for_n <- is.null(n)
+  if (solving_for_n) {
+    check_target_power(power, alpha, context)
+  } else {
+    check_whole_number(n, "n", "participants", context, lower = 2)
+  }
   per_arm <- check_per_arm(per_arm, context)
 
   comp <- target_components(params, target, effectiveness, context)
   var_tte <- var_floor(params, context)
   effect_size <- comp$slope_difference / sqrt(var_tte)
-  sized <- size_per_arm(scale_effect(effect_size, comp$effectiveness),
-                        z_alpha(alpha, context), power)
+  scaled_effect <- scale_effect(effect_size, comp$effectiveness)
+  z_a <- z_alpha(alpha, context)
 
-  structure(
-    # No `design` argument, so the field is absent rather than NULL -- the 12
-    # fields of CONTRACT.md section 4.3, from the same assembler that gives
-    # solve_slope() its 13.
-    stage_two_result(comp, n_per_arm = sized$n_per_arm, power = power,
-                     alpha = alpha, var_tte = var_tte,
-                     effect_size = effect_size, params = params),
-    class = c("slope_sample_size_floor", "slope_result"), per_arm = per_arm
-  )
+  if (solving_for_n) {
+    n_per_arm <- size_per_arm(scaled_effect, z_a, power)$n_per_arm
+    cls <- "slope_sample_size_floor"
+  } else {
+    # Evened down and split 1:1 exactly as slope_power() does.
+    n_per_arm <- floor(n / 2)
+    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
+    cls <- "slope_power_ceiling"
+  }
+
+  # No `design` argument, so the field is absent rather than NULL -- the
+  # fields of CONTRACT.md section 4.3, from the same assembler that gives
+  # solve_slope() its own.
+  res <- stage_two_result(comp, n_per_arm = n_per_arm, power = power,
+                          alpha = alpha, var_tte = var_tte,
+                          effect_size = effect_size, params = params)
+  if (!solving_for_n) {
+    res <- append(res, list(n_requested = as.numeric(n)),
+                  after = match("n_per_arm", names(res)))
+  }
+  structure(res, class = c(cls, "slope_result"), per_arm = per_arm)
 }
 
 #' Smallest sample size any trial design can need
@@ -168,7 +188,7 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #' @details
 #' # No design argument
 #'
-#' Deliberately none, in either method. The bound holds for every visit
+#' Deliberately none. The bound holds for every visit
 #' schedule, and for every dropout pattern too, since dropout only ever raises
 #' the sample size. Passing a design would be passing something the answer does
 #' not depend on --- the same reason [slope_effect_size()] refuses an
@@ -176,8 +196,8 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #'
 #' # How tight it is
 #'
-#' `slope_sample_size(params, design, ...)$n` is greater than or equal to this
-#' for every `design`, strictly so before rounding. The bound is approached as
+#' `slope_sample_size(params, visits, dropout, ...)$n` is greater than or equal
+#' to this for every `visits` and `dropout`, strictly so before rounding. The bound is approached as
 #' the schedule becomes long and dense, and after `ceiling()` a long enough
 #' schedule reaches it exactly: on `slpower1` at the paper's 33% effectiveness
 #' the floor is 236, and a fifty-year trial with visits every five weeks needs
@@ -188,8 +208,8 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #' `effectiveness^-2`, so a floor computed at the default 0.25 says nothing
 #' about a trial powered for a 33% effect.
 #'
-#' @param x A `slope_params` object, or a result from [slope_sample_size()] or
-#'   [slope_power()] whose settings should be reused.
+#' @param params A `slope_params` object, from [slope_params()] or
+#'   [slope_params_manual()].
 #' @param effectiveness Proportion of the slope difference the treatment is
 #'   expected to remove, in (0, 1]. Must not be supplied when
 #'   `target = "observed"`, which fixes it at 1.
@@ -203,8 +223,6 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #'   regardless, and `per_arm` is recorded as an attribute that `print()`
 #'   consults and that can be overridden afterwards with
 #'   `print(x, per_arm = FALSE)`.
-#' @param ... Not used; passing anything here is an error rather than being
-#'   silently ignored.
 #'
 #' @return An object of class `slope_sample_size_floor`, a list with the same
 #'   elements as a [slope_sample_size()] result **except `design`**, of which
@@ -225,10 +243,10 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 #' slope_sample_size_floor(pars, effectiveness = 0.33)
 #'
-#' # Reuse a result's own effectiveness, power and alpha, and see how much
-#' # of the sample size is the design's doing rather than the disease's.
+#' # How much of a design's sample size is the design's doing rather than the
+#' # disease's: the same settings, with and without a schedule.
 #' ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
-#' flr <- slope_sample_size_floor(ss)
+#' flr <- slope_sample_size_floor(pars, effectiveness = 0.33)
 #' c(design = ss$n, floor = flr$n, ratio = ss$n / flr$n)
 #'
 #' @seealso [slope_var_floor()] for the variance behind it,
@@ -236,82 +254,85 @@ floor_result <- function(params, effectiveness, target, power, alpha, per_arm, c
 #'   [slope_sample_size_grid()] to search the designs that remain worth
 #'   searching.
 #' @export
-slope_sample_size_floor <- function(x, ...) {
-  UseMethod("slope_sample_size_floor")
-}
-
-#' @describeIn slope_sample_size_floor Compute the floor from fitted or
-#'   supplied parameters.
-#' @export
-slope_sample_size_floor.slope_params <- function(x,
-                                                 effectiveness = 0.25,
-                                                 target = c("effectiveness", "observed"),
-                                                 power = 0.8, alpha = 0.05,
-                                                 per_arm = TRUE, ...) {
+slope_sample_size_floor <- function(params, power = 0.8, effectiveness = 0.25,
+                                    target = c("effectiveness", "observed"),
+                                    alpha = 0.05, per_arm = TRUE) {
   context <- "slope_sample_size_floor()"
-  reject_dots(list(...), paste0(
-    "The floor holds for every visit schedule, so there is no `design`, no\n",
-    "  `dropout` and no `n` to supply -- that is what makes it a floor. For the\n",
-    "  sample size a particular design needs, use slope_sample_size()."),
-    context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
-  floor_result(x, effectiveness, target, power, alpha, per_arm, context)
+  floor_result(params, effectiveness, target, alpha, per_arm, context, power = power)
 }
 
-#' @describeIn slope_sample_size_floor Compute the floor for a result already
-#'   in hand, reusing its `effectiveness`, `target`, `power` and `alpha` so
-#'   that the two numbers are comparable. For a [slope_power()] result the
-#'   power reused is the one that design achieves, so the answer is the
-#'   smallest sample size that could reach the same power.
-#' @export
-slope_sample_size_floor.slope_result <- function(x, per_arm = TRUE, ...) {
-  context <- "slope_sample_size_floor()"
-  reject_dots(list(...), paste0(
-    "The calculation comes from the object, so `effectiveness`, `target`,\n",
-    "  `power` and `alpha` belong to the call that produced it. To vary them,\n",
-    "  take the floor of the parameters instead:\n",
-    "    slope_sample_size_floor(x$params, power = 0.9)"),
-    context)
-  # A slope_power result whose design is comfortably over-powered reports
-  # power == 1 in double precision; qnorm(1) is Inf and the floor would come
-  # back as Inf, which reads as "no sample size is enough" -- the opposite of
-  # the truth. check_probability()'s own message would name `power` as if the
-  # caller had typed it, so the diagnosis is given here instead.
-  if (isTRUE(x$power >= 1)) {
-    stop(sprintf(paste0(
-      "%s: this result's power is 1 to within double precision, so there is no\n",
-      "  finite sample size that reaches it and the floor is undefined. Take the\n",
-      "  floor at a stated power instead:\n",
-      "    slope_sample_size_floor(x$params, power = 0.9)"), context), call. = FALSE)
-  }
-  # NA_real_ is what a target = "observed" result stores for `effectiveness`
-  # (CONTRACT.md section 4.1); target_components() sets it to 1 on that branch
-  # anyway, but passing the NA through would trip check_scalar() first if the
-  # branch were ever reordered.
-  effectiveness <- if (identical(x$target, "observed")) 1 else x$effectiveness
-  floor_result(x$params, effectiveness, x$target, x$power, x$alpha, per_arm, context)
-}
-
-#' @describeIn slope_sample_size_floor Reject anything else, with a pointer to
-#'   what is accepted.
-#' @export
-slope_sample_size_floor.default <- function(x, ...) {
-  stop(sprintf(paste0(
-    "slope_sample_size_floor(): cannot compute a floor from an object of class %s.\n",
-    "  The bound depends only on the variance components, so pass the parameters --\n",
-    "  a slope_params object from slope_params() or slope_params_manual() -- or a\n",
-    "  slope_sample_size or slope_power result to reuse the settings of."),
-    paste(sQuote(class(x)), collapse = "/")), call. = FALSE)
-}
-
-#' Print a sample-size floor
+#' Highest power any trial design can achieve
 #'
-#' @param x A `slope_sample_size_floor` object.
+#' The power counterpart of [slope_sample_size_floor()]: at a fixed total
+#' sample size `n`, the power of a trial whose treatment-effect variance is
+#' the limiting [slope_var_floor()]. Because power rises as that variance
+#' falls, no visit schedule and no dropout pattern can reach a higher power
+#' with `n` participants: the variance's floor is the power's ceiling. If it is
+#' already too low, more or better-placed visits will not rescue the trial: `n`
+#' or the target effect has to change.
+#'
+#' Like [slope_sample_size_floor()] it is a bound, not an attainable value ---
+#' `slope_power(params, visits, dropout, n = n, ...)$power` is strictly lower
+#' for every finite schedule, approaching it only as the schedule becomes long
+#' and dense. See [slope_sample_size_floor()] for how tight the bound is and
+#' why it takes no visit schedule.
+#'
+#' @inheritParams slope_sample_size_floor
+#' @param n Total number of participants across both arms, as in
+#'   [slope_power()]. Required. Odd values are reduced by one so that the arms
+#'   are equal, with the value as supplied kept in `n_requested`.
+#' @param per_arm Which basis to print the counts on: `TRUE` (the default) for
+#'   participants per arm, `FALSE` for the trial total. Display only, as in
+#'   [slope_power()].
+#'
+#' @return An object of class `slope_power_ceiling`, a list with the same elements
+#'   as a [slope_power()] result **except `design`**: `n`, `n_per_arm`,
+#'   `n_requested`, `power`, `alpha`, `effectiveness`, `target`, `tte`,
+#'   `var_tte`, `effect_size`, `slope_difference`, `reference_slope` and
+#'   `params`. `power` is the upper bound and `var_tte` is [slope_var_floor()].
+#'   It inherits from `slope_result`, so [as.data.frame()][as.data.frame.slope_result]
+#'   gives a row with `n_follow_up = NA` and `solve_for = "power_ceiling"`.
+#'
+#' @inheritSection stage_two The reference slope
+#' @inherit stage_two references
+#'
+#' @examples
+#' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
+#' slope_power_ceiling(pars, n = 200, effectiveness = 0.33)
+#'
+#' # How much of the achievable power a two-year, three-visit design delivers.
+#' c(design  = slope_power(pars, c(0, 1, 2), n = 200, effectiveness = 0.33)$power,
+#'   ceiling = slope_power_ceiling(pars, n = 200, effectiveness = 0.33)$power)
+#'
+#' @seealso [slope_sample_size_floor()], the sample-size bound from the same
+#'   variance; [slope_power()] for the power of a stated design;
+#'   [slope_var_floor()].
+#' @export
+slope_power_ceiling <- function(params, n, effectiveness = 0.25,
+                              target = c("effectiveness", "observed"),
+                              alpha = 0.05, per_arm = TRUE) {
+  context <- "slope_power_ceiling()"
+  # `is.null(n)` too; see the note on the same guard in slope_power().
+  if (missing(n) || is.null(n)) {
+    stop(sprintf(paste0(
+      "%s: `n` is required -- it is the sample size whose highest achievable\n",
+      "  power is being bounded. For the smallest sample size any design could\n",
+      "  need, use slope_sample_size_floor()."), context), call. = FALSE)
+  }
+  target <- match.arg(target)
+  check_target_effectiveness(target, !missing(effectiveness), context)
+  floor_result(params, effectiveness, target, alpha, per_arm, context, n = n)
+}
+
+#' Print a sample-size floor or power ceiling
+#'
+#' @param x A `slope_sample_size_floor` or `slope_power_ceiling` object.
 #' @param ... Ignored.
 #' @param per_arm Which basis to print `N` on: `TRUE` for participants per
 #'   arm, `FALSE` for the trial total. Defaults to `NULL`, meaning "whatever
-#'   `slope_sample_size_floor()` was called with" -- read from `x`'s
+#'   the function that built `x` was called with" -- read from `x`'s
 #'   `per_arm` attribute, or per arm if that is absent.
 #' @return `x`, invisibly.
 #'
@@ -331,6 +352,26 @@ print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
   cat_line("visit schedule", "any (the bound holds for all)")
   cat("\n  Lower bound on sample size:\n")
   cat_n_line(x, per_arm)
+  cat_line("limiting s*^2", x$var_tte)
+  cat("\n")
+  invisible(x)
+}
+
+#' @rdname print.slope_sample_size_floor
+#' @export
+print.slope_power_ceiling <- function(x, ..., per_arm = NULL) {
+  per_arm <- display_basis(x, per_arm, "print.slope_power_ceiling()")
+  print_opening_blocks(x)
+  if (per_arm) {
+    cat_count("specified N per arm", x$n_requested / 2)
+  } else {
+    cat_line("specified N", x$n_requested, digits = 0L)
+  }
+  cat_n_line(x, per_arm, total_label = "actual N")
+  print_target_lines(x)
+  cat_line("visit schedule", "any (the bound holds for all)")
+  cat("\nUpper bound on power:\n")
+  cat_line("power", x$power)
   cat_line("limiting s*^2", x$var_tte)
   cat("\n")
   invisible(x)

@@ -4,12 +4,37 @@
 \alias{slope_effect_size}
 \title{Dropout-weighted standardised effect size}
 \usage{
-slope_effect_size(params, design, target = c("effectiveness", "observed"))
+slope_effect_size(
+  params,
+  visits,
+  dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
+  target = c("effectiveness", "observed")
+)
 }
 \arguments{
-\item{params}{A \code{slope_params} object.}
+\item{params}{A \code{slope_params} object, from \code{\link[=slope_params]{slope_params()}} fitted to
+previously collected longitudinal data or from \code{\link[=slope_params_manual]{slope_params_manual()}}.}
 
-\item{design}{A \code{trial_design} object, or a numeric vector of visit times.}
+\item{visits}{Numeric vector of the planned trial's visit times,
+\strong{including the baseline visit at time 0}, strictly increasing, of length
+at least 2, in the units of the \code{time} variable used to estimate \code{params}.
+Times may be any real values --- \code{c(0, 0.5, 1, 1.5, 2)} is valid. See
+"The visit schedule" below.}
+
+\item{dropout}{Optional expected dropout. Either a numeric vector of
+proportions, one per follow-up visit (\code{length(visits) - 1}), read as
+\code{dropout_scale} says, or a \code{\link[=dropout_rate]{dropout_rate()}} object giving a constant rate
+per unit of time, which is expanded to one proportion per interval of
+\code{visits}. \code{NULL} (the default) means no dropout. See "Dropout" below.}
+
+\item{dropout_scale}{How a numeric \code{dropout} vector is written.
+\code{"incremental"} (the default) means element \code{j} is the proportion of
+participants whose \strong{last attended visit is \code{visits[j]}}. \code{"cumulative"}
+means element \code{j} is the proportion who have withdrawn by \code{visits[j + 1]},
+i.e. who fail to attend it. A \code{\link[=dropout_rate]{dropout_rate()}} produces incremental
+proportions by construction, so it cannot be combined with
+\code{"cumulative"}.}
 
 \item{target}{\code{"effectiveness"} to measure the slope difference toward zero
 (or toward the healthy-control slope), or \code{"observed"} to measure it
@@ -40,8 +65,8 @@ Participants who attend only the baseline visit contribute nothing, since a
 single measurement carries no information about a slope. Every stratum uses
 the same slope difference and the same variance components, so withdrawal is
 assumed unrelated to a participant's own trajectory, and only monotone dropout
-from a common schedule can be expressed. See \code{\link[=trial_design]{trial_design()}} for what that
-does and does not cover.
+from a common schedule can be expressed. See the "Dropout" section of
+\code{\link[=slope_sample_size]{slope_sample_size()}} for what that does and does not cover.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
@@ -49,8 +74,7 @@ slope_effect_size(pars, c(0, 1, 2))
 
 # A quarter of participants are expected to miss the final visit: the
 # effect size shrinks because they contribute less slope information.
-design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
-slope_effect_size(pars, design)
+slope_effect_size(pars, c(0, 1, 2), dropout = c(0, 0.25))
 
 }
 \references{
@@ -62,12 +86,17 @@ Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
 repeated measures data. \emph{Biometrics} 49: 1022--1032.
 \doi{10.2307/2532244}
 
+Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+clinical trials where the outcome is a rate. Can estimating a baseline rate in
+a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+3717--3731. \doi{10.1002/sim.3280}
+
 Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 calculations for trials that compare slopes over time: Introducing the
 slopepower command. \emph{Stata Journal} 21(3): 575--601.
 \doi{10.1177/1536867X211045512}
 }
 \seealso{
-\code{\link[=trial_design]{trial_design()}} for how dropout is specified and what the
-pattern-mixture weighting assumes.
+The "Dropout" section of \code{\link[=slope_sample_size]{slope_sample_size()}} for how dropout is
+specified and what the pattern-mixture weighting assumes.
 }
