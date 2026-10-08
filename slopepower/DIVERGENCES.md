@@ -882,6 +882,52 @@ validation fix, not a change to the method.
 
 ---
 
+## 28. Residual structures — serial correlation and unstructured residuals
+
+**Stata**'s `slopepower` fits independent residuals and nothing else. Its own
+`mixed` command could do more (`residuals(ar 1, t())`, `residuals(exponential,
+t())`, `residuals(unstructured, t())`), but the command never passes one, and
+its Σ* (paper p.579) has `σ²_ε` on the diagonal only.
+
+**R** accepts an `nlme` residual structure in `slope_params(correlation = ,
+weights = )` and `slope_params_manual()`, stores it as plain data in
+`params$residual` (CONTRACT.md §2.1), and evaluates it at the planned schedule
+in Σ (CONTRACT.md §5.1). The vocabulary is `nlme`'s, not Stata's, because the
+fit *is* `nlme::lme()`:
+
+| Stata `mixed` | R |
+|---|---|
+| `residuals(independent)` | `correlation = NULL` (default) |
+| `residuals(ar 1, t(visit))` | `correlation = nlme::corAR1()` |
+| `residuals(exponential, t(visit))` | `correlation = nlme::corCAR1()` |
+| `residuals(unstructured, t(visit))` | `correlation = nlme::corSymm(), weights = nlme::varIdent(form = ~ 1 \| visit)` |
+| `residuals(exchangeable)` | refused: it is the random intercept |
+
+Also available: `corExp()` and `corGaus()`, each with an optional nugget, and
+`corSymm()` or `varIdent()` alone.
+
+An *addition*, like §23: with `correlation` and `weights` unset, the model,
+the fit and every number are exactly what they were, and `params$residual` is
+`NULL`. Nothing in the paper is recomputed differently.
+
+Why it is worth having: the random intercept and slope model treats every
+within-person deviation from a straight line as fresh, independent noise. When
+deviations persist from one visit to the next — a participant who has a bad
+year stays bad for a while — that is wrong, and it is wrong in the direction
+that matters: closely spaced visits carry less independent information than the
+independent model credits them with, so it can price a dense schedule too
+cheaply. Fitting the serial correlation lets stage one say so, and stage two
+then charges for it.
+
+Two consequences are enforced rather than documented only. A structure with a
+parameter per visit (`corSymm()`, `varIdent()`) says nothing about other times,
+so a schedule off its grid is an error and the floor (§23) is refused; and
+under `corSymm()` the variance components are not separately identified — the
+fit has a ridge of equally good decompositions of one identified marginal Σ —
+so the print method says so instead of presenting them as estimates.
+
+---
+
 ## Claims checked and rejected
 
 Things that look like divergences in the `.ado` source and are not, recorded

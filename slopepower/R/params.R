@@ -262,8 +262,10 @@ fit_quietly <- function(expr) {
 #' below has always had this property by accident of being a helper; this one
 #' has it on purpose.
 #' @noRd
-fit_common_model <- function(dat, ctrl, fixed) {
+fit_common_model <- function(dat, ctrl, fixed, resid) {
   eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
+                        correlation = .(resid$correlation),
+                        weights = .(resid$weights),
                         data = dat, method = "REML", control = ctrl)))
 }
 
@@ -282,8 +284,12 @@ with_covariates <- function(f, cov_terms) {
                     env = environment(f))
 }
 
+#' @param resid The `correlation` and `weights` calls, from [residual_calls()].
+#'   Under `healthy` the `weights` are always there: each group's own residual
+#'   variance, crossed with the visit when visit-specific variances were asked
+#'   for.
 #' @noRd
-fit_healthy_model <- function(dat, reduced, ctrl, fixed) {
+fit_healthy_model <- function(dat, reduced, ctrl, fixed, resid) {
   comparator_block <- if (reduced) {
     nlme::pdIdent(~ sp_control - 1)
   } else {
@@ -294,9 +300,10 @@ fit_healthy_model <- function(dat, reduced, ctrl, fixed) {
     comparator_block)))
   fit_quietly(eval(bquote(
     nlme::lme(.(fixed),
-              random  = rand,
-              weights = nlme::varIdent(form = ~ 1 | sp_grp),
-              data    = dat,
+              random      = rand,
+              correlation = .(resid$correlation),
+              weights     = .(resid$weights),
+              data        = dat,
               method  = "REML",
               control = ctrl)
   )))
@@ -591,6 +598,21 @@ covariate_note <- function(covariates) {
 #'   well as in baseline. This is what reduces `sigma2_slope`, and so the
 #'   sample size. `FALSE` adjusts the intercept only. Ignored without
 #'   `covariates`.
+#' @param correlation Optional residual correlation structure, as an `nlme`
+#'   `corStruct` exactly as it would be passed to [nlme::lme()]:
+#'   [nlme::corAR1()], [nlme::corCAR1()], [nlme::corExp()],
+#'   [nlme::corGaus()] or [nlme::corSymm()]. `NULL` (default) keeps the
+#'   independent residuals of Nash et al. (2021). The correlation is always
+#'   within a participant and a function of the time term of `formula`, so the
+#'   `form` is set for you: leave it out, or write the equivalent
+#'   `form = ~ time | subject` with the names used in `formula`. A starting
+#'   value, a nugget (`corExp(nugget = TRUE)`) and `fixed = TRUE` are honoured
+#'   as in `nlme`. See "Residual structures" below.
+#' @param weights Optional visit-specific residual variances, written
+#'   `nlme::varIdent(form = ~ 1 | time)` with the time term of `formula` as the
+#'   stratum. Together with `correlation = nlme::corSymm()` this is the fully
+#'   unstructured residual covariance. No other variance function is
+#'   supported.
 #'
 #' @details
 #' Three scenarios are supported, matching paper section 2.3:
@@ -634,10 +656,11 @@ covariate_note <- function(covariates) {
 #'
 #' where \eqn{G}{G} is an unstructured 2 by 2 matrix with diagonal
 #' \eqn{\sigma^2_a}{sigma2_intercept}, \eqn{\sigma^2_b}{sigma2_slope} and
-#' off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. Residuals are independent across
-#' visits and across participants; there is no serial correlation term. Only the
-#' mean \eqn{\mu}{mu} and the number of variance parameters differ between the
-#' scenarios.
+#' off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. By default residuals are
+#' independent across visits and across participants; `correlation` and
+#' `weights` replace that with a structured residual covariance within each
+#' participant (see "Residual structures"). Only the mean \eqn{\mu}{mu} and the
+#' number of variance parameters differ between the scenarios.
 #'
 #' \describe{
 #'   \item{Neither `healthy` nor `treated`}{
@@ -684,7 +707,9 @@ covariate_note <- function(covariates) {
 #'   "Covariate adjustment");
 #' * exactly one grouping level, the participant, whose random intercept and
 #'   random slope have an unstructured covariance;
-#' * independent residuals with a variance that is constant within a group;
+#' * residuals independent between participants, and within a participant
+#'   either independent with a variance that is constant within a group (the
+#'   default) or structured through `correlation` and `weights`;
 #' * at most two groups, distinguished only by their slope (and, for `healthy`,
 #'   by their variance components).
 #'
@@ -705,8 +730,10 @@ covariate_note <- function(covariates) {
 #' * **non-linear trajectories** --- quadratic time, splines, change points ---
 #'   and any estimand that is not a difference in slopes.
 #' * **non-Gaussian outcomes**: binary, ordinal, count or time-to-event.
-#' * **structured residuals**, such as AR(1) or other serial correlation within
-#'   a participant.
+#' * **residual structures other than those listed under "Residual
+#'   structures"**: compound symmetry (`corCompSymm()`, which the random
+#'   intercept already is), ARMA, spatial structures other than the exponential
+#'   and Gaussian, and variance functions other than `varIdent()` by visit.
 #' * **more than two arms, unequal allocation, or cluster-randomised, crossover
 #'   and stepped-wedge designs.** Stage two assumes two equal parallel arms.
 #'
@@ -741,7 +768,68 @@ covariate_note <- function(covariates) {
 #' between-participant variances (`sigma2_intercept`, and `sigma2_slope` via the
 #' time interactions) rather than `sigma2_residual`.
 #'
-#' @return An object of class `"slope_params"`. Its `$fit` component is the
+#' @section Residual structures:
+#'
+#' With `correlation` and `weights` the residual term above becomes
+#' \eqn{\epsilon_i \sim N(0, R_i)}{e[i] ~ N(0, R[i])} with
+#' \deqn{(R_i)_{jk} = \sigma^2_\epsilon \, \delta_j \delta_k \,
+#'       \rho(t_{ij}, t_{ik}),}{
+#'       R[i][j, k] = sigma2_residual * delta[j] * delta[k] * rho(t[ij], t[ik]),}
+#' the notation of `nlme`: \eqn{\rho}{rho} is the correlation and
+#' \eqn{\delta}{delta} the residual SD ratios of `varIdent()`, 1 without it.
+#' The structures, and the arguments that give them:
+#'
+#' | Structure | Argument | \eqn{\rho(s, t)}{rho(s, t)}, \eqn{d = |s - t|}{d = |s - t|} | Stata `mixed` |
+#' |---|---|---|---|
+#' | independent (default) | `correlation = NULL` | 0 | `residuals(independent)` |
+#' | AR(1) | `nlme::corAR1()` | \eqn{\phi^d}{Phi^d}, integer times only | `residuals(ar 1, t())` |
+#' | continuous-time AR(1) | `nlme::corCAR1()` | \eqn{\phi^d}{Phi^d} | `residuals(exponential, t())` |
+#' | exponential | `nlme::corExp()` | \eqn{(1 - n) e^{-d/r}}{(1 - n) exp(-d / r)} | |
+#' | Gaussian | `nlme::corGaus()` | \eqn{(1 - n) e^{-(d/r)^2}}{(1 - n) exp(-(d / r)^2)} | |
+#' | unstructured correlation | `nlme::corSymm()` | one per pair of visit times | |
+#' | unstructured covariance | `corSymm()` plus `weights` | one per pair, and a variance per time | `residuals(unstructured, t())` |
+#'
+#' Here \eqn{r}{r} is the range and \eqn{n}{n} the nugget, 0 unless
+#' `nugget = TRUE`; a nugget splits the residual into measurement error and a
+#' serially correlated part. `corAR1()` and `corCAR1()` agree wherever both
+#' are defined; the first is `nlme`'s discrete-time process and so needs
+#' integer times, both in the data and in any schedule planned from it. The
+#' unstructured covariance adds `weights = nlme::varIdent(form = ~ 1 | time)`,
+#' a variance for each visit time, to `corSymm()`.
+#'
+#' The fitted values are returned in `$residual` (see the "Value" section) and
+#' used by every stage-two function, which then plans for a trial analysed
+#' with the same residual structure. Three consequences:
+#'
+#' * `corSymm()` and `varIdent()` have a parameter for every distinct visit
+#'   time, so they need the participants to share a visit schedule -- record
+#'   time as the scheduled visit, not the date it took place -- and a planned
+#'   schedule can only use those times. A structure that is a function of
+#'   time (`corCAR1()`, `corExp()`, `corGaus()`) can price any schedule.
+#' * Under `corSymm()` the random-effects variances and the residual variance
+#'   are not separately identified: an unstructured correlation can absorb any
+#'   covariance the random effects imply. The covariance they imply together
+#'   at the visit times is identified, and that is the only thing stage two
+#'   uses, but the individual components printed are one point on a ridge of
+#'   equally good fits, and [slope_var_floor()] is refused.
+#' * Under `healthy` the correlation parameters are shared by cases and
+#'   controls -- `nlme` estimates one correlation structure per model -- while
+#'   the residual variances, and with `varIdent()` the per-visit variances, stay
+#'   separate per group. So the model no longer factorises into two per-group
+#'   fits, and `common_variance` can move the cases' estimates slightly, as it
+#'   can with covariates.
+#'
+#' @return An object of class `"slope_params"`. Its `$residual` component is
+#'   `NULL` for independent residuals, or else a list: `correlation`, the
+#'   `nlme` class name (`"none"` with `varIdent()` alone); `coef`, the fitted
+#'   correlation parameters on their natural scale (`Phi`; `range` and any
+#'   `nugget`; or `corSymm()`'s correlations in `nlme`'s order); `fixed`;
+#'   `times`, the visit times a `corSymm()` or `varIdent()` structure is
+#'   defined at, else `NULL`; and `sd_ratio`, the residual SD at each of those
+#'   times relative to the first, else `NULL`. When `sd_ratio` is set,
+#'   `sigma2_residual` is the residual variance at the first time.
+#'
+#'   Its `$fit` component is the
 #'   fitted `"lme"` object itself, useful for `nlme`'s diagnostic plots (e.g.
 #'   `plot(fit)`, `qqnorm(fit)`) -- note that these must reference the
 #'   internal column names (`sp_y`, `sp_time`, `sp_subject`, ...) described
@@ -772,6 +860,17 @@ covariate_note <- function(covariates) {
 #' df4$age <- ave(df4$id, df4$id, FUN = function(i) round(runif(1, 30, 60)))
 #' slope_params(sdmt ~ visit | id, data = df4, covariates = ~ age)
 #'
+#' # Serially correlated residuals: a continuous-time AR(1), on the first 50
+#' # participants of `slpower1`.
+#' df5 <- slpower1[slpower1$id %in% 1:50, ]
+#' slope_params(sdmt ~ visit | id, data = df5, correlation = nlme::corCAR1())
+#'
+#' # A fully unstructured residual covariance, as `residuals(unstructured)`
+#' # in Stata's `mixed`.
+#' slope_params(sdmt ~ visit | id, data = df5,
+#'              correlation = nlme::corSymm(),
+#'              weights = nlme::varIdent(form = ~ 1 | visit))
+#'
 #' @references
 #' Nash, S., Morgan, K. E., Frost, C. and Mulick, A. (2021). Power and
 #' sample-size calculations for trials that compare slopes over time:
@@ -787,7 +886,8 @@ slope_params <- function(formula, data,
                          origin = c("subject", "none"),
                          common_variance = NULL,
                          na.action = stats::na.omit,
-                         covariates = NULL, covariate_time = TRUE) {
+                         covariates = NULL, covariate_time = TRUE,
+                         correlation = NULL, weights = NULL) {
   context <- "slope_params()"
   cl <- match.call()
   # `healthy`/`treated` are arguments of this call, so a symbol in them that is
@@ -807,6 +907,10 @@ slope_params <- function(formula, data,
                  context, deparse(parts$outcome), deparse(parts$time)),
          call. = FALSE)
   }
+
+  # Checked before anything is evaluated or fitted: these are about what was
+  # typed, not about the data.
+  spec <- residual_spec(correlation, weights, parts, context)
 
   env <- environment(formula) %||% parent.frame()
 
@@ -905,6 +1009,9 @@ slope_params <- function(formula, data,
     }
     dat$sp_time <- dat$sp_time - first
   }
+  # On the times as fitted, after the origin shift: a visit grid is a set of
+  # times since each participant's first visit.
+  grid <- if (!is.null(spec)) check_residual_data(spec, dat$sp_time, dat$sp_subject, context)
 
   if (comparator != "none") {
     if (length(unique(dat$sp_case)) != 2L) {
@@ -1004,6 +1111,8 @@ slope_params <- function(formula, data,
     dat$sp_grp <- factor(ifelse(dat$sp_case == 1, "case", "control"),
                          levels = c("control", "case"))
   }
+  dat <- add_residual_columns(dat, spec, grid, comparator)
+  resid <- residual_calls(spec, comparator)
   fixed <- fixed_formula(comparator, cov_terms)
   if (length(cov_terms)) {
     check_covariate_rank(fixed, dat, basis$labels, comparator, context)
@@ -1013,7 +1122,12 @@ slope_params <- function(formula, data,
   reduced_used <- FALSE
 
   if (comparator != "healthy") {
-    fit <- fit_common_model(dat, ctrl, fixed)
+    fit <- tryCatch(fit_common_model(dat, ctrl, fixed, resid), error = function(e) {
+      if (is.null(spec)) stop(e)
+      stop(sprintf(paste0("%s: the mixed model with %s residuals did not converge: %s"),
+                   context, residual_label(spec$correlation), conditionMessage(e)),
+           call. = FALSE)
+    })
 
   } else {
     # Both outcomes are decided inside the handler, so `fit` only ever holds a
@@ -1024,7 +1138,7 @@ slope_params <- function(formula, data,
     fit <- NULL
     if (!isTRUE(common_variance)) {
       fit <- tryCatch(
-        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl, fixed = fixed),
+        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl, fixed = fixed, resid = resid),
         error = function(e) {
           if (isFALSE(common_variance)) {
             stop(sprintf(paste0("%s: the full model did not converge and ",
@@ -1051,7 +1165,8 @@ slope_params <- function(formula, data,
     }
     if (is.null(fit)) {
       reduced_used <- TRUE
-      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = ctrl, fixed = fixed),
+      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = ctrl, fixed = fixed,
+                                        resid = resid),
                       error = function(e) {
                         stop(sprintf("%s: the mixed model did not converge: %s",
                                      context, conditionMessage(e)), call. = FALSE)
@@ -1080,13 +1195,12 @@ slope_params <- function(formula, data,
   # for `healthy`, the shared intercept/slope block and homoscedastic residual
   # for the other two -- `treated`'s coefficient mapping differs from `none`'s,
   # but its variance components come from the same random-effects structure.
-  if (comparator == "healthy") {
-    re  <- extract_re(fit, "sp_case", "sp_case_time", context)
-    s2r <- extract_residual(fit, "case", context)
+  re <- if (comparator == "healthy") {
+    extract_re(fit, "sp_case", "sp_case_time", context)
   } else {
-    re  <- extract_re(fit, "(Intercept)", "sp_time", context)
-    s2r <- extract_residual(fit, NULL, context)
+    extract_re(fit, "(Intercept)", "sp_time", context)
   }
+  res <- residual_components(fit, spec, grid, comparator, context)
 
   new_slope_params(
     slope            = slope,
@@ -1095,7 +1209,8 @@ slope_params <- function(formula, data,
     sigma2_intercept = re$sigma2_intercept,
     sigma2_slope     = re$sigma2_slope,
     sigma_cov        = re$sigma_cov,
-    sigma2_residual  = s2r,
+    sigma2_residual  = res$sigma2_residual,
+    residual         = res$residual,
     n_obs            = nrow(dat),
     n_subjects       = nlevels(dat$sp_subject),
     common_variance  = reduced_used,
@@ -1123,6 +1238,21 @@ slope_params <- function(formula, data,
 #' @param slope_comparator Slope of the healthy controls or the treated arm.
 #'   Required unless `comparator = "none"`.
 #' @param comparator One of `"none"`, `"healthy"` or `"treated"`.
+#' @param correlation Optional residual correlation, as the `nlme` constructor
+#'   carrying the value to assume: `nlme::corAR1(0.6)`, `nlme::corCAR1(0.6)`,
+#'   `nlme::corExp(2)`, `nlme::corExp(c(2, 0.1), nugget = TRUE)`,
+#'   `nlme::corGaus(2)`, or `nlme::corSymm(c(...))` with the correlations in
+#'   `nlme`'s order, (1,2), (1,3), ..., (2,3), .... See "Residual structures"
+#'   in [slope_params()] for what each means. `corAR1()` and `corCAR1()` fall
+#'   back to `nlme`'s default value when none is given, so state it.
+#' @param weights Optional visit-specific residual SD ratios, as
+#'   `nlme::varIdent(c("1" = 1.1, "2" = 1.3), form = ~ 1 | visit)`: named by
+#'   visit time, relative to the first time in `times`, whose ratio is 1. The
+#'   stratum in `form` is required by `nlme` and otherwise ignored.
+#'   `sigma2_residual` is then the residual variance at the first time.
+#' @param times The visit times that the parameters of `corSymm()` and
+#'   `varIdent()` belong to, strictly increasing. Required with either, and
+#'   refused otherwise. A planned schedule must then be among these times.
 #'
 #' @return An object of class `"slope_params"`.
 #'
@@ -1143,16 +1273,26 @@ slope_params <- function(formula, data,
 #'   comparator = "healthy"
 #' )
 #'
+#' # Serially correlated residuals, with correlation 0.5 between visits a
+#' # year apart.
+#' slope_params_manual(
+#'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
+#'   sigma_cov = 5, sigma2_residual = 10,
+#'   correlation = nlme::corCAR1(0.5)
+#' )
+#'
 #' @seealso [slope_params()] to estimate these from data.
 #' @export
 slope_params_manual <- function(slope,
                                 sigma2_intercept, sigma2_slope,
                                 sigma_cov, sigma2_residual,
                                 slope_comparator = NA_real_,
-                                comparator = c("none", "healthy", "treated")) {
+                                comparator = c("none", "healthy", "treated"),
+                                correlation = NULL, weights = NULL, times = NULL) {
   context <- "slope_params_manual()"
   cl <- match.call()
   comparator <- match.arg(comparator)
+  residual <- residual_manual(correlation, weights, times, context)
 
   # The five components are validated and coerced by new_slope_params() below,
   # which is the single validation point for both routes into the class.
@@ -1174,6 +1314,7 @@ slope_params_manual <- function(slope,
     sigma2_slope     = sigma2_slope,
     sigma_cov        = sigma_cov,
     sigma2_residual  = sigma2_residual,
+    residual         = residual,
     n_obs            = NA_integer_,
     n_subjects       = NA_integer_,
     common_variance  = FALSE,
@@ -1196,12 +1337,13 @@ slope_params_manual <- function(slope,
 #' @noRd
 new_slope_params <- function(slope, slope_comparator, comparator,
                              sigma2_intercept, sigma2_slope, sigma_cov,
-                             sigma2_residual, n_obs, n_subjects,
+                             sigma2_residual, residual, n_obs, n_subjects,
                              common_variance, time_shifted, covariates, fit,
                              call, context) {
   v <- check_param_values(list(slope = slope, sigma2_intercept = sigma2_intercept,
                                 sigma2_slope = sigma2_slope, sigma2_residual = sigma2_residual,
                                 sigma_cov = sigma_cov), context)
+  check_residual(residual, context)
 
   structure(
     list(slope            = v$slope,
@@ -1211,6 +1353,7 @@ new_slope_params <- function(slope, slope_comparator, comparator,
          sigma2_slope     = v$sigma2_slope,
          sigma_cov        = v$sigma_cov,
          sigma2_residual  = v$sigma2_residual,
+         residual         = residual,
          n_obs            = n_obs,
          n_subjects       = n_subjects,
          common_variance  = common_variance,
@@ -1281,9 +1424,16 @@ print.slope_params <- function(x, ...) {
   cat_line("variance of random intercepts", x$sigma2_intercept)
   cat_line("variance of random slopes", x$sigma2_slope)
   cat_line("covariance of intercept and slope", x$sigma_cov)
-  cat_line("residual variance", x$sigma2_residual)
+  print_residual(x)
 
   covariate_note(x$covariates)
+  residual_note(x$residual)
+  # A statement about the fit, so not shown for components supplied directly.
+  if (identical(x$residual$correlation, "corSymm") && !is.null(x$fit)) {
+    cat(paste0("\nNote: with an unstructured residual correlation the variance components\n",
+               "      above are not separately identified -- only the covariance they imply\n",
+               "      at the visit times is, and that is all stage two uses.\n"))
+  }
   if (isTRUE(x$common_variance)) {
     cat("\nNote: reduced random-effects structure used for healthy controls\n")
     # The shared covariate coefficients couple the two groups; see the

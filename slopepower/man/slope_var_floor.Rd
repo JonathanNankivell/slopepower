@@ -35,11 +35,27 @@ without withdrawal.
 }
 
 \section{It is an infimum, not a minimum}{
-No finite schedule attains it. Writing \eqn{\Sigma = \Sigma_0 + \sigma^2_\epsilon I},
-every contrast \eqn{c} has \eqn{c^{\mathsf T}\Sigma c > c^{\mathsf T}\Sigma_0 c},
-so \code{slope_var(params, visits)} is strictly greater than this value for any
+No finite schedule attains it. Writing \eqn{\Sigma = \Sigma_0 + R}, with
+\eqn{R} the residual covariance (\eqn{\sigma^2_\epsilon I} for independent
+residuals), every contrast \eqn{c} has
+\eqn{c^{\mathsf T}\Sigma c > c^{\mathsf T}\Sigma_0 c}, so
+\code{slope_var(params, visits)} is strictly greater than this value for any
 \code{visits}, however long or however dense. The gap closes as the number of
 visits grows without bound.
+}
+
+\section{Residual structures}{
+The value is the same with a serially correlated residual -- \code{corAR1()},
+\code{corCAR1()}, \code{corExp()} or \code{corGaus()} in \code{\link[=slope_params]{slope_params()}} -- because each
+of those correlations dies away with the time between visits, so a long
+enough schedule still averages the residual out. It is approached more
+slowly: visits packed close together are correlated and repeat each other,
+so density alone gains less than it would with independent residuals.
+
+A structure with a parameter per visit, \code{corSymm()} or \code{varIdent()}, has
+no floor and is refused: it is defined only at the visit times it was
+fitted at, so the schedules it can price are subsets of those, and the
+smallest variance among them is simply \code{slope_var()} at all of them.
 
 Lengthening a schedule is not enough on its own. Two visits a distance
 \eqn{t} apart converge, as \eqn{t \to \infty}, on

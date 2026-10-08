@@ -23,7 +23,10 @@ Mapping from the paper to code, fixed throughout:
 | σ²_a | `sigma2_intercept` | between-subject variance of random intercepts |
 | σ²_b | `sigma2_slope` | between-subject variance of random slopes |
 | σ_ab | `sigma_cov` | covariance of random intercept and slope |
-| σ²_ε | `sigma2_residual` | within-subject residual variance |
+| σ²_ε | `sigma2_residual` | within-subject residual variance (at the first of `residual$times` when `residual$sd_ratio` is set) |
+| ρ(s, t) | `residual$correlation`, `residual$coef` | residual correlation between a participant's visits at times s and t; 0 for s ≠ t by default |
+| δ_k | `residual$sd_ratio` | residual SD at visit time k relative to the first (`varIdent()`); 1 by default |
+| R | `residual_cov()` | one participant's residual covariance, R_jk = σ²_ε δ_j δ_k ρ(t_j, t_k) |
 | β′₁ | `slope` | slope of the untreated / case group |
 | β′₁,hc or β′₂-related | `slope_comparator` | slope of healthy controls, or of the treated arm |
 | β₂ | `tte` | target treatment effect for the future trial |
@@ -50,6 +53,8 @@ list(
   time_shifted      = <lgl>,   # TRUE if any subject's first visit was moved to 0
   covariates        = <list or NULL>,  # list(columns = <chr>, time = <lgl>): the adjustment
                                #   the variance components are conditional on; NULL if none
+  residual          = <list or NULL>,  # the residual structure (section 2.1); NULL = independent
+                               #   residuals of constant variance, the paper's model
   fit               = <model or NULL>,
   call              = <call>
 )
@@ -59,6 +64,45 @@ Variance components are always those of the **untreated / case** group. When
 `comparator == "healthy"` the healthy controls contribute **only** `slope_comparator`; their
 variance components are estimated (to avoid contaminating the cases' estimates) and then
 discarded. This mirrors the Stata behaviour and paper §2.3.
+
+### 2.1 `residual`
+
+No counterpart in the paper or in Stata's `slopepower` (DIVERGENCES.md §28). `NULL` means the
+paper's independent residuals and is what an object built before the field existed is read as —
+`residual` is deliberately **not** in `PARAM_FIELDS`. Otherwise:
+
+```r
+list(
+  correlation = <chr>,          # "none", "corAR1", "corCAR1", "corExp", "corGaus" or "corSymm"
+  coef        = <named dbl>,    # natural scale: c(Phi =) for AR1/CAR1; c(range =[, nugget =]) for
+                                #   Exp/Gaus; corSymm's K(K-1)/2 correlations in nlme's order
+                                #   (1,2), (1,3), ..., (2,3), ...; numeric(0) for "none"
+  fixed       = <lgl>,          # the correlation was fixed, not estimated (refits keep it fixed)
+  times       = <dbl or NULL>,  # the visit grid, exactly when correlation == "corSymm" or
+                                #   sd_ratio is set; NULL otherwise
+  sd_ratio    = <dbl or NULL>   # varIdent(): residual SD at each of `times` over that at times[1]
+)
+```
+
+The user-facing vocabulary is `nlme`'s: `slope_params(correlation = corAR1(), weights =
+varIdent(form = ~ 1 | time))`, and `slope_params_manual()` takes the same constructors carrying
+values, plus `times`. The `form` is always "within participant, by the formula's time" — a
+user-supplied form must say exactly that or is refused — because that is the only reading stage
+two can evaluate at a planned schedule. The stored field is plain data, never an `nlme` object:
+stage two must evaluate it at times that never occurred in the data, and the manual route has no
+fit to hold one.
+
+Structures with `times` (`corSymm()`, `varIdent()`) exist **only at those times**. Every
+stage-two call at another time is an error, and so is the floor (section 5.7). `corAR1()` exists
+only at integer times, in the data and in any schedule. `corCompSymm()` is refused: it is the
+random intercept again, and not identified alongside it. Under `corSymm()` the four variance
+components are not separately identified — only the marginal Σ at `times` is, which is all
+sections 5.1–5.6 use — so the printed components carry a note saying so.
+
+Under `healthy`, `nlme` fits one correlation structure per model, so the correlation parameters
+are shared by both groups while the residual variances (and, with `varIdent()`, the per-visit
+variances: the stratum is group × visit) stay separate. The model then no longer factorises
+per group — the same consequence covariates have.
 
 ---
 
@@ -249,6 +293,14 @@ Sigma <- sigma2_intercept +
          diag(sigma2_residual, length(t))
 ```
 
+With a residual structure (section 2.1) the last term is `residual_cov(params, t)` instead of
+`diag(sigma2_residual)`: `sigma2_residual * outer(d, d) * C`, with `d` the SD ratios at `t` and
+`C` the correlation matrix — `Phi^|t_i - t_j|` (AR1, CAR1; AR1 at integer times only),
+`(1 - nugget) * exp(-d/range)` or `exp(-(d/range)^2)` off the diagonal (Exp, Gaus), or a lookup
+by position in `times` (Symm). Each entry depends only on its own pair of times, so section
+5.4's leading-submatrix slicing stays exact. `test-residual.R` holds every structure to
+`nlme::getVarCov(type = "marginal")` at a participant's own times, to 1e-8.
+
 This is Σ* from paper p.579, generalised to arbitrary real `t`. **It is a deliberate divergence
 from the Stata code**, which builds Σ on a unit-integer grid and selects rows with a matrix
 product; the two agree exactly at integer times. There is no `scale()` argument in this port —
@@ -363,6 +415,11 @@ slope_var_floor(params) = 2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)
 ```
 
 Twice the Schur complement of the random-effects covariance matrix, i.e. twice `Var(b_i | a_i)`.
+It is unchanged by a serially correlated residual (AR1, CAR1, Exp, Gaus): `R` is still positive
+definite, so the strict inequality below holds, and each of those correlations decays with the
+lag, so a long dense schedule still averages the residual away. It is **refused** for a structure
+with `times` (section 2.1): the schedules it can price are subsets of `times`, so there is no
+infimum over all schedules to report, and under `corSymm()` its inputs are not identified.
 Positive whenever that matrix is positive definite, which `check_re_covariance()` already
 guarantees on every route into a `slope_params` object — so there is no degenerate branch to
 write.
@@ -409,6 +466,12 @@ Errors (not warnings, not silent `NA`):
 - `sum(dropout) > 1 + 1e-8`
 - non-positive variance components in `slope_params_manual()`
 - a covariance matrix that is not positive definite
+- a residual structure (section 2.1) that is unsupported (`corCompSymm()` by name), has a `form`
+  other than "within participant, by time", is `corAR1()` on non-integer times, or is
+  `corSymm()`/`varIdent()` on data without a shared visit schedule (a time attended by fewer than
+  two participants); two measurements at one time within a participant
+- a stage-two schedule with a time outside `residual$times`, or a non-integer time under
+  `corAR1()`; `slope_var_floor()` / `slope_sample_size_floor()` under a structure with `times`
 
 Warnings:
 

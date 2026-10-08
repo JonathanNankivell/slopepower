@@ -94,6 +94,9 @@ make_refitter <- function(params) {
                                          env = baseenv())
     args$covariate_time <- any(grepl("sp_cov_[0-9]+:sp_time|sp_time:sp_cov_[0-9]+", b))
   }
+  # Likewise the residual structure: a replicate fitted with independent
+  # residuals would put the wrong model's spread around the point estimate.
+  args <- c(args, residual_refit_args(params$residual))
   cl <- as.call(c(list(quote(slope_params)), args,
                   if (identical(comparator, "healthy")) {
                     # Only under `healthy`: for the other two slope_params()
