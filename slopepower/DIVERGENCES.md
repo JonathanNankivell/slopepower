@@ -48,7 +48,7 @@ Sigma <- sigma2_intercept +
          diag(sigma2_residual, length(t))
 ```
 
-`trial_design(visits = c(0, 0.5, 1, 1.5, 2))` is now legal directly; Stata
+`visits = c(0, 0.5, 1, 1.5, 2)` is now legal directly; Stata
 requires `schedule(1 2 3 4) scale(0.5)`. The two are proven exactly
 equivalent against Stata's own output for the paper's six-month design
 (N = 620 either way, `stata-reference` grid 6). `slopepower()`, the
@@ -70,7 +70,7 @@ matrix `visit_matrix'[1,1] = 1
 ```
 
 **R** requires the caller to write baseline into `visits` explicitly
-(`trial_design(c(0, 1, 2))`, not `trial_design(c(1, 2))`), and rejects a
+(`visits = c(0, 1, 2)`, not `visits = c(1, 2)`), and rejects a
 vector that doesn't start at 0 with a suggested correction, rather than
 inserting it silently. Rationale in `design.R`: the implicit convention is a
 common source of off-by-one design errors, and Stata's own users have to
@@ -98,8 +98,10 @@ if "`power'"=="" & "`n'"=="" {
 **R** splits this into two exported functions with disjoint signatures:
 
 ```r
-slope_sample_size(params, design, effectiveness = 0.25, target, power = 0.8, alpha = 0.05)
-slope_power(params, design, n, effectiveness = 0.25, target, alpha = 0.05)
+slope_sample_size(params, visits, dropout = NULL, dropout_scale, power = 0.8,
+                  effectiveness = 0.25, target, alpha = 0.05)
+slope_power(params, visits, dropout = NULL, dropout_scale, n,
+            effectiveness = 0.25, target, alpha = 0.05)
 ```
 
 `slope_power(..., power = 0.8)` is an "unused argument" error from R's own
@@ -132,18 +134,18 @@ with two further checks (`.ado:135`, `:198`) that the declared model actually
 has the variable it needs, and two more (`:131`, `:195`) warning that a
 supplied variable does not apply to the declared model.
 
-**R** has no model declaration at all. The scenario *is* which grouping
-argument was given:
+**R** has a single declaration, `comparator`, with `group` naming the one
+column it needs:
 
 ```r
-slope_params(y ~ t | id, data)                    # Stata's obs nocontrols  (model 2)
-slope_params(y ~ t | id, data, healthy = case)    # Stata's obs case()      (model 1)
-slope_params(y ~ t | id, data, treated = treat)   # Stata's rct treat()     (model 3)
+slope_params(y ~ t | id, data)                                            # Stata's obs nocontrols  (model 2)
+slope_params(y ~ t | id, data, comparator = "healthy", group = case)    # Stata's obs case()      (model 1)
+slope_params(y ~ t | id, data, comparator = "treated", group = treat)   # Stata's rct treat()     (model 3)
 ```
 
-`healthy` and `treated` are mutually exclusive, and that single check is all
-that survives of the six above: the remaining inconsistent states cannot be
-written down. The declaration lives on only in `slopepower()`, which
+Two checks survive of the six above — a `group` with `comparator = "none"`,
+and a comparator with no `group` — because those are the only inconsistent
+states that can still be written down; `match.arg()` rules out the rest. The declaration lives on only in `slopepower()`, which
 reproduces every one of Stata's checks because its job is to accept Stata
 calls verbatim.
 
@@ -155,17 +157,18 @@ calls verbatim.
 attended visit is visit `i`). Converting from a cumulative attrition curve
 is left to the user.
 
-**R**'s `trial_design()` accepts `dropout_type = "cumulative"` and converts
+**R**'s stage-two functions accept `dropout_scale = "cumulative"` and convert
 internally:
 
 ```r
-trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
-             dropout_type = "cumulative")
+slope_sample_size(params, c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15),
+                  dropout_scale = "cumulative")
 ```
 
 converted via `diff(c(0, cumulative))`, with validation that the cumulative
-vector is non-decreasing and bounded by 1. The stored `dropout` field is
-always incremental regardless of which form was supplied.
+vector is non-decreasing and bounded by 1. The result's stored
+`design$dropout` is always incremental regardless of which form was
+supplied.
 
 ---
 
@@ -176,36 +179,37 @@ manually converted to `dropouts(0.15)`, `dropouts(.05 .05 .05)`, or
 `dropouts(.025 .025 .025 .025 .025 .025)` depending on which visit schedule
 is being compared, with the arithmetic redone by hand for each.
 
-**R** adds `dropout_rate(rate, per = 1, type = c("linear", "cumulative"))`,
-which `trial_design()` expands for whatever schedule it is given. `type`
-chooses which of two withdrawal patterns `rate` describes:
+**R** adds `dropout_rate(rate, per = 1, pattern = c("linear", "geometric"))`,
+which every stage-two function expands for whatever schedule it is given.
+`pattern` chooses which of two withdrawal patterns `rate` describes:
 
 - `"linear"` (the default) applies `rate` to the *original* cohort —
   `(rate / per) * (visits[j+1] - visits[j])` per stratum:
 
   ```r
-  trial_design(c(0, 1, 2, 3),        dropout = dropout_rate(0.05))  # 0.05 x 3
-  trial_design(seq(0, 3, by = 0.5),  dropout = dropout_rate(0.05))  # 0.025 x 6
-  trial_design(c(0, 3),              dropout = dropout_rate(0.05))  # 0.15
+  dropout = dropout_rate(0.05)  # visits c(0, 1, 2, 3):       0.05 x 3
+                                # visits seq(0, 3, by = 0.5): 0.025 x 6
+                                # visits c(0, 3):             0.15
   ```
 
-- `"cumulative"` applies `rate` as the proportion of *whoever is still in
+- `"geometric"` applies `rate` as the proportion of *whoever is still in
   follow-up* who withdraws per `per` units of time, compounding
   geometrically rather than shrinking the original cohort by equal amounts:
   survival at time `t` is `(1 - rate) ^ (t / per)`.
 
   ```r
-  trial_design(c(0, 1, 2, 3), dropout = dropout_rate(0.05, type = "cumulative"))
+  dropout = dropout_rate(0.05, pattern = "geometric")  # visits c(0, 1, 2, 3)
   # 0.05, 0.0475, 0.045125 -- 5% of whoever remains, each interval
   ```
 
-Because the expansion happens in the constructor, the same object drives a
-single design and every row of a Table-1 style comparison alike: the grid
-functions expand it per cell through the same code path. Whichever `type` is
-used, a rate produces incremental proportions by construction, so it cannot be
-paired with `dropout_type = "cumulative"` (section 5) — an unrelated choice,
-about how the vector itself was written down rather than how withdrawal
-behaves over time — and that combination is rejected.
+Because the expansion happens in the one design validator, the same object
+drives a single design and every row of a Table-1 style comparison alike: the
+grid functions expand it per cell through the same code path. Whichever
+`pattern` is used, a rate produces incremental proportions by construction, so
+it cannot be paired with `dropout_scale = "cumulative"` (section 5) — an
+unrelated choice, about how the vector itself was written down rather than how
+withdrawal behaves over time, and named apart so the two never share a word —
+and that combination is rejected.
 
 This is new surface area, but it computes exactly what a Stata user would
 otherwise compute by hand for `dropouts()`, so it is not a change to the
@@ -281,21 +285,22 @@ position.
 
 ---
 
-## 9. `slope_params`/`trial_design` invariants are re-checked at every use, not only at construction
+## 9. `slope_params` invariants are re-checked at every use, not only at construction
 
 **Stata** validates once, in the `syntax`/quietly block at the top of the
 command, coupled to that specific call's arguments. There is no persisted
 object to re-validate later.
 
-**R** makes `slope_params` and `trial_design` real objects, and re-checks
-their invariants (positive-definite Σ and G, dropout length/sum, finite
-visits, etc.) at the boundary of *every* stage-two call — `check_params()`
-and `as_trial_design()` — not only where the constructors run. That is what
-closes the gap for objects the constructors never saw: a hand-assembled
+**R** makes `slope_params` a real object, and re-checks its invariants
+(positive-definite Σ and G, etc.) at the boundary of *every* stage-two call —
+`check_params()` — not only where the constructors run. That is what closes
+the gap for objects the constructors never saw: a hand-assembled
 `slope_params` with a non-PD random-effects G matrix but a PD marginal Σ
 (large `sigma2_residual` masks it) would otherwise slip through and silently
-return a wrong large N, and a `trial_design` whose `$dropout` was edited after
-construction would escape the baseline-dropout warning entirely.
+return a wrong large N. The trial design (dropout length/sum, finite visits,
+etc.) is taken as `visits` and `dropout` directly and validated by every
+stage-two call that receives it, so there is no design object to edit after
+validation.
 
 ---
 
@@ -515,7 +520,7 @@ built into the command) requires the user to correctly assemble `cluster()`,
 that it silently assumes no observations were excluded — four places to get
 wrong with no structural guard.
 
-**R**'s `slope_bootstrap()` has no equivalent options: subjects are always
+**R**'s bootstrap functions have no equivalent options: subjects are always
 the resampling unit, replicate identifiers are always freshly generated (so
 a subject drawn twice counts as two people rather than colliding), and
 stratification by group is automatic whenever `comparator != "none"`. There
@@ -535,7 +540,7 @@ controls' slope: the model factorises per group, so the case estimates are
 invariant, but `slope_comparator` — what `slope_difference` is measured
 against — is not.
 
-`slope_bootstrap()` also warns when the fitted slope is less than 2.5× its
+Every bootstrap also warns when the fitted slope is less than 2.5× its
 standard error, per the paper's own §2.6 recommendation — a check the Stata
 side leaves to the user to remember to apply by eye.
 
@@ -551,8 +556,8 @@ dataset in place and then undo it).
 
 **R** has no notion of "current data" at all in the stage-two layer:
 `slope_var()`, `slope_effect_size()`, `slope_sample_size()`, `slope_power()`
-and the grid functions take a `slope_params` object and a `trial_design`
-object as plain arguments and return a plain value or list — they can be
+and the grid functions take a `slope_params` object and a visit schedule
+as plain arguments and return a plain value or list — they can be
 called from a script with no dataset loaded, called from `slope_params_manual()`-built
 inputs, or vectorised over many designs without any `preserve`/`restore`
 bookkeeping.
@@ -702,8 +707,9 @@ accept it as the "right" answer either.
 always evaluated at a stated `schedule()`, and Table 1 explores schedules
 one at a time.
 
-**R** exports `slope_var_floor()` and `slope_sample_size_floor()`, the
-greatest lower bound of `s*^2` — and hence of `N` — over *every* visit
+**R** exports `slope_var_floor()`, `slope_sample_size_floor()` and
+`slope_power_ceiling()`: the greatest lower bound of `s*^2` — and hence of `N`,
+and the least upper bound of power at a given `N` — over *every* visit
 schedule. It falls out of the closed form `s*^2 = 2 / (t' Sigma^-1 t)`
 derived in the `what-is-s-star` vignette, and is
 `2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)`, twice the variance of
@@ -719,8 +725,8 @@ cannot be rescued by any visit schedule.
 
 Two things kept it honest rather than clever. The sample size goes through
 `size_per_arm()`, the same equation (6) `solve_slope()` calls, so the bound
-and the thing it bounds cannot drift apart. And it takes no `design`
-argument in either method (CONTRACT.md §4.3) — the value does not depend on
+and the thing it bounds cannot drift apart. And it takes no `visits` or
+`dropout` argument (CONTRACT.md §4.3) — the value does not depend on
 one, and dropout can only raise it, so the bound covers designs with
 withdrawal too.
 
@@ -743,7 +749,7 @@ bootstrapping each design independently. The resampling scheme —
 design being priced, so refitting once prices every cell: `R` replicates
 plus one leave-one-subject-out jackknife, not `n_cells` times that. A
 nine-cell grid at the default `R = 999` costs about what one
-`slope_bootstrap()` call does, not nine times it.
+`slope_sample_size_boot()` call does, not nine times it.
 
 This is not only cheaper — it changes what the intervals mean together.
 Every cell's interval is built from the *same* draws, so two designs'

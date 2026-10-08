@@ -78,7 +78,7 @@ check_params <- function(params, context) {
 #'
 #' Deliberately permissive: any strictly increasing finite vector of length >= 2
 #' defines a valid covariance matrix. The stricter trial constraints (baseline at
-#' zero) belong to `trial_design()` and are enforced by the stage-two entry
+#' zero) belong to [build_trial_design()] and are enforced by the stage-two entry
 #' points, `slope_sample_size()` and `slope_power()`.
 #' @noRd
 check_visits <- function(visits, context) {
@@ -93,8 +93,18 @@ check_visits <- function(visits, context) {
   invisible(as.numeric(visits))
 }
 
-# `as_trial_design()`, which coerces and revalidates the `design` argument of
-# every stage-two call, lives in design.R beside the class it validates.
+#' Validate the inputs every stage-two entry point shares, in a fixed order
+#'
+#' `params` first and then the design, so a call wrong in both reports the
+#' parameters -- the order the checks ran in when the design was a separate
+#' object validated inside the calculation. `dropout_scale` arrives already
+#' matched by the caller's `match.arg()`. Returns the internal `trial_design`
+#' the calculation reads.
+#' @noRd
+stage_two_design <- function(params, visits, dropout, dropout_scale, context) {
+  check_params(params, context)
+  build_trial_design(visits, dropout, dropout_scale, context)
+}
 
 # ---------------------------------------------------------------------------
 # covariance and treatment-effect variance
@@ -280,7 +290,7 @@ reference_is_comparator <- function(comparator, target) {
 #'
 #' Split from [effect_components()] because the design-free half is the whole of
 #' what [slope_sample_size_floor()] needs: the floor is a bound over every
-#' schedule, so it has no `design` to weight by, but it targets exactly the same
+#' schedule, so it has no visits or dropout to weight by, but it targets exactly the same
 #' \eqn{\beta_2} and must reach it by exactly the same route. Duplicating this
 #' resolution there would let the two drift into targeting different effects
 #' from the same `params`.
@@ -353,13 +363,13 @@ target_components <- function(params, target, effectiveness, context) {
 
 #' Resolve the reference slope, effectiveness and dropout-weighted effect size
 #'
-#' The design-dependent half; [target_components()] is the rest, and is called
-#' *after* `as_trial_design()` so that a design warning still precedes a target
-#' warning in the order they always did.
+#' The design-dependent half; [target_components()] is the rest. `design` is
+#' the internal object [build_trial_design()] returns, already validated by the
+#' entry point -- so a design warning still precedes a target warning, in the
+#' order they always did.
 #' @noRd
 effect_components <- function(params, design, target, effectiveness, context) {
   check_params(params, context)
-  design <- as_trial_design(design, context)
   comp <- target_components(params, target, effectiveness, context)
   slope_difference <- comp$slope_difference
 
@@ -390,7 +400,7 @@ effect_components <- function(params, design, target, effectiveness, context) {
 
   if (eff2 <= 0) {
     stop(sprintf(paste0("%s: every participant is expected to drop out before contributing ",
-                        "slope information, so the effect size is zero. Check `design$dropout`."),
+                        "slope information, so the effect size is zero. Check `dropout`."),
                  context), call. = FALSE)
   }
   effect_size <- sign(slope_difference) * sqrt(eff2)
@@ -412,11 +422,10 @@ effect_components <- function(params, design, target, effectiveness, context) {
 #' single measurement carries no information about a slope. Every stratum uses
 #' the same slope difference and the same variance components, so withdrawal is
 #' assumed unrelated to a participant's own trajectory, and only monotone dropout
-#' from a common schedule can be expressed. See [trial_design()] for what that
-#' does and does not cover.
+#' from a common schedule can be expressed. See the "Dropout" section of
+#' [slope_sample_size()] for what that does and does not cover.
 #'
-#' @param params A `slope_params` object.
-#' @param design A `trial_design` object, or a numeric vector of visit times.
+#' @inheritParams stage_two
 #' @param target `"effectiveness"` to measure the slope difference toward zero
 #'   (or toward the healthy-control slope), or `"observed"` to measure it
 #'   against the treated arm of a previous trial. See [slope_sample_size()].
@@ -437,22 +446,24 @@ effect_components <- function(params, design, target, effectiveness, context) {
 #'
 #' # A quarter of participants are expected to miss the final visit: the
 #' # effect size shrinks because they contribute less slope information.
-#' design <- trial_design(c(0, 1, 2), dropout = c(0, 0.25))
-#' slope_effect_size(pars, design)
+#' slope_effect_size(pars, c(0, 1, 2), dropout = c(0, 0.25))
 #'
 #' @inherit stage_two references
-#' @seealso [trial_design()] for how dropout is specified and what the
-#'   pattern-mixture weighting assumes.
+#' @seealso The "Dropout" section of [slope_sample_size()] for how dropout is
+#'   specified and what the pattern-mixture weighting assumes.
 #' @export
-slope_effect_size <- function(params, design,
+slope_effect_size <- function(params, visits, dropout = NULL,
+                              dropout_scale = c("incremental", "cumulative"),
                               target = c("effectiveness", "observed")) {
   # No `effectiveness` argument, deliberately. The returned effect size is on
   # the slope-difference scale (CONTRACT.md section 5.4) and does not depend on
   # effectiveness, so accepting the argument would silently ignore it: a caller
   # reconstructing N = 2 * ceiling((z + z)^2 / es^2) from this value would be
   # wrong by a factor of effectiveness^-2. See the note in @return.
+  context <- "slope_effect_size()"
+  design <- stage_two_design(params, visits, dropout, match.arg(dropout_scale), context)
   comp <- effect_components(params, design, target, effectiveness = 1,
-                            context = "slope_effect_size()")
+                            context = context)
   comp$effect_size
 }
 
@@ -483,6 +494,43 @@ scale_effect <- function(effect_size, effectiveness) {
 size_per_arm <- function(scaled_effect, z_a, power) {
   z_sum_sq <- (z_a + stats::qnorm(power))^2
   list(z_sum_sq = z_sum_sq, n_per_arm = ceiling(z_sum_sq / scaled_effect^2))
+}
+
+#' The power a scaled effect achieves at a total sample size `n`
+#'
+#' The inverse direction of [size_per_arm()], written once for the same reason.
+#' `n` is forced even and split 1:1, so `n_per_arm` -- not the requested `n` --
+#' is what a result is built from; `stage_two_result()` reports 2 * n_per_arm.
+#' @noRd
+power_at_n <- function(scaled_effect, z_a, n) {
+  n_per_arm <- floor(n / 2)
+  list(n_per_arm = n_per_arm,
+       power = stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a))
+}
+
+#' Validate `alpha` and whichever of `n` and `power` is being supplied
+#'
+#' Returns `TRUE` when solving for `n` (i.e. `n` is `NULL`).
+#' @noRd
+check_n_or_power <- function(alpha, n, power, context) {
+  check_probability(alpha, "alpha", context)
+  if (is.null(n)) {
+    check_target_power(power, alpha, context)
+  } else {
+    check_whole_number(n, "n", "participants", context, lower = 2)
+  }
+  is.null(n)
+}
+
+#' Add `n_requested` to a power-direction result
+#'
+#' Kept separately from `n`, which is the even number actually used. Positioned
+#' by name rather than by index: CONTRACT.md section 4.2 fixes it "after
+#' n_per_arm", and `stage_two_result()` assembles that list elsewhere.
+#' @noRd
+add_n_requested <- function(res, n) {
+  append(res, list(n_requested = as.numeric(n)),
+         after = match("n_per_arm", names(res)))
 }
 
 #' Validate a target power against the alpha it is paired with
@@ -559,14 +607,7 @@ stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
 #' @noRd
 solve_slope <- function(params, design, effectiveness,
                         target, alpha, n, power, context) {
-  check_probability(alpha, "alpha", context)
-
-  solving_for_n <- is.null(n)
-  if (solving_for_n) {
-    check_target_power(power, alpha, context)
-  } else {
-    check_whole_number(n, "n", "participants", context, lower = 2)
-  }
+  solving_for_n <- check_n_or_power(alpha, n, power, context)
 
   comp <- effect_components(params, design, target, effectiveness, context)
 
@@ -581,10 +622,9 @@ solve_slope <- function(params, design, effectiveness,
     z_sum_sq <- sized$z_sum_sq
     n_per_arm <- sized$n_per_arm
   } else {
-    # Forced even and split 1:1, so `n_per_arm` -- not the requested `n` -- is
-    # what the result is built from; `stage_two_result()` reports 2 * n_per_arm.
-    n_per_arm <- floor(n / 2)
-    power <- stats::pnorm(scaled_effect * sqrt(n_per_arm) - z_a)
+    at_n <- power_at_n(scaled_effect, z_a, n)
+    n_per_arm <- at_n$n_per_arm
+    power <- at_n$power
   }
 
   # With dropout no single s*^2 applies across strata, so report the effective
@@ -616,8 +656,23 @@ solve_slope <- function(params, design, effectiveness,
 #'
 #' @param params A `slope_params` object, from [slope_params()] fitted to
 #'   previously collected longitudinal data or from [slope_params_manual()].
-#' @param design A `trial_design` object, from [trial_design()], or a numeric
-#'   vector of visit times beginning at 0.
+#' @param visits Numeric vector of the planned trial's visit times,
+#'   **including the baseline visit at time 0**, strictly increasing, of length
+#'   at least 2, in the units of the `time` variable used to estimate `params`.
+#'   Times may be any real values --- `c(0, 0.5, 1, 1.5, 2)` is valid. See
+#'   "The visit schedule" below.
+#' @param dropout Optional expected dropout. Either a numeric vector of
+#'   proportions, one per follow-up visit (`length(visits) - 1`), read as
+#'   `dropout_scale` says, or a [dropout_rate()] object giving a constant rate
+#'   per unit of time, which is expanded to one proportion per interval of
+#'   `visits`. `NULL` (the default) means no dropout. See "Dropout" below.
+#' @param dropout_scale How a numeric `dropout` vector is written.
+#'   `"incremental"` (the default) means element `j` is the proportion of
+#'   participants whose **last attended visit is `visits[j]`**. `"cumulative"`
+#'   means element `j` is the proportion who have withdrawn by `visits[j + 1]`,
+#'   i.e. who fail to attend it. A [dropout_rate()] produces incremental
+#'   proportions by construction, so it cannot be combined with
+#'   `"cumulative"`.
 #' @param effectiveness Proportion of the slope difference the treatment is
 #'   expected to remove, in (0, 1] (see "The reference slope" below). Must not
 #'   be supplied when `target = "observed"`, which fixes it at 1.
@@ -650,21 +705,62 @@ solve_slope <- function(params, design, effectiveness,
 #'     Stata command's default behaviour for trial data.}
 #' }
 #'
+#' @section The visit schedule:
+#'
+#' Stata's `schedule()` option lists follow-up visits only and assumes an
+#' implicit baseline at time 0. This port requires baseline to be given
+#' explicitly in `visits`, because the implicit convention is a common source
+#' of off-by-one design errors. A `visits` vector that does not start at 0 is
+#' rejected with a suggested correction rather than silently repaired.
+#'
+#' Stata also restricts `schedule()` to ascending integers of at least 1 and
+#' provides a `scale()` option to compensate, because it builds the covariance
+#' matrix on a unit-integer grid. This port builds it directly at the requested
+#' times, so `scale()` is unnecessary and has no equivalent: express `visits`
+#' in whatever units the fitted slope uses.
+#'
 #' @section Dropout:
 #'
-#' When `design` carries a dropout pattern, the calculation is adjusted by the
-#' pattern-mixture method of Dawson and Lagakos (1991, 1993), following section
-#' 2.5 of Nash et al. (2021). Participants are stratified by the visits they
-#' attend, each stratum is sized as though the whole trial followed that pattern,
-#' and the strata are combined as the reciprocal of the weighted mean of the
-#' reciprocals of those sizes. Withdrawers thus still contribute the visits they
-#' attended, which is less conservative than dividing a completers-only sample
-#' size by the completion rate, and is the right adjustment when the trial will
-#' be analysed with a mixed model on all observed measurements. Only monotone
-#' dropout from a schedule common to all participants is modelled, and every
-#' stratum is assumed to share the same variance components, so withdrawal is
-#' taken to be unrelated to a participant's own trajectory. See [trial_design()]
-#' for the full account and for how the `dropout` vector itself is read.
+#' The two `dropout_scale`s describe the same strata from opposite ends, and
+#' confusing them changes the trial design materially. A participant counted in
+#' `dropout[j]` (incremental) attends `visits[1:j]` and misses everything after,
+#' so their last attended visit is `visits[j]` and the first they miss is
+#' `visits[j + 1]`. The result's `$design` field stores the vector as
+#' incremental whichever was supplied, and prints both columns so the reading
+#' is never ambiguous.
+#'
+#' Participants whose last attended visit is baseline contribute no follow-up
+#' measurement and therefore no information about the slope. They are excluded
+#' from the calculation entirely, with a warning when `dropout[1]` is non-zero
+#' so that this is visible rather than silent.
+#'
+#' The calculation is adjusted by the pattern-mixture method of Dawson and
+#' Lagakos (1991, 1993), which is what section 2.5 of Nash et al. (2021) adopts
+#' and what the Stata command's `dropouts()` option does. Participants are
+#' divided into strata by the visits they attend: stratum `j` attends
+#' `visits[1:j]` and nothing after, and the completers --- a proportion
+#' `1 - sum(dropout)` --- attend everything. Each stratum is sized as though
+#' the entire trial followed that one visit pattern, and the strata are
+#' combined as the reciprocal of the weighted mean of the reciprocals of those
+#' stratum-specific sample sizes, the weights being the incremental `dropout`.
+#' Equivalently, and this is how it is actually computed, the squared
+#' standardised effect sizes are averaged with those weights; see
+#' [slope_effect_size()].
+#'
+#' Withdrawers therefore still contribute the visits they did attend. That
+#' makes the adjustment less conservative than inflating a completers-only
+#' sample size by `1 / (1 - sum(dropout))`, and it is the appropriate one when
+#' the trial will be analysed with a mixed model fitted to all observed
+#' measurements, as in [slope_params()]. If the planned analysis instead
+#' discards partial records, this will understate the sample size needed.
+#'
+#' Two assumptions come with it. Dropout is monotone and truncates a schedule
+#' common to every participant: withdrawal is permanent, and intermittent
+#' missingness --- a visit missed and follow-up resumed --- has no
+#' representation here, as in the Stata original. And every stratum is given
+#' the same slope difference and the same variance components, so withdrawal is
+#' assumed unrelated to a participant's own trajectory; dropout driven by how
+#' fast someone is declining is outside the model.
 #'
 #' One field of the result changes meaning under dropout. No single \eqn{s^{*2}}
 #' applies across strata, so `var_tte` reports the effective value obtained by
@@ -679,6 +775,11 @@ solve_slope <- function(params, design, effectiveness,
 #' Dawson, J. D., and S. W. Lagakos. 1993. Size and power of two-sample tests of
 #' repeated measures data. \emph{Biometrics} 49: 1022--1032.
 #' \doi{10.2307/2532244}
+#'
+#' Frost, C., M. G. Kenward, and N. C. Fox. 2008. Optimizing the design of
+#' clinical trials where the outcome is a rate. Can estimating a baseline rate in
+#' a run-in period increase efficiency? \emph{Statistics in Medicine} 27:
+#' 3717--3731. \doi{10.1002/sim.3280}
 #'
 #' Nash, S., K. E. Morgan, C. Frost, and A. Mulick. 2021. Power and sample-size
 #' calculations for trials that compare slopes over time: Introducing the
@@ -718,7 +819,7 @@ NULL
 #' returns for parameters whose reference slope has been halved directly:
 #'
 #' ```
-#' ss <- slope_sample_size(params, design, target = "observed")
+#' ss <- slope_sample_size(params, visits, target = "observed")
 #' 2 * ceiling((qnorm(1 - ss$alpha / 2) + qnorm(ss$power))^2 /
 #'             (p * ss$effect_size)^2)
 #' ```
@@ -738,6 +839,7 @@ NULL
 #'   picks which of `n`/`n_per_arm` `print()` leads with, and changes neither.
 #'
 #' @inheritSection stage_two The reference slope
+#' @inheritSection stage_two The visit schedule
 #' @inheritSection stage_two Dropout
 #' @inherit stage_two references
 #'
@@ -748,32 +850,56 @@ NULL
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 #' slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33, power = 0.9)
 #'
+#' # Dropout, as the proportion whose last visit is each one, or as the
+#' # proportion who have withdrawn by each follow-up visit.
+#' slope_sample_size(pars, c(0, 1, 2, 3), dropout = c(0, 0.05, 0.10),
+#'                   effectiveness = 0.33)
+#' slope_sample_size(pars, c(0, 1, 2, 3), dropout = c(0, 0.05, 0.15),
+#'                   dropout_scale = "cumulative", effectiveness = 0.33)
+#'
 #' # Case/healthy-control comparator: measured toward the healthy controls'
 #' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 #' # are calendar dates and so are converted to years in the formula.
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
-#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+#'                       comparator = "healthy", group = case)
 #' slope_sample_size(pars2, c(0, 1, 2), effectiveness = 0.33)
 #'
 #' # Randomised-trial comparator, target = "observed": size a repeat trial to
 #' # detect the same effect the trial actually found, fitted to all one
 #' # hundred and fifty participants of `slpower3`.
-#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+#'                       comparator = "treated", group = treat)
 #' slope_sample_size(pars3, c(0, 0.5, 2), target = "observed")
 #'
-#' @seealso [trial_design()] to build the `design` argument,
+#' @seealso [dropout_rate()] to state dropout once for any schedule,
 #'   [slope_power()] for the power of a given `n`,
 #'   [slope_sample_size_grid()] to compare many designs at once,
-#'   [slope_bootstrap()] for an interval around the result.
+#'   [slope_sample_size_boot()] for an interval around the result.
 #' @export
-slope_sample_size <- function(params, design,
-                              effectiveness = 0.25,
+slope_sample_size <- function(params, visits, dropout = NULL,
+                              dropout_scale = c("incremental", "cumulative"),
+                              power = 0.8, effectiveness = 0.25,
                               target = c("effectiveness", "observed"),
-                              power = 0.8, alpha = 0.05, per_arm = TRUE) {
+                              alpha = 0.05, per_arm = TRUE) {
   context <- "slope_sample_size()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   per_arm <- check_per_arm(per_arm, context)
+  design <- stage_two_design(params, visits, dropout, match.arg(dropout_scale), context)
+  sample_size_result(params, design, power, effectiveness, target, alpha, per_arm,
+                     context)
+}
+
+#' The body of [slope_sample_size()], given a design already built
+#'
+#' Split from the exported function so the grid and bootstrap drivers, which
+#' build each design once and then solve against it many times, re-solve
+#' exactly what `slope_sample_size()` solves without rebuilding -- and
+#' re-warning about -- the design on every cell or replicate.
+#' @noRd
+sample_size_result <- function(params, design, power, effectiveness = NULL, target,
+                               alpha, per_arm, context) {
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
                      n = NULL, power = power, context = context)
@@ -812,6 +938,7 @@ slope_sample_size <- function(params, design,
 #'   them.
 #'
 #' @inheritSection stage_two The reference slope
+#' @inheritSection stage_two The visit schedule
 #' @inheritSection stage_two Dropout
 #' @inherit stage_two references
 #'
@@ -825,22 +952,25 @@ slope_sample_size <- function(params, design,
 #' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
 #' # are calendar dates and so are converted to years in the formula.
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
-#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+#'                       comparator = "healthy", group = case)
 #' slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
 #'
 #' # Randomised-trial comparator, target = "observed": what power would a
 #' # repeat trial have to detect the same effect the trial actually found,
 #' # fitted to all one hundred and fifty participants of `slpower3`.
-#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+#'                       comparator = "treated", group = treat)
 #' slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
 #'
-#' @seealso [trial_design()] to build the `design` argument,
+#' @seealso [dropout_rate()] to state dropout once for any schedule,
 #'   [slope_sample_size()] for the `n` a target power needs,
 #'   [slope_power_grid()] to compare many designs at once,
-#'   [slope_bootstrap()] for an interval around the result.
+#'   [slope_power_boot()] for an interval around the result.
 #' @export
-slope_power <- function(params, design, n,
-                        effectiveness = 0.25,
+slope_power <- function(params, visits, dropout = NULL,
+                        dropout_scale = c("incremental", "cumulative"),
+                        n, effectiveness = 0.25,
                         target = c("effectiveness", "observed"),
                         alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power()"
@@ -854,19 +984,27 @@ slope_power <- function(params, design, n,
     stop(sprintf(paste0(
       "%s: `n` is required -- it is the sample size whose power is being\n",
       "  evaluated. To solve for the sample size that achieves a given power,\n",
-      "  use slope_sample_size(params, design, power = 0.8)."),
+      "  use slope_sample_size(params, visits, power = 0.8)."),
       context), call. = FALSE)
   }
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
+  design <- stage_two_design(params, visits, dropout, match.arg(dropout_scale), context)
+  power_result(params, design, n, effectiveness, target, alpha, per_arm, context)
+}
+
+#' The body of [slope_power()], given a design already built
+#'
+#' Split for the reason [sample_size_result()] is. `effectiveness` defaults to
+#' `NULL` in both because the grids leave it out under `target = "observed"`,
+#' which ignores it.
+#' @noRd
+power_result <- function(params, design, n, effectiveness = NULL, target, alpha,
+                         per_arm, context) {
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
                      n = n, power = NULL, context = context)
-  # Kept separately from `n`, which is the even number actually used. Positioned
-  # by name rather than by index: CONTRACT.md section 4.2 fixes it "after
-  # n_per_arm", and solve_slope() assembles that list two hundred lines away.
-  res <- append(res, list(n_requested = as.numeric(n)),
-                after = match("n_per_arm", names(res)))
+  res <- add_n_requested(res, n)
   structure(res, class = c("slope_power", "slope_result"), per_arm = per_arm)
 }
 
@@ -999,14 +1137,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 print.slope_power <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_power()")
   print_opening_blocks(x)
-  if (per_arm) {
-    # `n_requested` has not been evened, so its per-arm figure can be a half
-    # participant -- cat_count() (utils.R) prints that decimal rather than
-    # cat_line()'s digits = 0L path silently rounding it away.
-    cat_count("specified N per arm", x$n_requested / 2)
-  } else {
-    cat_line("specified N", x$n_requested, digits = 0L)
-  }
+  cat_specified_n_line(x, per_arm)
   cat_n_line(x, per_arm, total_label = "actual N")
   print_design_block(x)
   cat("\nEstimated power:\n")
@@ -1025,15 +1156,17 @@ print.slope_power <- function(x, ..., per_arm = NULL) {
 #'
 #' `solve_for` records which question produced the row --- `"n"` for
 #' [slope_sample_size()], `"power"` for [slope_power()], `"n_floor"` for
-#' [slope_sample_size_floor()]. It is derived from the object's class, and
+#' [slope_sample_size_floor()] and `"power_ceiling"` for [slope_power_ceiling()].
+#' It is derived from the object's class, and
 #' exists so that a bound table stays interpretable; the functions themselves
 #' have no such switch.
 #'
-#' A `"n_floor"` row has `n_follow_up = NA`, because the bound it reports holds
+#' A `"n_floor"` or `"power_ceiling"` row has `n_follow_up = NA`, because the
+#' bound it reports holds
 #' for every visit schedule and so is attached to none of them.
 #'
-#' @param x A `slope_sample_size`, `slope_power` or `slope_sample_size_floor`
-#'   object.
+#' @param x A `slope_sample_size`, `slope_power`, `slope_sample_size_floor` or
+#'   `slope_power_ceiling` object.
 #' @param row.names,optional Passed on for consistency with the generic; ignored.
 #' @param ... Ignored.
 #' @return A one-row data frame.
@@ -1075,6 +1208,7 @@ as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ..
     n_obs            = as.numeric(x$params$n_obs %||% NA_real_),
     n_subjects       = as.numeric(x$params$n_subjects %||% NA_real_),
     solve_for        = if (inherits(x, "slope_sample_size_floor")) "n_floor"
+                       else if (inherits(x, "slope_power_ceiling")) "power_ceiling"
                        else if (inherits(x, "slope_power")) "power"
                        else "n",
     row.names        = row.names,

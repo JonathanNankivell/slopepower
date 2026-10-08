@@ -155,11 +155,16 @@ test_that("the scenario follows which group argument is supplied", {
   expect_identical(paper_fit("slpower3")$comparator, "treated")
 })
 
-test_that("healthy and treated are mutually exclusive", {
+test_that("`group` is required by a comparator and refused without one", {
   d <- load_paper_data("slpower2")
-  d$treat <- d$case
-  expect_error(slope_params(sdmt ~ time | id, d, healthy = case, treated = treat),
-               "only one of")
+  expect_error(slope_params(sdmt ~ time | id, d, group = case),
+               "`group` is supplied but comparator = \"none\"")
+  expect_error(slope_params(sdmt ~ time | id, d, comparator = "healthy"),
+               "comparator = \"healthy\" needs `group`")
+  expect_error(slope_params(sdmt ~ time | id, d, comparator = "treated"),
+               "comparator = \"treated\" needs `group`")
+  expect_error(slope_params(sdmt ~ time | id, d, comparator = "control", group = case),
+               "should be one of")
 })
 
 test_that("the formula must name a subject identifier", {
@@ -170,9 +175,9 @@ test_that("the formula must name a subject identifier", {
 test_that("a group variable must be binary and 0/1 coded", {
   d <- load_paper_data("slpower2")
   d$bad <- d$case + 1                      # coded 1/2
-  expect_error(slope_params(sdmt ~ time | id, d, healthy = bad), "0/1")
+  expect_error(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = bad), "0/1")
   d$constant <- 1L
-  expect_error(slope_params(sdmt ~ time | id, d, healthy = constant),
+  expect_error(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = constant),
                "two distinct values")
 })
 
@@ -265,14 +270,14 @@ test_that("a Date or POSIXct time column fits, on an axis of days", {
 })
 
 test_that("a logical group column is taken as coded, not guessed at", {
-  # TRUE/FALSE is the natural thing to hand `treated =` or `healthy =`, and
+  # TRUE/FALSE is the natural thing to hand `group =`, and
   # unlike the c("case", "control") factor of test-review-regressions.R there is
   # nothing to determine: TRUE is 1. So it needs no recoding by the user, and
   # must reproduce the numeric fit exactly rather than approximately.
   d <- load_paper_data("slpower3")
   numeric_fit <- paper_fit("slpower3")
   d$trt <- d$treat == 1
-  logical_fit <- slope_params(sdmt ~ time | id, d, treated = trt)
+  logical_fit <- slope_params(sdmt ~ time | id, d, comparator = "treated", group = trt)
   expect_equal(logical_fit$slope, numeric_fit$slope, tolerance = 1e-12)
   expect_equal(logical_fit$slope_comparator, numeric_fit$slope_comparator,
                tolerance = 1e-12)
@@ -282,7 +287,7 @@ test_that("a logical group column is taken as coded, not guessed at", {
   # the control-arm slope becomes the experimental one and back again. If TRUE
   # were mapped to 0 this would be the identity instead.
   d$trt_flipped <- d$treat == 0
-  flipped <- slope_params(sdmt ~ time | id, d, treated = trt_flipped)
+  flipped <- slope_params(sdmt ~ time | id, d, comparator = "treated", group = trt_flipped)
   expect_equal(flipped$slope, numeric_fit$slope_comparator, tolerance = 1e-12)
   expect_equal(flipped$slope_comparator, numeric_fit$slope, tolerance = 1e-12)
 })
@@ -334,16 +339,16 @@ test_that("a group column of an unsupported type is rejected on the type", {
 })
 
 test_that("a group argument that evaluates to NULL is reported, not ignored", {
-  # `healthy = g` where g is NULL in the caller's environment. substitute() sees
-  # the symbol and so selects the healthy scenario; the NULL only surfaces when
+  # `group = g` where g is NULL in the caller's environment. substitute() sees
+  # the symbol and so takes a group as given; the NULL only surfaces when
   # the column is evaluated. Quietly falling back to comparator = "none" there
   # would answer a different question from the one asked -- powering toward a
   # slope of zero rather than toward the controls' slope -- and would do it
   # without saying so.
   d <- load_paper_data("slpower1")
   g <- NULL
-  expect_error(slope_params(sdmt ~ visit | id, d, healthy = g),
-               "`healthy` evaluated to NULL")
+  expect_error(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = g),
+               "`group` evaluated to NULL")
 })
 
 # --- per-subject time re-origining ------------------------------------------
@@ -358,7 +363,7 @@ test_that("time is shifted so each subject starts at zero", {
 
 test_that("the re-origining emits a message, as Stata warns", {
   d <- load_paper_data("slpower2")
-  expect_message(slope_params(sdmt ~ time | id, d, healthy = case),
+  expect_message(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case),
                  "shifted")
 })
 
@@ -366,7 +371,7 @@ test_that('origin = "none" leaves time alone and changes the fit', {
   d <- load_paper_data("slpower2")
   shifted   <- paper_fit("slpower2")
   unshifted <- suppressMessages(
-    slope_params(sdmt ~ time | id, d, healthy = case, origin = "none"))
+    slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case, origin = "none"))
   expect_false(unshifted$time_shifted)
   # the slope is barely affected, but the intercept variance is not comparable
   expect_equal(unshifted$slope, shifted$slope, tolerance = 0.05)
@@ -387,7 +392,7 @@ test_that("an explicit unit change rescales the slope proportionally", {
 test_that("common_variance is ignored with a warning outside the healthy case", {
   d <- load_paper_data("slpower1")
   expect_warning(slope_params(sdmt ~ time | id, d, common_variance = TRUE),
-                 "only when `healthy`")
+                 "only when comparator = \"healthy\"")
 })
 
 test_that("common_variance does not change the case estimates", {
@@ -396,7 +401,7 @@ test_that("common_variance does not change the case estimates", {
   d <- load_paper_data("slpower2")
   full    <- paper_fit("slpower2")
   reduced <- suppressMessages(
-    slope_params(sdmt ~ time | id, d, healthy = case, common_variance = TRUE))
+    slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case, common_variance = TRUE))
   expect_true(reduced$common_variance)
   expect_false(full$common_variance)
   expect_equal(reduced$slope, full$slope, tolerance = 1e-5)
@@ -462,7 +467,7 @@ parallel_control_slopes <- rep(-0.5, 100)
 
 test_that("the healthy fit falls back to a reduced structure and says so", {
   d <- noiseless_controls(varying_control_slopes)
-  expect_message(p <- slope_params(sdmt ~ visit | id, d, healthy = case),
+  expect_message(p <- slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case),
                  "falling back to a random intercept only for controls")
   expect_true(p$common_variance)
 
@@ -470,7 +475,7 @@ test_that("the healthy fit falls back to a reduced structure and says so", {
   # outright -- the same model, reached by a different route -- not merely on a
   # similar one.
   forced <- suppressMessages(
-    slope_params(sdmt ~ visit | id, d, healthy = case, common_variance = TRUE))
+    slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case, common_variance = TRUE))
   expect_true(forced$common_variance)
   for (nm in c("slope", "slope_comparator", "sigma2_intercept", "sigma2_slope",
                "sigma_cov", "sigma2_residual")) {
@@ -486,7 +491,7 @@ test_that("common_variance = FALSE forbids the fallback and errors instead", {
   d <- noiseless_controls(varying_control_slopes)
   msgs <- character()
   err <- withCallingHandlers(
-    tryCatch(slope_params(sdmt ~ visit | id, d, healthy = case,
+    tryCatch(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case,
                           common_variance = FALSE),
              error = conditionMessage),
     message = function(m) {
@@ -504,7 +509,7 @@ test_that("a reduced structure that also fails is an error, not a third try", {
   d <- noiseless_controls(parallel_control_slopes)
   # Under the default the fallback is announced first and then fails: the
   # message is not a promise that the refit worked.
-  expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, healthy = case)),
+  expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case)),
                "the mixed model did not converge")
 
   # The same error is reached when the reduced structure was asked for outright,
@@ -512,7 +517,7 @@ test_that("a reduced structure that also fails is an error, not a third try", {
   # announce.
   msgs <- character()
   err <- withCallingHandlers(
-    tryCatch(slope_params(sdmt ~ visit | id, d, healthy = case,
+    tryCatch(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case,
                           common_variance = TRUE),
              error = conditionMessage),
     message = function(m) {
@@ -544,7 +549,7 @@ test_that("a comparator group of 1 subject is rejected, not silently fit", {
   sim <- merge(subj, data.frame(visit = 0:3))
   sim$sdmt <- sim$intercept + sim$slope * sim$visit + rnorm(nrow(sim), 0, 3)
   expect_error(
-    suppressMessages(slope_params(sdmt ~ visit | id, sim, healthy = case)),
+    suppressMessages(slope_params(sdmt ~ visit | id, sim, comparator = "healthy", group = case)),
     "at least 2 participants")
 })
 
@@ -556,7 +561,7 @@ test_that("small or unbalanced comparator groups warn but still fit", {
   sim <- merge(subj, data.frame(visit = 0:3))
   sim$sdmt <- sim$intercept + sim$slope * sim$visit + rnorm(nrow(sim), 0, 3)
   expect_warning(
-    suppressMessages(slope_params(sdmt ~ visit | id, sim, healthy = case)),
+    suppressMessages(slope_params(sdmt ~ visit | id, sim, comparator = "healthy", group = case)),
     "small or unbalanced")
 })
 
@@ -579,7 +584,7 @@ test_that("print.slope_params() flags a reduced random-effects structure", {
   # unaffected because CONTRACT.md sec 2 is why the retreat was allowed at all.
   d <- noiseless_controls(varying_control_slopes)
   p <- suppressMessages(
-    slope_params(sdmt ~ visit | id, d, healthy = case, common_variance = TRUE))
+    slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case, common_variance = TRUE))
   out <- capture.output(print(p))
   expect_true(any(grepl("reduced random-effects structure used for healthy controls",
                         out, fixed = TRUE)))

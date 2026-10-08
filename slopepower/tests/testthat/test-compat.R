@@ -223,7 +223,7 @@ test_that("slopepower() validates column names", {
 # slopepower.ado ever runs, and there is no numlist in R. The exception is the
 # integer requirement, which the port drops (CONTRACT.md 5.1) -- covered by the
 # last test in this section. test-stata-behaviour.R makes the same statements
-# about `visits` on trial_design(); these are about the wrapper's own guards,
+# about `visits` in the design validator; these are about the wrapper's own guards,
 # which sit on the other side of the interface and are reached by a different
 # argument in different units.
 

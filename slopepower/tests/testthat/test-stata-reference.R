@@ -405,8 +405,8 @@ test_that("with Stata's own variance components the arithmetic is exact", {
       p <- stata_manual_params(j$fits[i, , drop = FALSE])
       # Stata's own axis: the schedule as integers, no rescaling.
       visits <- c(0, as.numeric(strsplit(row$sched, "[[:space:]]+")[[1]]))
-      des <- suppressWarnings(trial_design(visits, stata_dropout(row)))
-      args <- list(params = p, design = des, alpha = row$alpha)
+      args <- list(params = p, visits = visits, dropout = stata_dropout(row),
+                   alpha = row$alpha)
       if (isTRUE(row$usetrt == 1)) args$target <- "observed"
       else if (nzchar(row$effin)) args$effectiveness <- as.numeric(row$effin)
       # No tryCatch. Every row reaching here survived the filter above, so both

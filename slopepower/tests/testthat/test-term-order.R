@@ -113,13 +113,13 @@ test_that("fixef_term is order-invariant where positional indexing is not", {
 
 test_that("results do not depend on column or row order of the data", {
   d <- load_paper_data("slpower2")
-  ref <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case))
+  ref <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case))
 
   rev_cols <- suppressMessages(
-    slope_params(sdmt ~ time | id, d[, rev(names(d)), drop = FALSE], healthy = case))
+    slope_params(sdmt ~ time | id, d[, rev(names(d)), drop = FALSE], comparator = "healthy", group = case))
   set.seed(42)
   shuffled <- suppressMessages(
-    slope_params(sdmt ~ time | id, d[sample(nrow(d)), , drop = FALSE], healthy = case))
+    slope_params(sdmt ~ time | id, d[sample(nrow(d)), , drop = FALSE], comparator = "healthy", group = case))
 
   for (got in list(rev_cols, shuffled)) {
     expect_equal(got$slope, ref$slope, tolerance = 1e-8)
@@ -139,15 +139,15 @@ test_that("a transformation of time is one term, but a covariate is rejected", {
   # One term, however written: the day axis rescaled inline must reproduce the
   # year-axis fit. (Only to 3 d.p. -- rescaling is exact algebraically but not
   # numerically, since a day axis leaves sigma^2_b around 1e-5.)
-  ref <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case))
-  inline <- suppressMessages(slope_params(sdmt ~ I(vdays / 365) | id, d, healthy = case))
+  ref <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case))
+  inline <- suppressMessages(slope_params(sdmt ~ I(vdays / 365) | id, d, comparator = "healthy", group = case))
   expect_equal(inline$slope, ref$slope, tolerance = 1e-3)
 
   # Two terms is always a mistake: `time + age` used to be evaluated as the
   # arithmetic sum and fitted as though it were the time variable, returning a
   # silently meaningless slope rather than an error.
-  expect_error(slope_params(sdmt ~ time + age | id, d, healthy = case),
+  expect_error(slope_params(sdmt ~ time + age | id, d, comparator = "healthy", group = case),
                "single time term")
-  expect_error(slope_params(sdmt ~ time * age | id, d, healthy = case),
+  expect_error(slope_params(sdmt ~ time * age | id, d, comparator = "healthy", group = case),
                "single time term")
 })

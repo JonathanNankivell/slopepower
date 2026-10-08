@@ -50,9 +50,9 @@ visit is \code{schedule[j]}}, so their last attended visit is the one before it
 --- \code{schedule[j - 1]}, or the implicit baseline at time 0 when \code{j} is 1.
 \code{dropouts[1]} therefore describes participants seen at baseline only, who
 contribute nothing to a slope; that alignment is the Stata original's, and
-\code{\link[=trial_design]{trial_design()}} prints both readings side by side. They are handled by the
-Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata original;
-see \code{\link[=trial_design]{trial_design()}}.}
+the result's \verb{$design} prints both readings side by side. They are handled
+by the Dawson and Lagakos (1991, 1993) pattern mixture, as in the Stata
+original; see the "Dropout" section of \code{\link[=slope_sample_size]{slope_sample_size()}}.}
 
 \item{scale}{Number of \code{time} units in one \code{schedule} unit. Defaults to 1.}
 
@@ -83,8 +83,8 @@ element with \code{schedule}, and the data type is declared with \code{obs}/\cod
 than by which grouping variable is supplied.
 }
 \details{
-New code should use \code{\link[=slope_params]{slope_params()}}, \code{\link[=trial_design]{trial_design()}} and then
-\code{\link[=slope_sample_size]{slope_sample_size()}} or \code{\link[=slope_power]{slope_power()}} directly. Those separate the two
+New code should use \code{\link[=slope_params]{slope_params()}} and then \code{\link[=slope_sample_size]{slope_sample_size()}} or
+\code{\link[=slope_power]{slope_power()}} directly. Those separate the two
 stages of the calculation, so the mixed model is fitted once and any number of
 designs evaluated against it; they express the visit schedule in real time
 rather than through the \code{scale} workaround; and they ask one question each,

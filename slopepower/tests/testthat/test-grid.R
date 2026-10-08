@@ -57,7 +57,7 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
     n = 450, effectiveness = 0.33))
 
   for (nm in names(table1_visits)) {
-    direct <- slope_power(p, trial_design(table1_visits[[nm]]),
+    direct <- slope_power(p, table1_visits[[nm]],
                           n = 450, effectiveness = 0.33)$power
     expect_equal(out$power[out$design == nm], direct, tolerance = 1e-12)
   }
@@ -81,12 +81,11 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
   for (nm in names(table1_visits)) {
     v <- table1_visits[[nm]]
     for (drop in list(NULL, rep(0.05, length(v) - 1L))) {
-      des <- suppressWarnings(trial_design(v, drop))
       out <- suppressWarnings(slope_power_grid(
         p, visits = list(only = v), dropout = list(only = drop),
         n = 450, effectiveness = 0.33, per_arm = FALSE))
       direct <- as.data.frame(suppressWarnings(
-        slope_power(p, des, n = 450, effectiveness = 0.33)))
+        slope_power(p, v, drop, n = 450, effectiveness = 0.33)))
       expect_equal(unlist(out[1L, shared]), unlist(direct[shared]),
                    tolerance = 0, info = nm)
     }
@@ -96,7 +95,7 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
   out <- slope_sample_size_grid(p, visits = list(only = c(0, 1, 2)),
                                 dropout = list(only = NULL), effectiveness = 0.33,
                                 per_arm = FALSE)
-  direct <- as.data.frame(slope_sample_size(p, trial_design(c(0, 1, 2)),
+  direct <- as.data.frame(slope_sample_size(p, c(0, 1, 2),
                                             effectiveness = 0.33))
   expect_equal(unlist(out[1L, shared]), unlist(direct[shared]), tolerance = 0)
 })
@@ -176,7 +175,7 @@ test_that("visits accounts for dropout, on either basis", {
   expect_equal(out$visits, 2 * arm$visits)
 
   # With dropout, a withdrawing participant still contributes the visits
-  # attended before doing so (trial_design()'s pattern mixture), so the
+  # attended before doing so (the pattern mixture), so the
   # anticipated total sits strictly below n * scheduled_visits.
   out2 <- suppressWarnings(slope_sample_size_grid(
     p, visits = list(extended = c(0, 1, 2, 5)),
@@ -203,7 +202,7 @@ test_that("slope_sample_size_grid() agrees with slope_sample_size() cell by cell
     power = 0.9, effectiveness = 0.33, per_arm = FALSE))
 
   for (nm in names(table1_visits)) {
-    direct <- slope_sample_size(p, trial_design(table1_visits[[nm]]),
+    direct <- slope_sample_size(p, table1_visits[[nm]],
                                 power = 0.9, effectiveness = 0.33)$n
     expect_equal(out$n[out$design == nm], direct)
   }
@@ -222,10 +221,9 @@ test_that("the two grids are inverses, design by design", {
                      dropout = list(`5pc` = dropout_rate(0.05)),
                      n = 450, effectiveness = 0.33))))
   for (i in seq_len(nrow(sizes))) {
-    des <- suppressWarnings(trial_design(
-      table1_visits[[sizes$design[i]]],
-      dropout = dropout_rate(0.05)$rate * diff(table1_visits[[sizes$design[i]]])))
-    back <- slope_power(p, des, n = sizes$n[i], effectiveness = 0.33)
+    v <- table1_visits[[sizes$design[i]]]
+    back <- suppressWarnings(slope_power(p, v, dropout = dropout_rate(0.05)$rate * diff(v),
+                                         n = sizes$n[i], effectiveness = 0.33))
     expect_gte(back$power, 0.8)
     expect_lt(back$power - 0.8, 0.005)
   }
@@ -255,7 +253,7 @@ test_that("a dropout vector of the wrong length for a design errors helpfully", 
 })
 
 test_that("slope_power_grid() collects the baseline-only warning once", {
-  # trial_design() warns per design; the grid should report once, not nine times
+  # The design validator warns per design; the grid should report once, not nine times
   w <- capture_warnings(slope_power_grid(
     paper_fit("slpower1"), visits = table1_visits,
     dropout = list(`10pc` = dropout_rate(0.10)),
@@ -322,14 +320,14 @@ test_that("a bare dropout vector or dropout_rate() is labelled by its contents",
   expect_identical(per$dropout, "0.1 per 12")
   expect_equal(per$dropout_total, 0.025)
 
-  # `type` is carried into the label only when it is not the default: a linear
-  # rate keeps the label above unchanged, but a cumulative one at the same
-  # rate and per is a different assumption and would otherwise key the same
-  # row.
-  cum <- suppressWarnings(slope_power_grid(
-    p, visits = list(annual = 0:3), dropout = dropout_rate(0.05, type = "cumulative"),
+  # `pattern` is carried into the label only when it is not the default: a
+  # linear rate keeps the label above unchanged, but a geometric one at the
+  # same rate and per is a different assumption and would otherwise key the
+  # same row.
+  geo <- suppressWarnings(slope_power_grid(
+    p, visits = list(annual = 0:3), dropout = dropout_rate(0.05, pattern = "geometric"),
     n = 450, effectiveness = 0.33))
-  expect_identical(unique(cum$dropout), "0.05 per 1, cumulative")
+  expect_identical(unique(geo$dropout), "0.05 per 1, geometric")
 })
 
 test_that("a wholly unnamed list is labelled element by element and deduped", {
@@ -447,7 +445,7 @@ test_that("effectiveness, power and alpha each become an axis when given several
   expect_equal(out$alpha, rep(0.05, 4L))
   # Declared order nests the axes: power varies slower than effectiveness.
   for (i in seq_len(nrow(out))) {
-    direct <- slope_sample_size(p, trial_design(c(0, 1, 2)),
+    direct <- slope_sample_size(p, c(0, 1, 2),
                                 power = out$power[i],
                                 effectiveness = out$effectiveness[i])
     expect_equal(out$n[i], direct$n, tolerance = 0)
@@ -469,7 +467,7 @@ test_that("slope_power_grid() varies n and alpha the same way", {
 
   for (i in seq_len(nrow(out))) {
     v <- if (out$design[i] == "annual") c(0, 1, 2) else seq(0, 2, 0.5)
-    direct <- slope_power(p, trial_design(v), n = out$n[i], alpha = out$alpha[i],
+    direct <- slope_power(p, v, n = out$n[i], alpha = out$alpha[i],
                           effectiveness = 0.33)
     expect_equal(out$power[i], direct$power, tolerance = 0)
   }
@@ -554,4 +552,24 @@ test_that("the baseline-dropout warning counts designs, not cells", {
     effectiveness = list(a = 0.2, b = 0.3, c = 0.4)))
   expect_length(w, 1L)
   expect_match(w, "in 1 of 1 combinations", fixed = TRUE)
+})
+
+test_that("dropout_scale applies to every numeric vector in a grid's dropout list", {
+  p <- ref_params()
+  cum <- slope_sample_size_grid(
+    p, visits = list(a = 0:3, b = c(0, 1, 3, 5)),
+    dropout = list(x = c(0, 0.05, 0.15), y = c(0, 0.1, 0.1)),
+    dropout_scale = "cumulative", effectiveness = 0.33)
+  inc <- slope_sample_size_grid(
+    p, visits = list(a = 0:3, b = c(0, 1, 3, 5)),
+    dropout = list(x = c(0, 0.05, 0.10), y = c(0, 0.1, 0)),
+    effectiveness = 0.33)
+  expect_identical(cum$n, inc$n)
+  expect_equal(cum$dropout_total, inc$dropout_total)
+
+  # A rate is incremental by construction, so it cannot sit in a cumulative list.
+  expect_error(
+    slope_power_grid(p, visits = 0:3, dropout = list(r = dropout_rate(0.05)),
+                     dropout_scale = "cumulative", n = 400),
+    "cannot be combined with dropout_scale")
 })

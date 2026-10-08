@@ -146,9 +146,9 @@ stata_fit <- function(row) {
   fit <- suppressMessages(suppressWarnings(switch(
     row$model,
     obs_nocont = slope_params(sdmt ~ time | id, d),
-    obs_cases  = slope_params(sdmt ~ time | id, d, healthy = case,
+    obs_cases  = slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                               common_variance = cv),
-    rct        = slope_params(sdmt ~ time | id, d, treated = treat),
+    rct        = slope_params(sdmt ~ time | id, d, comparator = "treated", group = treat),
     stop("unknown model: ", row$model)
   )))
 
@@ -174,10 +174,10 @@ stata_replay <- function(row) {
   out <- tryCatch({
     p <- stata_fit(row)
     # The baseline-only-dropout warning fires on every "front-loaded" row of
-    # grid 1 by design; it is the behaviour under test, not a surprise.
-    des <- suppressWarnings(trial_design(stata_visits(row), stata_dropout(row)))
-
-    args <- list(params = p, design = des, alpha = row$alpha)
+    # grid 1 by design; it is the behaviour under test, not a surprise, and is
+    # suppressed with the rest below.
+    args <- list(params = p, visits = stata_visits(row), dropout = stata_dropout(row),
+                 alpha = row$alpha)
     if (isTRUE(row$usetrt == 1)) {
       args$target <- "observed"
     } else if (nzchar(row$effin)) {

@@ -9,8 +9,8 @@
 # ---------------------------------------------------------------------------
 # dropout specifications
 #
-# `dropout_rate()` itself lives in design.R, beside the `trial_design()`
-# argument it is an alternative spelling of. Only the grid's own handling of a
+# `dropout_rate()` itself lives in design.R, beside the dropout validators it
+# is an alternative spelling for. Only the grid's own handling of a
 # specification -- naming the failing cell, and the length rule that a grid
 # makes newly relevant -- is here.
 # ---------------------------------------------------------------------------
@@ -19,22 +19,36 @@
 #'
 #' The grid's wrapper around `expand_dropout_rate()` (design.R): it adds the
 #' cell label to any message, and applies the length rule to a bare numeric
-#' vector *before* `trial_design()` sees it, because a length mismatch means
-#' something specific in a grid -- a fixed vector paired with a schedule it was
-#' not written for -- that a single design cannot exhibit.
+#' vector *before* [build_trial_design()] sees it, because a length mismatch
+#' means something specific in a grid -- a fixed vector paired with a schedule
+#' it was not written for -- that a single design cannot exhibit.
 #'
-#' @param spec `NULL`, a numeric vector of incremental proportions, or a
-#'   `dropout_rate` object.
+#' A numeric vector is returned as given, still on `dropout_scale`; a rate is
+#' returned expanded, and so always incremental -- which is why a rate under
+#' `dropout_scale = "cumulative"` is refused here, as [validate_dropout()]
+#' refuses it for a single design.
+#'
+#' @param spec `NULL`, a numeric vector of proportions, or a `dropout_rate`
+#'   object.
 #' @param visits The visit times of the design being evaluated.
+#' @param dropout_scale How a numeric `spec` is written.
 #' @param label The grid label of the dropout specification, named in every
 #'   error message so the failing cell can be identified.
 #' @noRd
-expand_dropout <- function(spec, visits, context, label) {
+expand_dropout <- function(spec, visits, dropout_scale, context, label) {
   where <- sprintf(" (dropout = \"%s\")", label)
 
   if (is.null(spec)) return(NULL)
 
   if (inherits(spec, "dropout_rate")) {
+    if (identical(dropout_scale, "cumulative")) {
+      stop(sprintf(paste0("%s%s: a dropout_rate() cannot be combined with dropout_scale = ",
+                          "\"cumulative\"; it expands to the proportion withdrawing within ",
+                          "each interval, which is already incremental. Drop the ",
+                          "`dropout_scale` argument, or supply the cumulative proportions ",
+                          "as numeric vectors."),
+                   context, where), call. = FALSE)
+    }
     return(expand_dropout_rate(spec, visits, context, where))
   }
 
@@ -132,12 +146,12 @@ label_visits <- function(x) if (is.numeric(x)) label_numeric(x) else "design"
 label_dropout <- function(x) {
   if (is.null(x)) return("none")
   if (inherits(x, "dropout_rate")) {
-    # `type` is carried into the label, like `per`, only when it is not the
+    # `pattern` is carried into the label, like `per`, only when it is not the
     # default: "linear" is what every existing rate label already means, so
-    # leaving it off keeps those labels unchanged, while a cumulative rate --
+    # leaving it off keeps those labels unchanged, while a geometric rate --
     # a different assumption from a linear one at the same rate and per --
     # would otherwise key the same row.
-    suffix <- if (identical(x$type, "cumulative")) ", cumulative" else ""
+    suffix <- if (identical(x$pattern, "geometric")) ", geometric" else ""
     return(sprintf("%s per %s%s", fmt_num(x$rate), fmt_num(x$per), suffix))
   }
   if (is.numeric(x)) return(label_numeric(x))
@@ -154,7 +168,7 @@ label_scalar <- function(x) if (is.numeric(x) && length(x) == 1L) fmt_num(x) els
 
 #' Wrap an error from one grid cell with the cell that produced it
 #'
-#' Shared by the `trial_design()` call and the `evaluate()` call in
+#' Shared by the `build_trial_design()` call and the `evaluate()` call in
 #' `grid_impl()`'s loops below, so a cell that fails either step is reported the
 #' same way: named, rather than surfacing whatever unqualified message the
 #' failing call happens to raise. The cell arrives as its coordinate --- one
@@ -219,7 +233,7 @@ grid_cells <- function(axes) {
 #' slowest, so a grid that varies nothing else lists its cells in exactly the
 #' order the visits x dropout loop always did.
 #' @noRd
-grid_axes <- function(visits, dropout, scalars, context) {
+grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
   visit_list <- as_visits_list(visits, context)
   drop_list  <- as_dropout_list(dropout, context)
   scalar_lists <- stats::setNames(
@@ -253,9 +267,10 @@ grid_axes <- function(visits, dropout, scalars, context) {
     for (dj in seq_along(drop_list)) {
       dname <- names(drop_list)[dj]
 
-      inc <- expand_dropout(drop_list[[dj]], v, context, dname)
+      spec <- drop_list[[dj]]
+      inc <- expand_dropout(spec, v, dropout_scale, context, dname)
 
-      # trial_design() warns when the first stratum attends baseline only. That is
+      # build_trial_design() warns when the first stratum attends baseline only. That is
       # correct and expected here -- it fires for most non-zero rates -- so it is
       # collected and reported once rather than once per design. Matched by
       # condition class, not message text, so a copy-edit of the warning's
@@ -264,7 +279,9 @@ grid_axes <- function(visits, dropout, scalars, context) {
       # named the same way a failure from `evaluate()` in grid_evaluate() is.
       designs[[design_index(di, dj)]] <- tryCatch(
         withCallingHandlers(
-          trial_design(v, inc),
+          build_trial_design(v, inc,
+                             if (inherits(spec, "dropout_rate")) "incremental" else dropout_scale,
+                             context),
           slopepower_baseline_dropout = function(w) {
             baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
             invokeRestart("muffleWarning")
@@ -341,7 +358,7 @@ grid_axes <- function(visits, dropout, scalars, context) {
 
 #' The expected number of visits one participant attends under a design
 #'
-#' Stratum `j` of the Dawson-Lagakos pattern mixture (see [trial_design()])
+#' Stratum `j` of the Dawson-Lagakos pattern mixture (see [slope_sample_size()])
 #' attends `visits[1:j]` and nothing after -- `j` visits -- and the
 #' completers, a proportion `1 - sum(dropout)`, attend all `length(visits)`.
 #' The expectation over strata is therefore a dropout-weighted mean of visit
@@ -445,8 +462,8 @@ grid_evaluate <- function(g, evaluate, context) {
 #' one display basis happens above this function, at the two plain grids'
 #' exported boundary -- see [basis_columns()] -- not inside it.
 #' @noRd
-grid_impl <- function(visits, dropout, scalars, evaluate, context) {
-  g <- grid_axes(visits, dropout, scalars, context)
+grid_impl <- function(visits, dropout, dropout_scale, scalars, evaluate, context) {
+  g <- grid_axes(visits, dropout, dropout_scale, scalars, context)
   res <- grid_evaluate(g, evaluate, context)
   as.data.frame(c(g$out, res), stringsAsFactors = FALSE)
 }
@@ -516,7 +533,8 @@ report_collected <- function(context, cells, k, tail) {
 #' numbers of visits. Use [dropout_rate()] to state the rate once and have it
 #' expanded correctly for each schedule. However the proportions are arrived at,
 #' each cell of the grid handles them exactly as [slope_power()] does, by the
-#' Dawson and Lagakos (1991, 1993) pattern mixture described in [trial_design()].
+#' Dawson and Lagakos (1991, 1993) pattern mixture described in the "Dropout"
+#' section of [slope_sample_size()].
 #'
 #' Use [slope_sample_size_grid()] for the converse table: the sample size each
 #' design needs to reach a target power.
@@ -524,8 +542,12 @@ report_collected <- function(context, cells, k, tail) {
 #' @param params A `slope_params` object.
 #' @param visits A numeric vector of visit times, or a named list of such vectors.
 #'   Each must begin at 0.
-#' @param dropout `NULL`, a numeric vector of incremental proportions, a
-#'   [dropout_rate()] object, or a named list mixing any of these.
+#' @param dropout `NULL`, a numeric vector of proportions, a [dropout_rate()]
+#'   object, or a named list mixing any of these.
+#' @param dropout_scale How every numeric vector in `dropout` is written:
+#'   `"incremental"` (the default) or `"cumulative"`, as in
+#'   [slope_sample_size()]. It applies to every vector in the list, and cannot
+#'   be `"cumulative"` if the list holds a [dropout_rate()].
 #' @param n Total number of participants. Required. A single value is held
 #'   constant across the grid; several make it another axis.
 #' @param effectiveness,alpha Passed to [slope_power()]. A single value is held
@@ -550,7 +572,7 @@ report_collected <- function(context, cells, k, tail) {
 #'   expected number of visits one participant attends -- `scheduled_visits`
 #'   itself when `dropout_total` is zero, less otherwise, since a participant
 #'   who withdraws still contributes the visits attended before doing so (see
-#'   [trial_design()]'s "How dropout enters the calculation"). Cells are
+#'   the "Dropout" section of [slope_sample_size()]). Cells are
 #'   listed with `design` varying slowest, then `dropout`, then any further
 #'   axes in the order the arguments are declared above.
 #'
@@ -605,7 +627,8 @@ report_collected <- function(context, cells, k, tail) {
 #' # Case/healthy-control comparator: two cases and two healthy controls, a
 #' # subset of `slpower2` whose visits are calendar dates converted to years.
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
-#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+#'                       comparator = "healthy", group = case)
 #' slope_power_grid(
 #'   pars2, n = 40, effectiveness = 0.33,
 #'   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
@@ -616,7 +639,8 @@ report_collected <- function(context, cells, k, tail) {
 #' # only the trial's original two follow-up visits against a denser one, at
 #' # the effect size the trial actually found, fitted to all one hundred and
 #' # fifty participants of `slpower3`.
-#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+#'                       comparator = "treated", group = treat)
 #' slope_power_grid(
 #'   pars3, n = 396, target = "observed",
 #'   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
@@ -624,11 +648,12 @@ report_collected <- function(context, cells, k, tail) {
 #' )
 #'
 #' @seealso [slope_power()], [slope_sample_size_grid()], [dropout_rate()],
-#'   [slope_sample_size_grid_boot()] for a bootstrapped interval around the
-#'   converse table -- the sample size each design needs
+#'   [slope_power_grid_boot()] for a bootstrapped interval around every cell
+#'   of this table, sharing one set of replicates across the whole grid
 #' @export
-slope_power_grid <- function(params, visits, dropout = NULL, n,
-                             effectiveness = 0.25,
+slope_power_grid <- function(params, visits, dropout = NULL,
+                             dropout_scale = c("incremental", "cumulative"),
+                             n, effectiveness = 0.25,
                              target = c("effectiveness", "observed"),
                              alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power_grid()"
@@ -645,8 +670,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
   check_target_effectiveness(target, !missing(effectiveness), context)
 
   finish_grid(
-    grid_stage_two(params, visits, dropout, "n", n, effectiveness, target, alpha,
-                   slope_power, context),
+    grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "n", n,
+                   effectiveness, target, alpha, context),
     per_arm, context)
 }
 
@@ -658,8 +683,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #' this is the same exploration read the other way round.
 #'
 #' Dropout is handled cell by cell exactly as in [slope_sample_size()], by the
-#' Dawson and Lagakos (1991, 1993) pattern mixture described in [trial_design()].
-#' Use [dropout_rate()] rather than a fixed vector when the schedules being
+#' Dawson and Lagakos (1991, 1993) pattern mixture described in its "Dropout"
+#' section. Use [dropout_rate()] rather than a fixed vector when the schedules being
 #' compared have different numbers of visits.
 #'
 #' @inheritParams slope_power_grid
@@ -720,7 +745,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #' # Case/healthy-control comparator: two cases and two healthy controls, a
 #' # subset of `slpower2` whose visits are calendar dates converted to years.
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
-#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+#'                       comparator = "healthy", group = case)
 #' slope_sample_size_grid(
 #'   pars2, power = 0.8, effectiveness = 0.33,
 #'   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
@@ -731,7 +757,8 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #' # to detect the same effect the trial actually found, comparing its
 #' # original visit schedule against a denser one, fitted to all one hundred
 #' # and fifty participants of `slpower3`.
-#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
+#'                       comparator = "treated", group = treat)
 #' slope_sample_size_grid(
 #'   pars3, power = 0.8, target = "observed",
 #'   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
@@ -743,8 +770,9 @@ slope_power_grid <- function(params, visits, dropout = NULL, n,
 #'   around every cell of this table, sharing one set of replicates across
 #'   the whole grid
 #' @export
-slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
-                                   effectiveness = 0.25,
+slope_sample_size_grid <- function(params, visits, dropout = NULL,
+                                   dropout_scale = c("incremental", "cumulative"),
+                                   power = 0.8, effectiveness = 0.25,
                                    target = c("effectiveness", "observed"),
                                    alpha = 0.05, per_arm = TRUE) {
   context <- "slope_sample_size_grid()"
@@ -752,8 +780,8 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
   check_target_effectiveness(target, !missing(effectiveness), context)
 
   finish_grid(
-    grid_stage_two(params, visits, dropout, "power", power, effectiveness, target, alpha,
-                   slope_sample_size, context),
+    grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "power", power,
+                   effectiveness, target, alpha, context),
     per_arm, context)
 }
 
@@ -761,20 +789,19 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL, power = 0.8,
 #'
 #' [slope_power_grid()] and [slope_sample_size_grid()] differ only in which
 #' argument holds the value they hold fixed across the grid (`n` vs `power`)
-#' and which stage-two function is re-solved per cell; everything else --
+#' and so which stage-two calculation is re-solved per cell; everything else --
 #' deciding whether `effectiveness` is an axis, and the call to `grid_impl()`
-#' -- is identical, so both call through here. The same shape as
-#' `bootstrap_stage_two()` in bootstrap.R, for the same reason.
+#' -- is identical, so both call through here.
 #'
 #' `fixed_name`/`fixed_value` rather than a pre-built one-element list: the
 #' name comes from a literal at each call site, so `stats::setNames()` here
 #' keeps that pairing in one place rather than repeating `list(n = n)` and
 #' `list(power = power)` beside two otherwise-identical blocks.
 #' @noRd
-grid_stage_two <- function(params, visits, dropout, fixed_name, fixed_value,
-                           effectiveness, target, alpha, fn, context) {
-  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha, fn)
-  grid_impl(visits, dropout, spec$scalars, spec$evaluate, context)
+grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
+                           fixed_value, effectiveness, target, alpha, context) {
+  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha)
+  grid_impl(visits, dropout, dropout_scale, spec$scalars, spec$evaluate, context)
 }
 
 #' Which stage-two arguments are grid axes, and how a cell is priced
@@ -793,9 +820,20 @@ grid_stage_two <- function(params, visits, dropout, fixed_name, fixed_value,
 #' axis, not an error. `named` and the per-level `tte` collapsing in the
 #' bootstrap grid are derived from the axis set too, so the two tables would
 #' have disagreed about their own shape.
+#'
+#' `fixed_name` picks the calculation: holding `n` fixed is [slope_power()]'s,
+#' holding `power` fixed is [slope_sample_size()]'s. Each cell is solved by the
+#' body of that function, against a design the grid has already built, and
+#' reports any failure under that function's name, as the cell's message always
+#' has.
 #' @noRd
 grid_stage_two_spec <- function(params, fixed_name, fixed_value,
-                                effectiveness, target, alpha, fn) {
+                                effectiveness, target, alpha) {
+  solver <- if (identical(fixed_name, "n")) {
+    list(fn = power_result, context = "slope_power()")
+  } else {
+    list(fn = sample_size_result, context = "slope_sample_size()")
+  }
   # maybe_add_effectiveness() decides whether `effectiveness` belongs in the
   # call at all -- it must not be passed under target = "observed" -- which here
   # is the same question as whether it is an axis of the grid.
@@ -805,6 +843,7 @@ grid_stage_two_spec <- function(params, fixed_name, fixed_value,
 
   list(scalars = scalars,
        evaluate = function(des, args) {
-         do.call(fn, c(list(params = params, design = des, target = target), args))
+         do.call(solver$fn, c(list(params = params, design = des, target = target,
+                                   per_arm = TRUE, context = solver$context), args))
        })
 }

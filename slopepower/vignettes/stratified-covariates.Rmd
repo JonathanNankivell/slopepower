@@ -82,13 +82,13 @@ with(trial[first, ], table(stratum = interaction(age_group, sex), treat))
 
 ## Stage one: unadjusted and adjusted
 
-The previous trial had a treated arm, so we use the `treated` model, which
+The previous trial had a treated arm, so we use the `comparator = "treated"` model, which
 gives one intercept and a separate slope for each arm. First we fit it without
 covariates, and then adjusted for the two stratification factors:
 
 ```{r fit}
-unadj <- slope_params(sdmt ~ visit | id, trial, treated = treat)
-adj   <- slope_params(sdmt ~ visit | id, trial, treated = treat,
+unadj <- slope_params(sdmt ~ visit | id, trial, comparator = "treated", group = treat)
+adj   <- slope_params(sdmt ~ visit | id, trial, comparator = "treated", group = treat,
                       covariates = ~ age_group + sex)
 adj
 ```
@@ -116,7 +116,7 @@ To see which part of the adjustment does the work, we also fit a version that
 adjusts the baseline level only:
 
 ```{r compare}
-base_only <- slope_params(sdmt ~ visit | id, trial, treated = treat,
+base_only <- slope_params(sdmt ~ visit | id, trial, comparator = "treated", group = treat,
                           covariates = ~ age_group + sex, covariate_time = FALSE)
 
 pick <- function(p) unlist(p[c("slope", "slope_comparator", "sigma2_intercept",
@@ -146,10 +146,8 @@ The new trial runs for three years with annual visits and aims to slow decline
 by 30%:
 
 ```{r design}
-design <- trial_design(c(0, 1, 2, 3))
-
 sizes <- lapply(list(unadjusted = unadj, baseline_only = base_only, adjusted = adj),
-                slope_sample_size, design = design, effectiveness = 0.3)
+                slope_sample_size, visits = c(0, 1, 2, 3), effectiveness = 0.3)
 data.frame(n_per_arm = vapply(sizes, `[[`, 1, "n_per_arm"),
            var_tte   = vapply(sizes, `[[`, 1, "var_tte"))
 ```
@@ -199,10 +197,10 @@ for an analysis it should not be running.
   under `effectiveness` is a proportion of that slope. If the new trial will
   recruit a noticeably older or more male population, its average control-arm
   slope, and so its target effect, will differ.
-* **Uncertainty.** `slope_bootstrap()` refits the adjusted model in every
-  replicate, so a bootstrap interval for the adjusted sample size needs no
-  extra arguments:
-  `slope_bootstrap(slope_sample_size(adj, design, effectiveness = 0.3), R = 2000)`.
+* **Uncertainty.** `slope_sample_size_boot()` refits the adjusted model in
+  every replicate, so a bootstrap interval for the adjusted sample size needs
+  no extra arguments:
+  `slope_sample_size_boot(adj, c(0, 1, 2, 3), effectiveness = 0.3, R = 2000)`.
 * **Small strata.** A factor level that a bootstrap resample leaves out is
   dropped from that refit rather than making it fail. With very small strata,
   the adjustment will vary from one replicate to the next.

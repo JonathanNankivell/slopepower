@@ -4,14 +4,14 @@
 # one set of resampled replicates rather than being bootstrapped
 # independently, because the resampling scheme depends only on the stage-one
 # `params`, never on the design being priced. These tests exist to pin that
-# sharing -- a one-cell grid must reproduce slope_bootstrap() exactly, and a
+# sharing -- a one-cell grid must reproduce slope_sample_size_boot() exactly, and a
 # many-cell grid must draw the same replicates as a one-cell one at the same
 # seed -- as much as to test the table itself.
 #
 # R is kept small throughout, as in test-bootstrap.R: these test the
 # machinery, not the coverage.
 
-# Ten subjects, a small model that fits quickly and (at type = "bca") needs
+# Ten subjects, a small model that fits quickly and (at ci_method = "bca") needs
 # only ten leave-one-subject-out refits rather than slpower1's two hundred.
 # Built on demand, not at load time, so it is not paid for by every other
 # test file.
@@ -36,17 +36,17 @@ small_treated_fit <- function() {
   subj$b <- subj$b + 0.8 * subj$arm
   d <- merge(subj, data.frame(visit = 0:3))
   d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
-  slope_params(y ~ visit | id, d, treated = arm)
+  slope_params(y ~ visit | id, d, comparator = "treated", group = arm)
 }
 
-# --- equivalence to slope_bootstrap() ---------------------------------------
+# --- equivalence to the single-design bootstraps -----------------------------
 
-test_that("a one-cell grid reproduces slope_bootstrap() exactly, at the same seed", {
+test_that("a one-cell grid reproduces slope_sample_size_boot() exactly, at the same seed", {
   pars <- small_fit()
   design <- c(0, 1, 2, 3)
 
-  one <- suppressWarnings(slope_bootstrap(
-    slope_sample_size(pars, design, effectiveness = 0.33), R = 12, seed = 2))
+  one <- suppressWarnings(slope_sample_size_boot(
+    pars, design, effectiveness = 0.33, R = 12, seed = 2))
   grid <- suppressWarnings(slope_sample_size_grid_boot(
     pars, visits = design, effectiveness = 0.33, R = 12, seed = 2))
 
@@ -55,7 +55,7 @@ test_that("a one-cell grid reproduces slope_bootstrap() exactly, at the same see
   expect_equal(grid$n_mean, one$boot_mean)
   expect_equal(grid$n_sd, one$boot_sd)
   expect_equal(grid$n_failed, one$n_failed)
-  expect_equal(grid$ci_type, one$type)
+  expect_equal(grid$ci_method, one$ci_method)
 
   # The slope block -- built once for the whole grid -- must agree with the
   # single result's own slope summary too, since both are the same
@@ -121,7 +121,7 @@ test_that("slope_sample_size_grid_boot() returns one row per combination, with t
   expect_equal(nrow(out), 4L)
   expect_true(all(c("n_mean", "n_sd", "n_lower", "n_upper",
                     "tte_mean", "tte_sd", "tte_lower", "tte_upper",
-                    "tte_ci_type", "ci_type", "n_failed") %in% names(out)))
+                    "tte_ci_method", "ci_method", "n_failed") %in% names(out)))
 })
 
 test_that("a bootstrapped `n` interval is always widened to even sizes", {
@@ -135,11 +135,11 @@ test_that("a bootstrapped `n` interval is always widened to even sizes", {
   expect_true(all(out$n_upper %% 2 == 0))
 })
 
-test_that("`type = \"percentile\"` is honoured cell by cell, without a jackknife", {
+test_that("`ci_method = \"percentile\"` is honoured cell by cell, without a jackknife", {
   pars <- small_fit()
   out <- slope_sample_size_grid_boot(pars, visits = c(0, 1, 2, 3), effectiveness = 0.33,
-                                     R = 6, seed = 1, type = "percentile")
-  expect_true(all(out$ci_type == "percentile"))
+                                     R = 6, seed = 1, ci_method = "percentile")
+  expect_true(all(out$ci_method == "percentile"))
 })
 
 test_that("the target treatment effect is constant across design and dropout, and varies with effectiveness", {
@@ -178,7 +178,7 @@ test_that("grid_boot_cell_stat() reports a cell as starved rather than erroring"
   grid_boot_cell_stat <- slopepower:::grid_boot_cell_stat
   # Only one non-NA value: too few to form any interval.
   res <- grid_boot_cell_stat(c(10, NA, NA, NA), function() c(9, 11, 10), observed = 10,
-                             type = "bca", probs = c(0.025, 0.975), context = "test",
+                             ci_method = "bca", probs = c(0.025, 0.975), context = "test",
                              what = "", statistic = "n")
   expect_true(res$starved)
   expect_true(is.na(res$mean))
@@ -186,7 +186,7 @@ test_that("grid_boot_cell_stat() reports a cell as starved rather than erroring"
   expect_equal(res$n_failed, 3L)
 })
 
-test_that("too few refits succeeding aborts the whole grid, as it does for slope_bootstrap()", {
+test_that("too few refits succeeding aborts the whole grid, as it does for a single-design bootstrap", {
   # R = 1 means at most one replicate can possibly succeed -- fewer than the
   # two run_bootstrap() (bootstrap.R) itself requires for an interval -- so
   # this is deterministic however well-behaved the fit is, unlike forcing an
@@ -241,7 +241,7 @@ test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plu
                         lines, fixed = TRUE)))
 
   # A clean run (no refit failures, no starved cells) still reports both
-  # notes, per the convention set for slope_bootstrap()'s own print method.
+  # notes, per the convention set for print.slope_bootstrap().
   expect_true(any(grepl("bootstrap replicates failed to refit", lines)))
   expect_true(any(grepl("of replicates refit a slope on the opposite side", lines)))
 })
@@ -314,8 +314,8 @@ test_that("print.slope_sample_size_grid_boot() marks a starved cell and a fallen
     visits = list(a = c(0, 1, 2, 3), b = c(0, 1, 2))))
   out$n_lower[1L] <- NA_real_
   out$n_upper[1L] <- NA_real_
-  out$ci_type[1L] <- NA_character_
-  out$ci_type[2L] <- "percentile"
+  out$ci_method[1L] <- NA_character_
+  out$ci_method[2L] <- "percentile"
 
   # R wraps a wide frame into blocks; the interval is the last column of the
   # last of them, so its rows are the two lines under the header that ends in
@@ -342,11 +342,11 @@ test_that("print.slope_sample_size_grid_boot() marks a fallen-back tte interval 
   pars <- small_fit()
   out <- slope_sample_size_grid_boot(pars, visits = c(0, 1, 2, 3),
                                      effectiveness = c(0.25, 0.33), R = 5, seed = 6)
-  expect_true(all(out$ci_type == "bca"))
-  out$tte_ci_type[1L] <- "percentile"
+  expect_true(all(out$ci_method == "bca"))
+  out$tte_ci_method[1L] <- "percentile"
   out$tte_lower[2L] <- NA_real_
   out$tte_upper[2L] <- NA_real_
-  out$tte_ci_type[2L] <- NA_character_
+  out$tte_ci_method[2L] <- NA_character_
 
   lines <- capture.output(print(out))
   frame <- frame_block(lines)
@@ -497,8 +497,43 @@ test_that("slope_sample_size_grid_boot() collects the baseline-dropout warning o
   )
 })
 
-test_that("slope_bootstrap() points at slope_sample_size_grid_boot() for a grid result", {
+test_that("a one-cell power grid reproduces slope_power_boot() exactly, at the same seed", {
   pars <- small_fit()
-  g <- slope_sample_size_grid(pars, visits = c(0, 1, 2), effectiveness = 0.33)
-  expect_error(slope_bootstrap(g), "slope_sample_size_grid_boot")
+  design <- c(0, 1, 2, 3)
+
+  one <- suppressWarnings(slope_power_boot(
+    pars, design, n = 60, effectiveness = 0.33, R = 12, seed = 2))
+  grid <- suppressWarnings(slope_power_grid_boot(
+    pars, visits = design, n = 60, effectiveness = 0.33, R = 12, seed = 2))
+
+  expect_s3_class(grid, "slope_power_grid_boot")
+  expect_identical(attr(grid, "statistic"), "power")
+  expect_equal(grid$power, one$observed)
+  expect_equal(grid$power_lower, one$ci[1L])
+  expect_equal(grid$power_upper, one$ci[2L])
+  expect_equal(grid$power_mean, one$boot_mean)
+  expect_equal(grid$power_sd, one$boot_sd)
+  expect_equal(grid$n_failed, one$n_failed)
+  expect_equal(grid$ci_method, one$ci_method)
+  expect_equal(attr(grid, "slope_ci"), one$slope_ci)
+})
+
+test_that("a power grid bootstrap prints its power intervals and no rounding note", {
+  pars <- small_fit()
+  out <- suppressWarnings(slope_power_grid_boot(
+    pars, visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)), n = c(60, 80),
+    effectiveness = 0.33, R = 6, seed = 1))
+  expect_equal(nrow(out), 4L)
+  expect_true(all(c("power_mean", "power_sd", "power_lower", "power_upper",
+                    "tte_ci_method", "ci_method", "n_failed") %in% names(out)))
+  expect_false(any(c("n_mean", "n_lower") %in% names(out)))
+  printed <- capture.output(print(out))
+  expect_match(printed[1L], "<slope_power_grid_boot>", fixed = TRUE)
+  expect_true(any(grepl("power_ci", printed, fixed = TRUE)))
+  expect_false(any(grepl("rounded up", printed, fixed = TRUE)))
+  # Subsetting drops the class and the grid-wide summary, as for the
+  # sample-size grid.
+  expect_false(inherits(out[1:2, ], "slope_power_grid_boot"))
+  expect_null(attr(out[1:2, ], "R"))
+  expect_error(slope_power_grid_boot(pars, visits = c(0, 1, 2)), "`n` is required")
 })

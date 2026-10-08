@@ -53,13 +53,13 @@ test_that("slope_sigma() is nlme's marginal covariance for every structure", {
 
 test_that("the structure is matched under `healthy`, with per-group variances kept", {
   d <- load_paper_data("slpower2")
-  p <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  p <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                      correlation = corCAR1()))
   expect_matches_nlme(p, as.character(d$id[d$case == 1][1L]))
 
   # A shared visit grid, so visit-specific variances can be fitted too.
   d$visit <- stats::ave(d$time, d$id, FUN = seq_along) - 1
-  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, healthy = case,
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case,
                                      correlation = corCAR1(),
                                      weights = varIdent(form = ~ 1 | visit)))
   expect_matches_nlme(p, as.character(d$id[d$case == 1][1L]))
@@ -69,7 +69,7 @@ test_that("the structure is matched under `healthy`, with per-group variances ke
 
 test_that("the structure is matched under `treated`, on unequally spaced visits", {
   d <- load_paper_data("slpower3")
-  p <- slope_params(sdmt ~ visit | id, d, treated = treat, correlation = corSymm(),
+  p <- slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat, correlation = corSymm(),
                     weights = varIdent(form = ~ 1 | visit))
   expect_matches_nlme(p, "1")
   expect_equal(p$residual$times, c(0, 0.5, 2))
@@ -124,18 +124,30 @@ test_that("slope_params() refuses structures it cannot use, saying why", {
 
 test_that("corAR1() is refused on non-integer times, pointing to corCAR1()", {
   d <- load_paper_data("slpower3")
-  expect_error(slope_params(sdmt ~ visit | id, d, treated = treat, correlation = corAR1()),
+  expect_error(slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat, correlation = corAR1()),
                "corCAR1")
 })
 
 test_that("corSymm() and varIdent() need a shared visit schedule", {
   d <- load_paper_data("slpower2")   # visits recorded as dates
-  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                              correlation = corSymm())),
                "shared across participants")
-  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case,
+  expect_error(suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                              weights = varIdent(form = ~ 1 | time))),
                "shared across participants")
+})
+
+test_that("under `healthy`, varIdent() needs every visit time in each group", {
+  # Pooled over both groups every time is well attended; the cases alone have
+  # no visit 3, so their `case:3` variance does not exist.
+  d <- load_paper_data("slpower2")
+  d$visit <- stats::ave(d$time, d$id, FUN = seq_along) - 1
+  d <- d[!(d$case == 1 & d$visit == 3), ]
+  expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy",
+                                             group = case,
+                                             weights = varIdent(form = ~ 1 | visit))),
+               "Among the cases, time\\(s\\) 3 have fewer")
 })
 
 test_that("two measurements at one time within a participant are refused", {
@@ -168,7 +180,7 @@ test_that("dropout strata slice the structured covariance correctly", {
   p <- residual_fit("un")
   visits <- c(0, 1, 3)
   drop <- c(0, 0.2)
-  es <- slope_effect_size(p, trial_design(visits, dropout = drop))
+  es <- slope_effect_size(p, visits, dropout = drop)
   d <- p$slope
   manual <- sqrt((1 - sum(drop)) * d^2 / slope_var(p, visits) +
                  drop[2] * d^2 / slope_var(p, visits[1:2]))
@@ -267,6 +279,14 @@ test_that("a hand-edited residual field is re-checked before use", {
   p <- manual(correlation = corSymm(c(0.3, 0.2, 0.4)), times = 0:2)
   p$residual$times <- NULL
   expect_error(slope_var(p, 0:2), "`times` must be given exactly when")
+  # residual_cor() reads the coefficients by name, so unnamed ones are refused
+  # here rather than failing there, or dropping a nugget.
+  p <- manual(correlation = corCAR1(0.5))
+  p$residual$coef <- unname(p$residual$coef)
+  expect_error(slope_var(p, 0:2), "`coef` must be named `Phi`")
+  p <- manual(correlation = corExp(c(2, 0.3), nugget = TRUE))
+  p$residual$coef <- unname(p$residual$coef)
+  expect_error(slope_var(p, 0:2), "`coef` must be named `range`, or `range` and `nugget`")
 })
 
 test_that("an object without a residual field, from before it existed, still works", {

@@ -2,25 +2,28 @@
 % Please edit documentation in R/floor.R
 \name{print.slope_sample_size_floor}
 \alias{print.slope_sample_size_floor}
-\title{Print a sample-size floor}
+\alias{print.slope_power_ceiling}
+\title{Print a sample-size floor or power ceiling}
 \usage{
 \method{print}{slope_sample_size_floor}(x, ..., per_arm = NULL)
+
+\method{print}{slope_power_ceiling}(x, ..., per_arm = NULL)
 }
 \arguments{
-\item{x}{A \code{slope_sample_size_floor} object.}
+\item{x}{A \code{slope_sample_size_floor} or \code{slope_power_ceiling} object.}
 
 \item{...}{Ignored.}
 
 \item{per_arm}{Which basis to print \code{N} on: \code{TRUE} for participants per
 arm, \code{FALSE} for the trial total. Defaults to \code{NULL}, meaning "whatever
-\code{slope_sample_size_floor()} was called with" -- read from \code{x}'s
+the function that built \code{x} was called with" -- read from \code{x}'s
 \code{per_arm} attribute, or per arm if that is absent.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
-Print a sample-size floor
+Print a sample-size floor or power ceiling
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)

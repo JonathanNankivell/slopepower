@@ -25,7 +25,7 @@
 #' groups, so the fitted slope and every variance component would be taken from
 #' the wrong one. The numeric path has always been strict about this; the
 #' factor path used to trust alphabetical order, which made
-#' `healthy = <"case"/"control" column>` return the healthy controls' slope
+#' `group = <"case"/"control" column>` return the healthy controls' slope
 #' labelled as the cases'.
 #'
 #' @param meaning What "1" means for this column (e.g. `"case"` or
@@ -533,8 +533,7 @@ covariate_note <- function(covariates) {
                   if (!isTRUE(covariates$time)) "" else
                     if (length(covariates$columns) == 1L) " and its interaction with time"
                     else ", and their interactions with time")
-  cat("\n", paste(strwrap(text, width = 72L, initial = "Note: ", prefix = "      "),
-                  collapse = "\n"), "\n", sep = "")
+  cat_note(text)
   invisible()
 }
 
@@ -553,15 +552,17 @@ covariate_note <- function(covariates) {
 #'   study duration: fitting on a badly scaled axis (days over several years, say)
 #'   leaves the random-slope variance near zero and the REML optimiser converges
 #'   less precisely. There is no `scale()` argument as there is in Stata --
-#'   express `visits` in [trial_design()] in whatever units are used here.
+#'   express `visits` in stage two in whatever units are used here.
 #' @param data A data frame in long format, one row per measurement.
-#' @param healthy Optional bare column name identifying healthy controls, coded
-#'   `1` for cases (subjects with the disease) and `0` for healthy controls.
-#'   Looked up in `data` first, then in the calling environment.
-#'   Mutually exclusive with `treated`.
-#' @param treated Optional bare column name identifying the treated arm of a
-#'   previously conducted trial, coded `1` for treated and `0` for the control
-#'   arm. Looked up as for `healthy`. Mutually exclusive with `healthy`.
+#' @param comparator What, if anything, the untreated group in `data` is
+#'   compared with: `"none"` (the default), `"healthy"` for observational data
+#'   with healthy controls, or `"treated"` for data from a previous trial with
+#'   a treated arm. See Details.
+#' @param group Bare column name identifying the two groups, required unless
+#'   `comparator = "none"` and refused with it. Under `"healthy"`, coded `1`
+#'   for cases (subjects with the disease) and `0` for healthy controls; under
+#'   `"treated"`, `1` for the treated arm and `0` for the control arm. Looked
+#'   up in `data` first, then in the calling environment.
 #' @param origin `"subject"` (default) shifts each subject's time so their first
 #'   visit is time zero, reproducing the Stata command's behaviour and ensuring
 #'   the random intercept is estimated at baseline. `"none"` leaves time as
@@ -570,7 +571,8 @@ covariate_note <- function(covariates) {
 #'   controls. `NULL` (default) fits the full model and falls back automatically
 #'   if it fails to converge; `TRUE` forces the reduced structure (a random
 #'   intercept only, equivalent to the Stata `nocontvar` option); `FALSE` forces
-#'   the full structure and errors on failure. Ignored unless `healthy` is given.
+#'   the full structure and errors on failure. Ignored unless
+#'   `comparator = "healthy"`.
 #' @param na.action Applied to the assembled model frame. Defaults to
 #'   [stats::na.omit()].
 #' @param covariates Optional one-sided formula of baseline covariates to adjust
@@ -588,7 +590,7 @@ covariate_note <- function(covariates) {
 #'   how many visits each participant has. A column that does not vary between
 #'   participants (e.g. an unused factor level) is dropped. Every column is
 #'   centred at its mean over participants -- over the cases only when
-#'   `healthy` is given -- so `slope` is the slope of a participant with those
+#'   `comparator = "healthy"` -- so `slope` is the slope of a participant with those
 #'   average covariate values. The returned variance components are then the
 #'   *adjusted* ones, and the object records the adjustment in `$covariates`.
 #'   A covariate that is an exact linear combination of the group indicator or
@@ -617,20 +619,22 @@ covariate_note <- function(covariates) {
 #' @details
 #' Three scenarios are supported, matching paper section 2.3:
 #'
-#' * neither `healthy` nor `treated`: a single group of untreated subjects with
+#' * `comparator = "none"`: a single group of untreated subjects with
 #'   the disease. The target treatment effect will be measured toward a slope of
 #'   zero.
-#' * `healthy`: observational data containing both cases and healthy controls.
+#' * `comparator = "healthy"`: observational data containing both cases and
+#'   healthy controls.
 #'   The target effect will be measured toward the healthy-control slope.
-#' * `treated`: data from a previous trial. The observed treatment effect is
+#' * `comparator = "treated"`: data from a previous trial. The observed
+#'   treatment effect is
 #'   available via `target = "observed"` in [slope_sample_size()] and
 #'   [slope_power()].
 #'
 #' The returned variance components are always those of the **untreated / case**
-#' group. When `healthy` is supplied the controls contribute only their slope;
+#' group. Under `comparator = "healthy"` the controls contribute only their slope;
 #' their variance components are estimated and discarded, per paper section 2.3.
 #'
-#' Note that for the `healthy` scenario without covariates the model factorises
+#' Note that for the `"healthy"` scenario without covariates the model factorises
 #' exactly into two independent fits, one per group: the fixed effects
 #' `y ~ case * time` span the same column space as separate per-group intercepts
 #' and slopes, the random-effects blocks are independent, and the residual
@@ -663,12 +667,12 @@ covariate_note <- function(covariates) {
 #' number of variance parameters differ between the scenarios.
 #'
 #' \describe{
-#'   \item{Neither `healthy` nor `treated`}{
+#'   \item{`comparator = "none"`}{
 #'     \deqn{\mu(t) = \beta_0 + \beta_1 t}{mu(t) = b0 + b1 * t}
 #'     with one \eqn{G}{G} and one \eqn{\sigma^2_\epsilon}{sigma2_residual}. The
 #'     returned slope is \eqn{\beta_1}{b1}. Equivalent to
 #'     `nlme::lme(y ~ t, random = ~ t | id)`.}
-#'   \item{`healthy = g`, with \eqn{g_i = 1}{g[i] = 1} for cases}{
+#'   \item{`comparator = "healthy", group = g`, with \eqn{g_i = 1}{g[i] = 1} for cases}{
 #'     \deqn{\mu(t) = \beta_0 + \beta_g g_i + (\beta_1 + \beta_{1g} g_i) t}{
 #'           mu(t) = b0 + bg * g[i] + (b1 + b1g * g[i]) * t}
 #'     and, in addition, a **separate** \eqn{G}{G} and a **separate**
@@ -677,7 +681,7 @@ covariate_note <- function(covariates) {
 #'     \eqn{\beta_1}{b1}; the variance components returned are the cases'.
 #'     Without covariates the model factorises into two independent per-group
 #'     fits (see above).}
-#'   \item{`treated = z`, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
+#'   \item{`comparator = "treated", group = z`, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
 #'     \deqn{\mu(t) = \beta_0 + \beta_1 t + \beta_p (1 - z_i) t}{
 #'           mu(t) = b0 + b1 * t + bp * (1 - z[i]) * t}
 #'     with one \eqn{G}{G} and one
@@ -698,8 +702,8 @@ covariate_note <- function(covariates) {
 #'
 #' The design matrices above are fixed by the method and are not what you would
 #' write by hand in `lme4`. Both comparator models depart from the obvious
-#' `y ~ group * time + (time | id)`: the `treated` model drops the group main
-#' effect, and the `healthy` model gives each group its own residual variance,
+#' `y ~ group * time + (time | id)`: the `"treated"` model drops the group main
+#' effect, and the `"healthy"` model gives each group its own residual variance,
 #' which `lme4` cannot fit at all. Included, therefore:
 #'
 #' * one continuous, approximately Gaussian outcome;
@@ -710,7 +714,7 @@ covariate_note <- function(covariates) {
 #' * residuals independent between participants, and within a participant
 #'   either independent with a variance that is constant within a group (the
 #'   default) or structured through `correlation` and `weights`;
-#' * at most two groups, distinguished only by their slope (and, for `healthy`,
+#' * at most two groups, distinguished only by their slope (and, for `"healthy"`,
 #'   by their variance components).
 #'
 #' Not included, and not obtainable by any argument to this function:
@@ -747,11 +751,11 @@ covariate_note <- function(covariates) {
 #' unchanged, and the slope and variance components are extracted exactly as
 #' before -- they are now conditional on the covariates.
 #'
-#' Under `healthy` the covariates are centred at the mean of the **cases**, not
+#' Under `comparator = "healthy"` the covariates are centred at the mean of the **cases**, not
 #' of everyone, because the planned trial enrols cases: `slope` is the slope of
 #' a case with the cases' average covariate values, and `slope_comparator` that
 #' of a healthy control with the same values. Their difference does not depend
-#' on where the covariates are centred. Under `treated` both arms come from the
+#' on where the covariates are centred. Under `comparator = "treated"` both arms come from the
 #' trial population, so everyone is used.
 #'
 #' Two consequences. First, stage two then assumes the planned trial will be
@@ -760,7 +764,7 @@ covariate_note <- function(covariates) {
 #' the returned object's `$covariates` -- a list of the `columns` adjusted for
 #' and whether their interactions with `time` were included, or `NULL` -- and
 #' is printed with the parameters and with every stage-two result. Second,
-#' because the covariate coefficients are shared across groups, the `healthy`
+#' because the covariate coefficients are shared across groups, the `"healthy"`
 #' model no longer factorises into two independent fits, so `common_variance`
 #' can now move the cases' estimates slightly.
 #'
@@ -812,7 +816,7 @@ covariate_note <- function(covariates) {
 #'   at the visit times is identified, and that is the only thing stage two
 #'   uses, but the individual components printed are one point on a ridge of
 #'   equally good fits, and [slope_var_floor()] is refused.
-#' * Under `healthy` the correlation parameters are shared by cases and
+#' * Under `comparator = "healthy"` the correlation parameters are shared by cases and
 #'   controls -- `nlme` estimates one correlation structure per model -- while
 #'   the residual variances, and with `varIdent()` the per-visit variances, stay
 #'   separate per group. So the model no longer factorises into two per-group
@@ -836,23 +840,26 @@ covariate_note <- function(covariates) {
 #'   above, not the originals from `data`.
 #'
 #' @examples
-#' # Neither `healthy` nor `treated`: a single group of untreated subjects.
+#' # No comparator: a single group of untreated subjects.
 #' # Four of the two hundred participants of `slpower1`, kept small so the
 #' # example runs quickly -- see `slpower1` for the paper's fit on the full data.
 #' df <- slpower1[slpower1$id %in% 1:4, ]
 #' slope_params(sdmt ~ visit | id, data = df)
 #'
-#' # `healthy`: two cases and two healthy controls, a subset of `slpower2`.
+#' # comparator = "healthy": two cases and two healthy controls, a subset of
+#' # `slpower2`.
 #' # Visits are recorded as calendar dates there, so the time term converts
 #' # them to years.
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
-#' slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2, healthy = case)
+#' slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
+#'              comparator = "healthy", group = case)
 #'
-#' # `treated`: data from a completed trial, a subset of `slpower3`. Fitting the
+#' # comparator = "treated": data from a completed trial, a subset of
+#' # `slpower3`. Fitting the
 #' # random-effects structure shared by both arms needs more than a couple of
 #' # subjects per arm to converge, so this excerpt keeps six per arm.
 #' df3 <- slpower3[slpower3$id %in% c(1:6, 76:81), ]
-#' slope_params(sdmt ~ visit | id, data = df3, treated = treat)
+#' slope_params(sdmt ~ visit | id, data = df3, comparator = "treated", group = treat)
 #'
 #' # Adjusting for a baseline covariate (simulated here for illustration).
 #' df4 <- slpower1[slpower1$id %in% 1:20, ]
@@ -879,10 +886,11 @@ covariate_note <- function(covariates) {
 #'
 #' @seealso [slope_params_manual()] to supply parameters directly,
 #'   [slope_sample_size()] and [slope_power()] for stage two,
-#'   [slope_bootstrap()] for an interval around the fitted slope.
+#'   [slope_params_boot()] for an interval around the fitted slope.
 #' @export
 slope_params <- function(formula, data,
-                         healthy = NULL, treated = NULL,
+                         comparator = c("none", "healthy", "treated"),
+                         group = NULL,
                          origin = c("subject", "none"),
                          common_variance = NULL,
                          na.action = stats::na.omit,
@@ -890,11 +898,12 @@ slope_params <- function(formula, data,
                          correlation = NULL, weights = NULL) {
   context <- "slope_params()"
   cl <- match.call()
-  # `healthy`/`treated` are arguments of this call, so a symbol in them that is
+  # `group` is an argument of this call, so a symbol in it that is
   # not a column belongs to whoever wrote the call -- not to whoever built the
   # formula, which can be a different frame entirely (a wrapper passing its
   # own group vector alongside a formula made at top level).
   caller <- parent.frame()
+  comparator <- match.arg(comparator)
   origin <- match.arg(origin)
 
   data <- tryCatch(as.data.frame(data), error = function(e) {
@@ -923,31 +932,34 @@ slope_params <- function(formula, data,
     stop(sprintf("%s: the outcome must be numeric.", context), call. = FALSE)
   }
 
-  healthy_expr <- substitute(healthy)
-  treated_expr <- substitute(treated)
-  if (!is.null(healthy_expr) && !is.null(treated_expr)) {
-    stop(sprintf("%s: supply only one of `healthy` and `treated`, not both.", context),
-         call. = FALSE)
+  group_expr <- substitute(group)
+  if (identical(comparator, "none") && !is.null(group_expr)) {
+    stop(sprintf(paste0(
+      "%s: `group` is supplied but comparator = \"none\".\n  Set comparator = ",
+      "\"healthy\" (1 = case, 0 = healthy control) or \"treated\" (1 = treated, ",
+      "0 = control) to say what it identifies."), context), call. = FALSE)
   }
-
-  comparator <- if (!is.null(healthy_expr)) "healthy" else
-    if (!is.null(treated_expr)) "treated" else "none"
+  if (!identical(comparator, "none") && is.null(group_expr)) {
+    stop(sprintf("%s: comparator = \"%s\" needs `group`, the column identifying %s.",
+                 context, comparator,
+                 if (comparator == "healthy") "cases (1) and healthy controls (0)"
+                 else "the treated (1) and control (0) arms"), call. = FALSE)
+  }
 
   grp <- NULL
   if (comparator != "none") {
-    gexpr <- if (comparator == "healthy") healthy_expr else treated_expr
-    graw  <- eval_column(gexpr, data, caller, context, comparator)
-    grp   <- coerce_binary(graw, comparator, context,
+    graw  <- eval_column(group_expr, data, caller, context, "group")
+    grp   <- coerce_binary(graw, "group", context,
                            meaning = if (comparator == "healthy") "case" else "treated")
     if (length(grp) != length(y)) {
-      stop(sprintf("%s: `%s` has length %d but the data have %d rows.",
-                   context, comparator, length(grp), length(y)), call. = FALSE)
+      stop(sprintf("%s: `group` has length %d but the data have %d rows.",
+                   context, length(grp), length(y)), call. = FALSE)
     }
   }
 
   common_variance <- warn_unused_arg(
     common_variance, !is.null(common_variance) && comparator != "healthy", NULL,
-    "%s: `common_variance` applies only when `healthy` is supplied; ignoring it.",
+    "%s: `common_variance` applies only when comparator = \"healthy\"; ignoring it.",
     context)
 
   n <- length(y)
@@ -1011,7 +1023,10 @@ slope_params <- function(formula, data,
   }
   # On the times as fitted, after the origin shift: a visit grid is a set of
   # times since each participant's first visit.
-  grid <- if (!is.null(spec)) check_residual_data(spec, dat$sp_time, dat$sp_subject, context)
+  grid <- if (!is.null(spec)) {
+    check_residual_data(spec, dat$sp_time, dat$sp_subject, context,
+                        group = if (comparator == "healthy") dat$sp_case)
+  }
 
   if (comparator != "none") {
     if (length(unique(dat$sp_case)) != 2L) {

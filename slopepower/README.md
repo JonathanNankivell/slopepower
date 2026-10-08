@@ -113,12 +113,10 @@ library(slopepower)
 #   formula is  outcome ~ time | subject
 pars <- slope_params(sdmt ~ visit | id, data = mydata)
 
-# Stage 2 — describe the proposed trial.
-design <- trial_design(visits = c(0, 1, 2))          # baseline + two follow-ups
-
-# Then ask one of the two questions.
-slope_sample_size(pars, design, effectiveness = 0.33)             # how many people?
-slope_power(pars, design, n = 200, effectiveness = 0.33)          # what power at N = 200?
+# Stage 2 — describe the proposed trial and ask one of the two questions.
+visits <- c(0, 1, 2)                                              # baseline + two follow-ups
+slope_sample_size(pars, visits, effectiveness = 0.33)             # how many people?
+slope_power(pars, visits, n = 200, effectiveness = 0.33)          # what power at N = 200?
 ```
 
 The two are separate functions on purpose. They take different inputs, answer
@@ -139,9 +137,9 @@ Both objects carry `n` and `n_per_arm` regardless; the printed summary shows one
 of them at a time, per arm by default (`per_arm = TRUE`), and `print(x, per_arm =
 FALSE)` shows the trial total instead without recomputing anything.
 
-`design` may be a bare numeric vector of visit times instead of a `trial_design`
-object, so `slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)` also
-works.
+Every stage-two function — the two above, their grid and bootstrap versions,
+and `slope_effect_size()` — takes the proposed trial the same way, as its second
+to fourth arguments: `visits`, then `dropout` and `dropout_scale` (see below).
 
 ### Units of time
 
@@ -161,14 +159,15 @@ Three scenarios, matching §2.3 of the paper:
 
 ```r
 slope_params(y ~ t | id, data = d)                    # single untreated group; effect measured toward slope 0
-slope_params(y ~ t | id, data = d, healthy = case)    # observational: cases (1) vs healthy controls (0)
-slope_params(y ~ t | id, data = d, treated = treat)   # previous RCT: treated (1) vs control (0)
+slope_params(y ~ t | id, data = d, comparator = "healthy", group = case)    # observational: cases (1) vs healthy controls (0)
+slope_params(y ~ t | id, data = d, comparator = "treated", group = treat)   # previous RCT: treated (1) vs control (0)
 ```
 
-`healthy` and `treated` take bare column names and are mutually exclusive. With
-`treated`, `target = "observed"` targets the treatment effect actually observed
-in that trial (Stata's `usetrt`) instead of an `effectiveness` fraction of the
-slope difference.
+`group` takes a bare column name, and is required by `comparator = "healthy"` or
+`"treated"` and refused without one. With `comparator = "treated"`,
+`target = "observed"` targets the treatment effect actually observed in that
+trial (Stata's `usetrt`) instead of an `effectiveness` fraction of the slope
+difference.
 
 ### Dropout
 
@@ -176,16 +175,23 @@ slope difference.
 `visits[j]`**, one entry per follow-up visit:
 
 ```r
-trial_design(visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
-trial_design(visits = c(0, 1, 2, 5), dropout = c(0.05, 0.1, 0.2),
-             dropout_type = "cumulative")   # converted to incremental
-trial_design(visits = c(0, 1, 2, 3), dropout = dropout_rate(0.05))  # 5% per unit time
+slope_sample_size(pars, c(0, 1, 2, 5), dropout = c(0, 0, 0.1))
+slope_sample_size(pars, c(0, 1, 2, 5), dropout = c(0.05, 0.1, 0.2),
+                  dropout_scale = "cumulative")   # withdrawn by each visit
+slope_sample_size(pars, c(0, 1, 2, 3), dropout = dropout_rate(0.05))  # 5% per unit time
 ```
 
-`dropout_rate(rate, per = 1)` states a constant withdrawal rate once and lets
-`trial_design()` expand it to `(rate / per) * diff(visits)` — one proportion per
-interval, whatever the schedule. It yields incremental proportions by
-construction, so it cannot be combined with `dropout_type = "cumulative"`.
+`dropout_scale` says how a numeric vector is written: `"incremental"` (the
+default), as above, or `"cumulative"`, where element `j` is the proportion who
+have withdrawn by `visits[j + 1]`.
+
+`dropout_rate(rate, per = 1)` states a constant withdrawal rate once and has it
+expanded against whichever schedule it is paired with — one proportion per
+interval. `pattern = "linear"` (the default) withdraws `rate` of the original
+cohort per `per` units of time, `(rate / per) * diff(visits)`;
+`pattern = "geometric"` withdraws `rate` of whoever remains. Either way it yields
+incremental proportions, so it cannot be combined with
+`dropout_scale = "cumulative"`.
 
 Participants who attend baseline only carry no slope information; a non-zero
 first element warns.
@@ -199,8 +205,8 @@ contribute the visits they attended, which is less conservative than dividing a
 completers-only sample size by the completion rate, and is the right adjustment
 when the trial is to be analysed by a mixed model on all observed measurements.
 Dropout is assumed monotone and unrelated to a participant's own trajectory —
-every stratum shares the same variance components. `?trial_design` spells this
-out.
+every stratum shares the same variance components. The "Dropout" section of
+`?slope_sample_size` spells this out.
 
 ## Parameters without data
 
@@ -269,10 +275,18 @@ too:
 ```r
 slope_sample_size_floor(pars, effectiveness = 0.33)   # the smallest N any design could need
 slope_var_floor(pars)                                 # the limiting s*^2 behind it
+```
 
-# Or, for the settings of a result you already have:
-ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
-slope_sample_size_floor(ss)
+`slope_sample_size_floor()` takes the arguments of `slope_sample_size()` minus the
+design — `params, power, effectiveness, target, alpha, per_arm` — so the floor for
+a result's settings is the same call without `visits` and `dropout`.
+
+`slope_power_ceiling()` is the same bound read the other way: at a fixed `n`, the
+highest power any schedule could achieve. It takes `slope_power()`'s arguments
+minus the design (`params, n, effectiveness, target, alpha, per_arm`):
+
+```r
+slope_power_ceiling(pars, n = 200, effectiveness = 0.33)   # no design can beat this power
 ```
 
 Neither takes a visit schedule, because neither depends on one — and dropout can
@@ -292,24 +306,33 @@ lengthening a two-visit trial only converges on the higher value
 ## Uncertainty in the stage-one estimates
 
 ```r
-ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
-slope_bootstrap(ss, R = 200, type = "bca", seed = 1)
+slope_sample_size_boot(pars, c(0, 1, 2), effectiveness = 0.33,
+                       R = 200, ci_method = "bca", seed = 1)
 ```
 
 Resamples subjects (stratified by group where relevant) and refits the mixed model
 each time, so it is slow — start with a small `R`. Needs parameters from
 `slope_params()`; manually supplied parameters carry no data to resample.
 
-Hand it the result you want an interval around, not a fresh specification of the
-calculation: the result already carries the design, effectiveness, target and
-significance level it was solved with, and each replicate re-solves exactly that.
-`slope_bootstrap()` dispatches on what it is given — a `slope_sample_size` object
-for the required `n`, a `slope_power` object for the power achieved, or a
-`slope_params` object for the fitted slope itself. Use `statistic = "tte"` on
-either stage-two result for the target treatment effect behind it. Because each
-method offers only quantities its object solved for or derived, bootstrapping one
-of the calculation's own inputs — a zero-width interval dressed up as a result —
-cannot be expressed.
+Each stage-two function has a bootstrap counterpart that takes exactly its
+arguments, followed by the bootstrap's own (`statistic`, `R`, `ci_method`,
+`level`, `seed`, `progress`):
+
+| calculation | bootstrap | default `statistic` |
+|---|---|---|
+| `slope_sample_size()` | `slope_sample_size_boot()` | `"n"` |
+| `slope_power()` | `slope_power_boot()` | `"power"` |
+| `slope_sample_size_grid()` | `slope_sample_size_grid_boot()` | `n`, every cell |
+| `slope_power_grid()` | `slope_power_grid_boot()` | `power`, every cell |
+| `slope_sample_size_floor()` | `slope_sample_size_floor_boot()` | `"n"` |
+| `slope_power_ceiling()` | `slope_power_ceiling_boot()` | `"power"` |
+| `slope_params()` | `slope_params_boot()` | `"slope"` |
+
+`statistic = "tte"` gives the target treatment effect instead. Each function
+offers only the quantity it solves for, so bootstrapping one of the
+calculation's own inputs — a zero-width interval dressed up as a result — cannot
+be expressed. The grid versions share one set of replicates across every cell.
+`ci_method` is `"bca"` (the default) or `"percentile"`.
 
 ## Example data
 
@@ -372,7 +395,7 @@ slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
 That last point is the one thing the wrapper keeps that new code should not: it
 is Stata's bimodal interface, preserved deliberately for parity. Use `slopepower()`
 for mechanical translation and parity checks; prefer the pipeline above —
-`slope_params()`, `trial_design()`, then `slope_sample_size()` or `slope_power()` —
+`slope_params()`, then `slope_sample_size()` or `slope_power()` —
 for new work.
 
 ## Notes
@@ -386,5 +409,5 @@ for new work.
   `test-packaged-data.R`, which checks those datasets against the `.dta` files
   they were converted from and so skips outside a source checkout.
 - `R CMD check` passes clean. `--run-donttest` additionally runs the
-  `slope_bootstrap()` example, which fits a mixed model once per replicate and so
+  `slope_sample_size_boot()` example, which fits a mixed model once per replicate and so
   takes appreciably longer than the rest.

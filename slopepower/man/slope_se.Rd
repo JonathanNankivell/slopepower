@@ -21,7 +21,7 @@ The standard error of the untreated (or case) slope, taken from the fitted
 mixed model's fixed-effects covariance matrix: for \code{comparator = "healthy"}
 or \code{"treated"} this combines the variances of, and covariance between, the
 two fixed-effect terms whose sum is the slope, not just the variance of a
-single coefficient. \code{\link[=slope_bootstrap]{slope_bootstrap()}} compares this to the slope itself
+single coefficient. The bootstrap functions compare this to the slope itself
 as the check recommended in section 2.6 of Nash et al. (2021): a slope
 less than 2.5 times its standard error means bootstrap replicates can
 straddle zero, at which point the resulting interval stops meaning
@@ -41,6 +41,6 @@ slope_se(slope_params_manual(
 }
 \seealso{
 \code{\link[=slope_sigma]{slope_sigma()}} and \code{\link[=slope_var]{slope_var()}}, the other quantities computed
-from a \code{slope_params} object; \code{\link[=slope_bootstrap]{slope_bootstrap()}}, which uses this to
-flag an unreliable interval.
+from a \code{slope_params} object; \code{\link[=slope_params_boot]{slope_params_boot()}} and its siblings,
+which use this to flag an unreliable interval.
 }

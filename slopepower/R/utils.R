@@ -141,8 +141,8 @@ check_whole_number <- function(x, name, noun, context, lower) {
 #' Validate the `per_arm` display-basis argument
 #'
 #' A single non-`NA` logical, shared by every entry point that accepts
-#' `per_arm` -- the two plain grids, `slope_sample_size_grid_boot()`,
-#' `slope_bootstrap()`, `slope_sample_size()`, `slope_power()` and
+#' `per_arm` -- the plain and bootstrapped grids, the single-design
+#' bootstraps, `slope_sample_size()`, `slope_power()` and
 #' `slope_sample_size_floor()` -- so the check cannot read differently at two
 #' of them. `check_scalar()` does not fit: it is written for a finite numeric,
 #' and `TRUE == 1` would make a stray `per_arm = 2` pass silently.
@@ -185,9 +185,9 @@ display_basis <- function(x, per_arm, context) {
 #' otherwise, so a per-arm figure that happens to be exact still prints
 #' without a spurious ".0", and one that is not keeps its one decimal place.
 #' @noRd
-cat_count <- function(label, value, width = 39L) {
+cat_count <- function(label, value) {
   digits <- if (is.na(value) || value == round(value)) 0L else 1L
-  cat_line(label, value, width = width, digits = digits)
+  cat_line(label, value, digits = digits)
 }
 
 #' Print the sample-size line on the chosen display basis
@@ -210,6 +210,31 @@ cat_n_line <- function(x, per_arm, total_label = "N") {
   invisible(x)
 }
 
+#' Print the requested (un-evened) sample size of a power-direction result
+#'
+#' The sibling of [cat_n_line()], shared by [print.slope_power()] and
+#' [print.slope_power_ceiling()]. `n_requested` has not been evened, so its
+#' per-arm figure can be a half participant -- [cat_count()] prints that
+#' decimal rather than `cat_line()`'s `digits = 0L` path rounding it away.
+#' @noRd
+cat_specified_n_line <- function(x, per_arm) {
+  if (per_arm) {
+    cat_count("specified N per arm", x$n_requested / 2)
+  } else {
+    cat_line("specified N", x$n_requested, digits = 0L)
+  }
+  invisible(x)
+}
+
+#' Print a wrapped "Note:" paragraph after a blank line
+#'
+#' Shared by `covariate_note()` and `residual_note()`, which print together.
+#' @noRd
+cat_note <- function(text) {
+  cat("\n", paste(strwrap(text, width = 72L, initial = "Note: ", prefix = "      "),
+                  collapse = "\n"), "\n", sep = "")
+}
+
 #' The two-sided critical value, computed exactly as the Stata original does
 #'
 #' `qnorm(1 - alpha / 2)` rather than the numerically preferable
@@ -225,8 +250,6 @@ cat_n_line <- function(x, per_arm, total_label = "N") {
 #' finite and unremarkable (7,584 at alpha = 1e-16 on the reference parameters,
 #' against 712 at alpha = 0.05). Stata degenerates the same way and reports
 #' N as missing; per CONTRACT.md section 6 the port says so instead.
-#' [slope_sample_size_floor.slope_result()] guards the identical `qnorm(1)`
-#' degeneracy on the power side.
 #' @noRd
 z_alpha <- function(alpha, context) {
   z <- stats::qnorm(1 - alpha / 2)
@@ -389,8 +412,8 @@ resolve_fixef_name <- function(b, parts) {
 #' [check_target_effectiveness()] rejects the two supplied together. Anything
 #' that rebuilds a stage-two call must therefore omit `effectiveness` under
 #' that target rather than supply it -- the rule belongs here once, rather than
-#' being re-expressed at each call site: [slope_bootstrap()]'s `resolve_args()`,
-#' [slopepower()] and both grid functions use this directly.
+#' being re-expressed at each call site: [slopepower()] and the grid functions
+#' use this directly.
 #' @noRd
 maybe_add_effectiveness <- function(args, effectiveness, target) {
   if (!identical(target, "observed")) args$effectiveness <- effectiveness
@@ -399,9 +422,9 @@ maybe_add_effectiveness <- function(args, effectiveness, target) {
 
 #' Reject `effectiveness` alongside target = "observed"
 #'
-#' The one place this rule is enforced, called by each of the four entry points
-#' that can be handed both -- [slope_sample_size()], [slope_power()] and the two
-#' grid wrappers -- immediately after `match.arg()`ing `target`. It has to sit at
+#' The one place this rule is enforced, called by each of the entry points
+#' that can be handed both -- [slope_sample_size()], [slope_power()], the grid
+#' wrappers and the bootstraps of all four -- immediately after `match.arg()`ing `target`. It has to sit at
 #' that boundary rather than deeper in the calculation: "did the caller type an
 #' `effectiveness`?" is a `missing()` question, and `missing()` can only be asked
 #' of the function whose argument it is.
@@ -443,8 +466,8 @@ check_column_name <- function(value, name, data, context) {
 #' trailing space before every newline. That is exactly the drift `fmt_line()`
 #' was extracted to prevent, reappearing in the plumbing around it.
 #' @noRd
-cat_line <- function(label, value, width = 39L, digits = 3L) {
-  cat(fmt_line(label, value, width = width, digits = digits), "\n", sep = "")
+cat_line <- function(label, value, digits = 3L) {
+  cat(fmt_line(label, value, digits = digits), "\n", sep = "")
 }
 
 #' Format a labelled value the way the Stata command does, for print methods
@@ -456,7 +479,7 @@ cat_line <- function(label, value, width = 39L, digits = 3L) {
 #' a column of `0.000` indistinguishable from a degenerate fit. The reasoning,
 #' and the worked examples behind the 5%, are in DIVERGENCES.md section 26.
 #' @noRd
-fmt_line <- function(label, value, width = 39L, digits = 3L) {
+fmt_line <- function(label, value, digits = 3L) {
   val <- if (is.character(value)) {
     value
   } else if (is.na(value)) {
@@ -477,7 +500,7 @@ fmt_line <- function(label, value, width = 39L, digits = 3L) {
       fixed
     }
   }
-  sprintf("%s = %s", formatC(label, width = width), val)
+  sprintf("%s = %s", formatC(label, width = 39L), val)
 }
 
 #' Has a fixed-decimal rendering lost too much of a value to be worth reading?

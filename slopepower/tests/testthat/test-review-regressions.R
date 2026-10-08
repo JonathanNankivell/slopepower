@@ -13,60 +13,41 @@ test_that("a labelled factor or character group column is rejected, not guessed"
   # and with it the controls' residual variance (10.699 rather than 10.354) --
   # the very error the by-name variance extraction exists to prevent.
   expect_error(
-    suppressMessages(slope_params(sdmt ~ time | id, d, healthy = g_chr)),
+    suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = g_chr)),
     "cannot be determined"
   )
   expect_error(
-    suppressMessages(slope_params(sdmt ~ time | id, d, healthy = g_fct)),
+    suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = g_fct)),
     "cannot be determined"
   )
 
   # The numeric path is unaffected and remains the reference.
-  p <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = g_num))
+  p <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = g_num))
   expect_equal(p$slope, -1.7153, tolerance = 1e-3)
   expect_equal(p$sigma2_residual, 10.354, tolerance = 1e-2)
 
   # A factor coded literally "0"/"1" is unambiguous and must still work.
   d$g_01 <- factor(as.character(d$case), levels = c("0", "1"))
-  p01 <- suppressMessages(slope_params(sdmt ~ time | id, d, healthy = g_01))
+  p01 <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = g_01))
   expect_equal(p01$slope, p$slope, tolerance = 1e-8)
   expect_equal(p01$sigma2_residual, p$sigma2_residual, tolerance = 1e-8)
 })
 
-test_that("hand-built trial_design objects have has_dropout derived, not trusted", {
+test_that("dropout given cumulatively prices the same trial as its increments", {
+  # `dropout_scale` records only how the user supplied the vector -- the design
+  # always stores it incrementally -- so acting on the label rejected
+  # legitimate cumulative input, with an error telling the user to do exactly
+  # what they had done. The design is now built by the stage-two function
+  # itself, so the label cannot disagree with `has_dropout` or the vector.
   p <- paper_fit("slpower1")
-
-  # Omitting the field used to fail with "argument is of length zero".
-  bare <- structure(list(visits = c(0, 1, 2), dropout = c(0, 0),
-                         dropout_type = "incremental"), class = "trial_design")
-  expect_silent(r <- slope_sample_size(p, bare, effectiveness = 0.33))
-  expect_equal(r$n, slope_sample_size(p, trial_design(c(0, 1, 2)), effectiveness = 0.33)$n)
-
-  # has_dropout = FALSE alongside a non-zero dropout vector used to report the
-  # unweighted s*^2 (5.96990) in place of the dropout-weighted value (6.36497),
-  # while still returning the correct N -- so the error was invisible in N alone.
-  lying <- structure(list(visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1),
-                          has_dropout = FALSE, dropout_type = "incremental"),
-                     class = "trial_design")
-  correct <- suppressWarnings(
-    slope_sample_size(p, trial_design(c(0, 1, 2, 5), c(0, 0, 0.1)), effectiveness = 0.33))
-  fixed <- suppressWarnings(slope_sample_size(p, lying, effectiveness = 0.33))
-  expect_equal(fixed$var_tte, correct$var_tte, tolerance = 1e-10)
-  expect_equal(fixed$n, correct$n)
-
-  # A design built with dropout_type = "cumulative" must work. `dropout_type`
-  # records only how the user supplied the vector -- `dropout` is always stored
-  # incrementally -- so acting on the label rejected legitimate constructor
-  # output, including trial_design()'s own documented example, with an error
-  # telling the user to do exactly what they had done.
-  cumul <- suppressWarnings(
-    trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15), dropout_type = "cumulative"))
-  incr <- suppressWarnings(
-    trial_design(c(0, 1, 2, 3), dropout = c(0.05, 0.05, 0.05)))
-  from_cumul <- suppressWarnings(slope_sample_size(p, cumul, effectiveness = 0.33))
-  from_incr <- suppressWarnings(slope_sample_size(p, incr, effectiveness = 0.33))
+  from_cumul <- suppressWarnings(slope_sample_size(
+    p, c(0, 1, 2, 3), dropout = c(0.05, 0.10, 0.15), dropout_scale = "cumulative",
+    effectiveness = 0.33))
+  from_incr <- suppressWarnings(slope_sample_size(
+    p, c(0, 1, 2, 3), dropout = c(0.05, 0.05, 0.05), effectiveness = 0.33))
   expect_equal(from_cumul$n, from_incr$n)
   expect_equal(from_cumul$var_tte, from_incr$var_tte, tolerance = 1e-10)
+  expect_true(from_cumul$design$has_dropout)
 })
 
 test_that("the covariate guard catches term removal and offsets, not just addition", {
@@ -91,80 +72,78 @@ test_that("the covariate guard catches term removal and offsets, not just additi
                tolerance = 1e-6)
 })
 
-test_that("slope_bootstrap() cannot be asked to bootstrap its own input", {
+test_that("a bootstrap cannot be asked to bootstrap its own input", {
   p <- paper_fit("slpower1")
   ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
-  pw <- slope_power(p, c(0, 1, 2), n = 712, effectiveness = 0.33)
 
-  # slope_bootstrap() used to re-specify the calculation through `...`, so a
+  # The single bootstrap used to re-specify the calculation through `...`, so a
   # caller could name a statistic that was also one of the inputs: every
   # replicate returned the number they had passed in, giving a zero-width
-  # interval that looked like a successful bootstrap. Four hand-written guards
-  # existed only to catch those combinations. Dispatching on the result removes
-  # the possibility rather than policing it -- a result object already knows
-  # which of n and power it solved for -- so the regression is now pinned by
-  # what each method will accept at all.
+  # interval that looked like a successful bootstrap. Splitting it by the
+  # quantity solved for removes the possibility rather than policing it --
+  # slope_sample_size_boot() has `power` as an input and `n` as its answer --
+  # so the regression is pinned by what each function will accept at all.
   # The refusal must still diagnose, not just reject: bare match.arg() reports
-  # `'arg' should be one of ...`, naming neither the argument nor the object, and
-  # the fix is upstream in the call that built the object rather than here.
-  err <- tryCatch(slope_bootstrap(ss, R = 5, statistic = "power"),
+  # `'arg' should be one of ...`, naming neither the argument nor the function.
+  err <- tryCatch(slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33, R = 5,
+                                         statistic = "power"),
                   error = conditionMessage)
-  expect_match(err, "`statistic`")
-  expect_match(err, "bootstrap a slope_power\\(\\) result")
+  expect_match(err, "^slope_sample_size_boot\\(\\): `statistic`")
+  expect_match(err, "use slope_power_boot\\(\\) instead")
   expect_false(grepl("'arg'", err, fixed = TRUE))
 
-  expect_match(tryCatch(slope_bootstrap(pw, R = 5, statistic = "n"),
+  expect_match(tryCatch(slope_power_boot(p, c(0, 1, 2), n = 712, R = 5, statistic = "n"),
                         error = conditionMessage),
-               "bootstrap a slope_sample_size\\(\\)\\s+result")
+               "use\\s+slope_sample_size_boot\\(\\) instead")
 
-  # And the inputs cannot be smuggled in alongside: they are not silently
-  # ignored, which would be the worst outcome of all.
-  expect_error(slope_bootstrap(ss, R = 5, n = 400), "unused argument")
-  expect_error(slope_bootstrap(pw, R = 5, power = 0.8), "unused argument")
+  # And the solved-for quantity cannot be smuggled in alongside: it is not an
+  # argument at all, so R refuses it rather than it being silently ignored.
+  expect_error(slope_sample_size_boot(p, c(0, 1, 2), R = 5, n = 400), "unused argument")
+  expect_error(slope_power_boot(p, c(0, 1, 2), n = 400, R = 5, power = 0.8),
+               "unused argument")
 
-  # A call written against the old interface fails loudly rather than quietly
-  # bootstrapping the slope and discarding the design.
-  err <- tryCatch(
-    slope_bootstrap(p, R = 5, statistic = "n", design = c(0, 1, 2),
-                    effectiveness = 0.33),
-    error = conditionMessage)
-  expect_match(err, "unused argument")
-  expect_match(err, "slope_bootstrap\\(slope_sample_size\\(")
-
-  # "tte" is reachable from either result: it depends on neither n nor power.
-  b <- suppressWarnings(slope_bootstrap(ss, R = 3, statistic = "tte"))
+  # "tte" is reachable from either: it depends on neither n nor power.
+  b <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33,
+                                               R = 3, statistic = "tte"))
   expect_equal(b$observed, ss$tte)
-  expect_equal(suppressWarnings(slope_bootstrap(pw, R = 3, statistic = "tte"))$observed,
+  expect_equal(suppressWarnings(slope_power_boot(p, c(0, 1, 2), n = 712, effectiveness = 0.33,
+                                                 R = 3, statistic = "tte"))$observed,
                ss$tte)
 })
 
-test_that("slope_bootstrap() re-solves the calculation the result was built with", {
+test_that("a bootstrap solves the same calculation its stage-two function does", {
   # The bootstrap must hold every input fixed and vary only the parameters. The
-  # observed value therefore has to reproduce the result it was handed, for each
-  # of the settings carried on the object -- design, effectiveness, alpha and
-  # the target power or sample size.
+  # observed value therefore has to reproduce the stage-two answer, for each of
+  # the settings -- design, effectiveness, alpha and the target power or sample
+  # size.
   p <- paper_fit("slpower1")
-  ss <- slope_sample_size(p, trial_design(c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1)),
+  ss <- slope_sample_size(p, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1),
                           effectiveness = 0.4, power = 0.9, alpha = 0.01)
-  expect_equal(suppressWarnings(slope_bootstrap(ss, R = 3))$observed, ss$n)
+  expect_equal(suppressWarnings(slope_sample_size_boot(
+    p, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1), effectiveness = 0.4, power = 0.9,
+    alpha = 0.01, R = 3))$observed, ss$n)
 
   pw <- slope_power(p, c(0, 1, 2), n = 401, effectiveness = 0.33, alpha = 0.1)
   # n = 401 is rounded down to 400 for equal arms; the replicates must answer
   # for the number actually used, not the one requested.
-  expect_equal(suppressWarnings(slope_bootstrap(pw, R = 3))$observed, pw$power)
+  expect_equal(suppressWarnings(slope_power_boot(
+    p, c(0, 1, 2), n = 401, effectiveness = 0.33, alpha = 0.1, R = 3))$observed, pw$power)
 
   # target = "observed" stores effectiveness as NA and rejects it as an input,
-  # so it must be omitted when the call is rebuilt rather than passed along.
+  # so it must not be passed along when the replicates are re-solved.
   p3 <- paper_fit("slpower3")
   ss3 <- slope_sample_size(p3, c(0, 0.5, 2), target = "observed")
-  expect_equal(suppressWarnings(slope_bootstrap(ss3, R = 3))$observed, ss3$n)
+  expect_equal(suppressWarnings(slope_sample_size_boot(
+    p3, c(0, 0.5, 2), target = "observed", R = 3))$observed, ss3$n)
+  expect_error(slope_sample_size_boot(p3, c(0, 0.5, 2), target = "observed",
+                                      effectiveness = 0.5, R = 3),
+               "only one of `effectiveness`")
 })
 
-test_that("slope_bootstrap() does not repeat the stage-two call's own warning", {
-  # The caller has already run the stage-two call themselves to produce the
-  # object being bootstrapped, and heard anything it had to say. Recomputing the
-  # observed value here said it a second time, attributed to slope_bootstrap()
-  # -- a function that had not made the choice being warned about.
+test_that("a bootstrap says the stage-two calculation's warning once, not per replicate", {
+  # The observed calculation warns once, under the bootstrap's own name. The
+  # replicates re-solve the same calculation several hundred times, and
+  # repeating the warning for each would tell the caller nothing new.
   set.seed(2)
   s <- data.frame(id = 1:60, case = rep(c(1, 0), each = 30))
   s$intercept <- rnorm(60, 50, 10)
@@ -173,19 +152,21 @@ test_that("slope_bootstrap() does not repeat the stage-two call's own warning", 
   s$slope <- rnorm(60, ifelse(s$case == 1, -0.3, -1.7), 1.2)
   d <- merge(s, data.frame(visit = 0:3))
   d$sdmt <- d$intercept + d$slope * d$visit + rnorm(nrow(d), 0, 3)
-  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, healthy = case))
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case))
 
   ss <- suppressWarnings(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33))
   msgs <- character()
-  withCallingHandlers(
-    slope_bootstrap(ss, R = 2, seed = 1),
+  b <- withCallingHandlers(
+    slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33, R = 2, seed = 1),
     warning = function(w) {
       msgs <<- c(msgs, conditionMessage(w))
       invokeRestart("muffleWarning")
     })
-  expect_false(any(grepl("makes the slope more extreme", msgs)))
-  # the observed value is still exactly the one the result reported
-  expect_equal(suppressWarnings(slope_bootstrap(ss, R = 2, seed = 1))$observed, ss$n)
+  extreme <- grep("makes the slope more extreme", msgs, value = TRUE)
+  expect_length(extreme, 1L)
+  expect_match(extreme, "^slope_sample_size_boot\\(\\)")
+  # the observed value is still exactly the one the stage-two call reports
+  expect_equal(b$observed, ss$n)
 })
 
 test_that("an explicit n = NULL is caught by the guard, not by the solver", {
@@ -198,7 +179,7 @@ test_that("an explicit n = NULL is caught by the guard, not by the solver", {
 
   for (call_it in list(
     function() slope_power(p, c(0, 1, 2), n = NULL),
-    function() do.call(slope_power, list(params = p, design = c(0, 1, 2), n = NULL))
+    function() do.call(slope_power, list(params = p, visits = c(0, 1, 2), n = NULL))
   )) {
     err <- tryCatch(call_it(), error = conditionMessage)
     expect_match(err, "`n` is required")
@@ -235,12 +216,12 @@ test_that("both grids enforce the effectiveness/observed guard", {
   # effectiveness = 1 with no warning. The omission is still there -- it has to
   # be -- so the check must be raised in each grid wrapper, both of them.
   expect_error(
-    slope_sample_size(p3, trial_design(c(0, 2, 3)), target = "observed",
+    slope_sample_size(p3, c(0, 2, 3), target = "observed",
                       effectiveness = 0.9),
     "only one of"
   )
   expect_error(
-    slope_power(p3, trial_design(c(0, 2, 3)), n = 400, target = "observed",
+    slope_power(p3, c(0, 2, 3), n = 400, target = "observed",
                 effectiveness = 0.9),
     "only one of"
   )
@@ -288,44 +269,25 @@ test_that("check_params() rejects a non-PD random-effects matrix even when the m
               "positive definite")
 })
 
-test_that("slope_bootstrap() rejects a non-integer R instead of crashing sprintf() on a failed replicate", {
+test_that("a bootstrap rejects a non-integer R instead of crashing sprintf() on a failed replicate", {
   p <- paper_fit("slpower1")
-  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   # R = 10.7 used to reach sprintf('%d of %d replicates failed...', n_failed, R)
   # as soon as one replicate failed to converge, and fail there instead with
   # "invalid format '%d'; use format %f, %e, %g or %a for numeric objects" --
   # an unrelated crash rather than a clean validation error.
-  expect_error(slope_bootstrap(ss, R = 10.7, seed = 1), "whole number")
+  expect_error(slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33, R = 10.7,
+                                      seed = 1), "whole number")
 })
 
-test_that("as_trial_design() warns on dropout[1] > 0 for a design that was never validated by trial_design()", {
+test_that("baseline-only dropout is warned about exactly once per call", {
+  # The design used to be built by one call and priced by another, and the
+  # second had to re-check -- and so could re-warn about -- a design the first
+  # had already warned about. Built by the stage-two function itself, it is
+  # checked once.
   p <- paper_fit("slpower1")
-
-  # A `trial_design` object built by the constructor, then edited directly:
-  # the object is genuine, but this exact dropout vector never went through
-  # trial_design()'s own warning check.
-  mutated <- trial_design(c(0, 1, 2))
-  mutated$dropout <- c(0.4, 0)
-  mutated$has_dropout <- TRUE
-  expect_warning(slope_sample_size(p, mutated, effectiveness = 0.33),
-                "contribute nothing")
-
-  # A hand-built object never carries the constructor's
-  # `slopepower_checked_dropout` attribute at all.
-  bare <- structure(list(visits = c(0, 2, 3), dropout = c(0.2, 0.1),
-                        has_dropout = TRUE, dropout_type = "incremental"),
-                    class = "trial_design")
-  expect_warning(slope_sample_size(p, bare, effectiveness = 0.33),
-                "contribute nothing")
-
-  # The ordinary path -- build, then use immediately, unmodified -- still
-  # warns exactly once (at construction), not twice.
   n_warn <- 0
   withCallingHandlers(
-    {
-      d <- trial_design(c(0, 2, 3), dropout = c(0.2, 0.1))
-      slope_sample_size(p, d, effectiveness = 0.33)
-    },
+    slope_sample_size(p, c(0, 2, 3), dropout = c(0.2, 0.1), effectiveness = 0.33),
     warning = function(w) { n_warn <<- n_warn + 1; invokeRestart("muffleWarning") }
   )
   expect_equal(n_warn, 1L)
@@ -333,7 +295,7 @@ test_that("as_trial_design() warns on dropout[1] > 0 for a design that was never
 
 test_that("an invalid design in one grid cell is named, like an evaluate() failure is", {
   p <- paper_fit("slpower1")
-  # "b" doesn't start at 0; this used to raise trial_design()'s own message
+  # "b" doesn't start at 0; this used to raise the design validator's message
   # verbatim, with no mention of slope_sample_size_grid() or which named
   # design failed -- the wrapping every other grid-cell failure gets.
   err <- expect_error(
@@ -362,8 +324,8 @@ test_that("the tte-direction warning is deduplicated once per grid, like the bas
 
 test_that("slopepower() validates dropouts before fitting stage one, not after", {
   d <- load_paper_data("slpower1")
-  # 3 dropouts for a 2-visit schedule. If this error came from inside
-  # trial_design(), it can only have been raised before the REML fit that
+  # 3 dropouts for a 2-visit schedule. If this error came from the design
+  # validator, it can only have been raised before the REML fit that
   # slope_params() performs -- there is no other way to observe the ordering
   # from outside, since the failure message is identical either way.
   expect_error(
@@ -415,7 +377,7 @@ test_that("a group indicator that changes within a participant is refused", {
   d <- load_paper_data("slpower2")
   flip <- d$id <= 5 & d$vdate > as.Date("2010-06-01")
   d$case[flip] <- 1 - d$case[flip]
-  err <- tryCatch(suppressMessages(slope_params(sdmt ~ time | id, d, healthy = case)),
+  err <- tryCatch(suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case)),
                   error = conditionMessage)
   expect_match(err, "`healthy` must be constant within a participant")
   expect_match(err, "5 of 500 participant")
@@ -423,7 +385,7 @@ test_that("a group indicator that changes within a participant is refused", {
   # And `treated` is held to the same rule, in its own name.
   d3 <- load_paper_data("slpower3")
   d3$treat[d3$id == 1 & d3$visit == 2] <- 1 - d3$treat[d3$id == 1 & d3$visit == 2]
-  expect_error(slope_params(sdmt ~ time | id, d3, treated = treat),
+  expect_error(slope_params(sdmt ~ time | id, d3, comparator = "treated", group = treat),
                "`treated` must be constant within a participant")
 
   # The unmodified data are unaffected: the guard costs the paper's own fits
@@ -546,9 +508,9 @@ test_that("a small-scale outcome prints its parameters, not a column of zeros", 
 test_that("near-0/1 group codes are snapped to exactly 0/1", {
   d <- load_paper_data("slpower1")
   d$case2 <- as.numeric(d$id %% 2)
-  exact <- slope_params(sdmt ~ time | id, d, healthy = case2)
+  exact <- slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case2)
   d$case2[d$case2 == 1] <- 1 + 1e-10
-  fuzzy <- slope_params(sdmt ~ time | id, d, healthy = case2)
+  fuzzy <- slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case2)
   expect_equal(fuzzy$slope, exact$slope)
   expect_equal(fuzzy$slope_comparator, exact$slope_comparator)
 })
@@ -566,8 +528,8 @@ test_that("a target power at or below alpha/2 is refused, not sized", {
 test_that("`healthy`/`treated` resolve in the caller's frame, not the formula's", {
   d <- load_paper_data("slpower1")
   fml <- sdmt ~ time | id
-  wrap <- function(fml, d, g) slope_params(fml, d, healthy = g)
-  direct <- slope_params(fml, d, healthy = as.numeric(d$id %% 2))
+  wrap <- function(fml, d, g) slope_params(fml, d, comparator = "healthy", group = g)
+  direct <- slope_params(fml, d, comparator = "healthy", group = as.numeric(d$id %% 2))
   via <- wrap(fml, d, as.numeric(d$id %% 2))
   expect_equal(via$slope, direct$slope)
   expect_equal(via$slope_comparator, direct$slope_comparator)
@@ -579,7 +541,7 @@ test_that("a numeric design's errors name the stage-two function called", {
   expect_error(slope_power(p, c(1, 2, 3), n = 100), "^slope_power\\(\\)")
 })
 
-test_that("the boot grid's shared effect size gives each cell slope_bootstrap()'s answer", {
+test_that("the boot grid's shared effect size gives each cell slope_sample_size_boot()'s answer", {
   subj <- local({
     set.seed(4)
     data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
@@ -593,10 +555,9 @@ test_that("the boot grid's shared effect size gives each cell slope_bootstrap()'
     pars, visits = designs, power = c(0.8, 0.9), alpha = c(0.05, 0.01),
     effectiveness = 0.33, R = 12, seed = 2))
   for (k in seq_len(nrow(grid))) {
-    one <- suppressWarnings(slope_bootstrap(
-      slope_sample_size(pars, designs[[grid$design[k]]], effectiveness = 0.33,
-                        power = grid$power[k], alpha = grid$alpha[k]),
-      R = 12, seed = 2))
+    one <- suppressWarnings(slope_sample_size_boot(
+      pars, designs[[grid$design[k]]], effectiveness = 0.33,
+      power = grid$power[k], alpha = grid$alpha[k], R = 12, seed = 2))
     expect_equal(grid$n_mean[k], one$boot_mean)
     expect_equal(c(grid$n_lower[k], grid$n_upper[k]), one$ci)
     expect_equal(grid$n_failed[k], one$n_failed)

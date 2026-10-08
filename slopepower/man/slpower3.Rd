@@ -35,7 +35,7 @@ what makes this the example where the spacing of visits matters most.
 }
 \examples{
 # The paper's p.594 fit: control slope -1.852, treated -1.104.
-slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+slope_params(sdmt ~ visit | id, data = slpower3, comparator = "treated", group = treat)
 
 }
 \references{

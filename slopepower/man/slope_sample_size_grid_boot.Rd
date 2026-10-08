@@ -2,26 +2,42 @@
 % Please edit documentation in R/grid_boot.R
 \name{slope_sample_size_grid_boot}
 \alias{slope_sample_size_grid_boot}
-\alias{print.slope_sample_size_grid_boot}
-\title{Bootstrap the sample size every cell of a grid needs, in one resampling pass}
+\alias{slope_power_grid_boot}
+\title{Bootstrap every cell of a sample-size or power grid, in one resampling pass}
 \usage{
 slope_sample_size_grid_boot(
   params,
   visits,
   dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
   power = 0.8,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
   R = 999,
-  type = c("bca", "percentile"),
+  ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
   progress = FALSE,
   per_arm = TRUE
 )
 
-\method{print}{slope_sample_size_grid_boot}(x, ..., per_arm = NULL)
+slope_power_grid_boot(
+  params,
+  visits,
+  dropout = NULL,
+  dropout_scale = c("incremental", "cumulative"),
+  n,
+  effectiveness = 0.25,
+  target = c("effectiveness", "observed"),
+  alpha = 0.05,
+  R = 999,
+  ci_method = c("bca", "percentile"),
+  level = 0.95,
+  seed = NULL,
+  progress = FALSE,
+  per_arm = TRUE
+)
 }
 \arguments{
 \item{params}{A \code{slope_params} object.}
@@ -29,8 +45,13 @@ slope_sample_size_grid_boot(
 \item{visits}{A numeric vector of visit times, or a named list of such vectors.
 Each must begin at 0.}
 
-\item{dropout}{\code{NULL}, a numeric vector of incremental proportions, a
-\code{\link[=dropout_rate]{dropout_rate()}} object, or a named list mixing any of these.}
+\item{dropout}{\code{NULL}, a numeric vector of proportions, a \code{\link[=dropout_rate]{dropout_rate()}}
+object, or a named list mixing any of these.}
+
+\item{dropout_scale}{How every numeric vector in \code{dropout} is written:
+\code{"incremental"} (the default) or \code{"cumulative"}, as in
+\code{\link[=slope_sample_size]{slope_sample_size()}}. It applies to every vector in the list, and cannot
+be \code{"cumulative"} if the list holds a \code{\link[=dropout_rate]{dropout_rate()}}.}
 
 \item{power}{Target power. Defaults to 0.8. A single value is held constant
 across the grid; several make it another axis.}
@@ -47,9 +68,10 @@ grid.}
 \item{R}{Number of bootstrap replicates. The default is sized for the
 interval this returns rather than for speed; see above before lowering it.}
 
-\item{type}{\code{"bca"} (the default) for bias-corrected and accelerated
-intervals, or \code{"percentile"}. The paper recommends BCa because the
-distribution of estimated sample sizes is typically skewed.}
+\item{ci_method}{How the confidence interval is built: \code{"bca"} (the default)
+for bias-corrected and accelerated, or \code{"percentile"}. The paper
+recommends BCa because the distribution of estimated sample sizes is
+typically skewed.}
 
 \item{level}{Confidence level for the interval.}
 
@@ -60,138 +82,107 @@ advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
-\item{per_arm}{Which basis to print the table's counts on: \code{TRUE} for
-participants per arm, \code{FALSE} for the trial total. Defaults to \code{NULL},
-meaning "whatever the call that built \code{x} requested" -- read from its
-\code{per_arm} attribute, or per arm if that is absent (an object built before
-this argument existed). Passing it explicitly prints the other basis of
-the same object without rebuilding it.}
+\item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Unlike
+the plain grids' \code{per_arm} (which reshapes the returned columns), these
+grids always carry both bases -- see the \verb{@return} block below -- and
+\code{per_arm} only sets which one the print method shows by default; the
+stored value can still be reached through the other columns, and a single
+call can be printed either way with \code{print(x, per_arm = ...)}.}
 
-\item{x}{The \code{slope_sample_size_grid_boot} object to print. Written out
-explicitly, unlike \code{print.slope_bootstrap()}'s own \code{x} -- this topic's
-\verb{@inheritParams slope_bootstrap} would otherwise leak \emph{that} generic's
-unrelated \code{x} (an object to bootstrap, not one to print) in here, since
-both share this help topic and both happen to have a parameter of the
-same name.}
-
-\item{...}{Not used.}
+\item{n}{For \code{slope_power_grid_boot()}: total number of participants, as in
+\code{\link[=slope_power_grid]{slope_power_grid()}}. Required. A single value is held constant across the
+grid; several make it another axis.}
 }
 \value{
-A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")}, one row per cell, with the columns
-\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports -- except that both bases are kept,
-whatever \code{per_arm} says: \code{n} is always the trial total, beside
+A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")} (or \code{"slope_power_grid_boot"}), one row per cell, with the
+columns \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports -- except that both bases are
+kept, whatever \code{per_arm} says: \code{n} is always the trial total, beside
 \code{n_per_arm}, and \code{visits} is split into \code{visits_total} and
-\code{visits_per_arm}. So \code{n} here is \emph{not} the \code{n} of a
-\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} called with the default \code{per_arm = TRUE};
-compare \code{n_per_arm} with that. The table also has:
+\code{visits_per_arm}. So \code{n} here is \emph{not} the \code{n} of a plain grid called with
+the default \code{per_arm = TRUE}; compare \code{n_per_arm} with that. The table
+also has:
 \describe{
-\item{\code{n_mean}, \code{n_sd}, \code{n_lower}, \code{n_upper}}{The bootstrap mean, SD
-and confidence interval of that cell's sample size, on the trial-total
-basis of \code{n}. The interval is
-widened to the nearest even sizes a trial could actually be run at,
-as a single \code{\link[=slope_bootstrap]{slope_bootstrap()}} call does for \code{statistic = "n"}.}
+\item{\code{n_mean}, \code{n_sd}, \code{n_lower}, \code{n_upper}}{For
+\code{slope_sample_size_grid_boot()}: the bootstrap mean, SD and confidence
+interval of that cell's sample size, on the trial-total basis of \code{n}.
+The interval is widened to the nearest even sizes a trial could
+actually be run at, as \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} does.}
+\item{\code{power_mean}, \code{power_sd}, \code{power_lower}, \code{power_upper}}{For
+\code{slope_power_grid_boot()}: the same, for the power that cell's fixed
+\code{n} achieves.}
 \item{\code{tte_mean}, \code{tte_sd}, \code{tte_lower}, \code{tte_upper}}{The same, for the
-target treatment effect behind that sample size. Constant down the
-\code{design} and \code{dropout} axes -- it does not depend on the design,
-only on \code{effectiveness} -- so it repeats unless \code{effectiveness} is
-itself an axis of the grid, and cells sharing an \code{effectiveness}
-share one interval exactly rather than merely agreeing to rounding.}
-\item{\code{ci_type}, \code{tte_ci_type}}{\code{"bca"} or \code{"percentile"}: the method
-actually used for that cell's \code{n} and \code{tte} interval, which can fall
+target treatment effect behind that cell. Constant down the \code{design}
+and \code{dropout} axes -- it does not depend on the design, only on
+\code{effectiveness} -- so it repeats unless \code{effectiveness} is itself an
+axis of the grid, and cells sharing an \code{effectiveness} share one
+interval exactly rather than merely agreeing to rounding.}
+\item{\code{ci_method}, \code{tte_ci_method}}{\code{"bca"} or \code{"percentile"}: the method
+actually used for that cell's main and \code{tte} interval, which can fall
 back to percentile cell by cell -- and, since the two intervals have
 their own bias corrections and their own jackknife columns, one
-without the other -- even when \code{type = "bca"} was requested. \code{NA} for
-an interval that could not be built at all.}
-\item{\code{n_failed}}{How many of the \code{R} replicates failed to yield a
-sample size for that cell -- refits that failed to converge, plus
-any resample whose stage-two solve itself failed -- out of \code{R}.}
+without the other -- even when \code{ci_method = "bca"} was requested. \code{NA}
+for an interval that could not be built at all.}
+\item{\code{n_failed}}{How many of the \code{R} replicates failed to yield the
+solved-for quantity for that cell -- refits that failed to converge,
+plus any resample whose stage-two solve itself failed -- out of \code{R}.}
 }
 
 The table also carries, as attributes rather than columns because they
-are shared by every cell: \code{R}, \code{type} (as requested), \code{level}, \code{se},
-\code{n_refit_failed} (replicates whose stage-one refit failed, before any
-per-cell solve is attempted), \code{straddle}, \code{per_arm} (as requested, or
-overridden at print time), and \code{slope_observed},
-\code{slope_mean}, \code{slope_sd}, \code{slope_ci}, \code{slope_type}, \code{slope_replicates} --
-the same summary of the refitted slopes a single \code{\link[=slope_bootstrap]{slope_bootstrap()}}
-result carries, since the slope is what the resampling actually
-perturbs and every cell's interval is a function of it. The printed
-table does not show them --- it reports the cells and, beneath them,
-\code{straddle} --- so these six attributes are where a reader who wants the
-slope's own interval finds it. They describe the whole table, so a
-subset such as \code{x[1:3, ]} drops them \emph{and} the class, returning a plain
-data frame of the surviving cells, printed as one.
+are shared by every cell: \code{R}, \code{ci_method} (as requested), \code{statistic}
+(\code{"n"} or \code{"power"}), \code{level}, \code{se}, \code{n_refit_failed} (replicates whose
+stage-one refit failed, before any per-cell solve is attempted),
+\code{straddle}, \code{per_arm} (as requested, or overridden at print time), and
+\code{slope_observed}, \code{slope_mean}, \code{slope_sd}, \code{slope_ci},
+\code{slope_ci_method}, \code{slope_replicates} -- the same summary of the refitted
+slopes a single-design bootstrap result carries, since the slope is what
+the resampling actually perturbs and every cell's interval is a function
+of it. The printed table does not show them --- it reports the cells and,
+beneath them, \code{straddle} --- so these six attributes are where a reader
+who wants the slope's own interval finds it. They describe the whole
+table, so a subset such as \code{x[1:3, ]} drops them \emph{and} the class,
+returning a plain data frame of the surviving cells, printed as one.
 }
 \description{
-The bootstrap counterpart of \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}}: prices the same
-cross product of visit schedules and dropout assumptions, and puts a
-confidence interval around the sample size -- and the target treatment
-effect behind it -- that each one needs. Nash et al. (2021, section 2.6)
-recommends the interval precisely because the variance components behind a
-sample size are themselves estimated; that matters most exactly when a
-design is being chosen from several, which is what a grid is for.
+The bootstrap counterparts of \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} and
+\code{\link[=slope_power_grid]{slope_power_grid()}}: they price the same cross product of visit schedules
+and dropout assumptions, and put a confidence interval around what each one
+solves for --- the sample size a design needs, or the power it achieves ---
+and around the target treatment effect behind it. Nash et al. (2021,
+section 2.6) recommends the interval precisely because the variance
+components behind a sample size are themselves estimated; that matters most
+exactly when a design is being chosen from several, which is what a grid is
+for.
 }
 \details{
 Every design shares one set of resampled replicates rather than being
 bootstrapped independently: the resampling scheme -- which subjects are
 drawn, and the refitted stage-one parameters that come back -- depends only
-on \code{params}, never on the design being priced (see \code{\link[=slope_bootstrap]{slope_bootstrap()}}'s
-own resampling scheme, which this reuses unchanged). So \code{R} replicates,
-refit once, price every cell in the table, rather than \code{R} refits \emph{per
-cell}: a nine-cell grid at the default \code{R = 999} costs about what one
-\code{\link[=slope_bootstrap]{slope_bootstrap()}} call does, not nine times it. Sharing the replicates
-also makes the comparison between cells paired: two designs' intervals move
-together with whatever the resampling happened to do to the slope, so a
-real difference between two designs is not confounded with two
-independently-drawn samples' worth of Monte Carlo noise -- precisely the
-comparison a grid exists to support.
+on \code{params}, never on the design being priced (see
+\code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}'s own resampling scheme, which this reuses
+unchanged). So \code{R} replicates, refit once, price every cell in the table,
+rather than \code{R} refits \emph{per cell}: a nine-cell grid at the default
+\code{R = 999} costs about what one \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} call does, not
+nine times it. Sharing the replicates also makes the comparison between
+cells paired: two designs' intervals move together with whatever the
+resampling happened to do to the slope, so a real difference between two
+designs is not confounded with two independently-drawn samples' worth of
+Monte Carlo noise -- precisely the comparison a grid exists to support.
 
-A cell with fewer than two surviving replicates -- both the sample size and
-the target treatment effect can fail independently, since a resampled
+A cell with fewer than two surviving replicates -- the solved-for quantity
+and the target treatment effect can fail independently, since a resampled
 slope difference can occasionally make the effect size non-finite -- is not
-fatal to the whole grid the way it is to a single \code{\link[=slope_bootstrap]{slope_bootstrap()}} call.
-Losing one cell of several does not justify discarding a run that may have
-taken several minutes to resample; that cell's interval columns are \code{NA}
-instead, and every such cell is named once in a warning. The grid only
-stops if not a single cell could be bootstrapped at all.
+fatal to the whole grid the way it is to a single-design bootstrap. Losing
+one cell of several does not justify discarding a run that may have taken
+several minutes to resample; that cell's interval columns are \code{NA} instead,
+and every such cell is named once in a warning. The grid only stops if not a
+single cell could be bootstrapped at all.
 }
-\section{Methods (by generic)}{
-\itemize{
-\item \code{print(slope_sample_size_grid_boot)}: Print a bootstrapped sample-size grid.
-
-Printed as data frames, by R itself, rather than as a hand-drawn table: a
-grid \emph{is} a data frame, \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} prints as one, and this
-shows exactly that table plus three columns --- \code{n_mean}, \code{n_sd}, and the
-interval as one \code{n_ci} column reading "924 to 1704". A second frame follows
-it for the target treatment effect when \code{effectiveness} varies, since that
-is the only axis it depends on. Everything shared by every cell --- the
-method, the replicate count, the interval level, and the failure and
-sign-straddling counts --- is reported in the notes beneath, which print on
-every call whether or not anything went wrong.
-
-\code{n}, \code{visits}, \code{n_mean}, \code{n_sd} and \code{n_ci} are shown on one basis --
-participants per arm by default -- rather than as the \code{n}/\code{n_per_arm} and
-\code{visits_total}/\code{visits_per_arm} pairs the underlying table carries; a
-"Counts:" note above the other notes says which basis is on the page. This
-is display only: the object itself is unaffected, and \code{print(x, per_arm = !attr(x, "per_arm"))} shows the other basis of the same table without
-rebuilding it.
-
-The resampled slope is not shown. It is still on the object, in the
-\code{slope_observed} attribute and the five beside it, and the straddle note
-still reports the one thing about it that bears on whether these intervals
-mean anything.
-
-Falls back to \code{print.data.frame()} when the bootstrap attributes are
-missing -- as they are after e.g. \code{x[1:3, ]}, since base \verb{[.data.frame}
-drops attributes it does not know about. A row-subsetted table is still
-every bit a data frame; it just no longer carries the summary this method
-exists to show.
-
-}}
 \examples{
 # No comparator: fitted to all two hundred participants of `slpower1`.
 # A real run wants the default R = 999; this uses far fewer so the example
-# runs quickly, the same trade-off slope_bootstrap()'s own examples make.
+# runs quickly, the same trade-off slope_sample_size_boot()'s own examples
+# make.
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 
 \donttest{
@@ -200,10 +191,18 @@ slope_sample_size_grid_boot(
   visits  = list(annual = c(0, 1, 2, 3), six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05)),
   R = 50, seed = 42)
+
+# The converse table: the power a fixed 450 participants achieves.
+slope_power_grid_boot(
+  pars, n = 450, effectiveness = 0.33,
+  visits  = list(annual = c(0, 1, 2, 3), six_month = seq(0, 3, 0.5)),
+  dropout = list(none = NULL, `5pc` = dropout_rate(0.05)),
+  R = 50, seed = 42)
 }
 
 }
 \seealso{
-\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} for the point estimates alone,
-\code{\link[=slope_bootstrap]{slope_bootstrap()}} to bootstrap a single design, \code{\link[=dropout_rate]{dropout_rate()}}
+\code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} and \code{\link[=slope_power_grid]{slope_power_grid()}} for the point
+estimates alone, \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} and \code{\link[=slope_power_boot]{slope_power_boot()}} to
+bootstrap a single design, \code{\link[=dropout_rate]{dropout_rate()}}
 }

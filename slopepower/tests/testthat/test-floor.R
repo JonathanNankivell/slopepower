@@ -59,7 +59,7 @@ test_that("slope_var_floor() rejects a non-params object", {
   expect_error(slope_var_floor(c(0, 1, 2)), "slope_var_floor\\(\\).*slope_params")
 })
 
-# --- slope_sample_size_floor(), params method -------------------------------
+# --- slope_sample_size_floor() ----------------------------------------------
 
 test_that("the floor bounds every design, and no design beats it", {
   p <- ref_params()
@@ -72,8 +72,8 @@ test_that("the floor bounds every design, and no design beats it", {
   }
 
   # Dropout only ever raises the requirement, so the bound survives it.
-  d <- trial_design(c(0, 1, 2, 3), dropout = c(0, 0.1, 0.2))
-  expect_gte(slope_sample_size(p, d, effectiveness = 0.33)$n, flr$n)
+  expect_gte(slope_sample_size(p, c(0, 1, 2, 3), c(0, 0.1, 0.2), effectiveness = 0.33)$n,
+             flr$n)
 })
 
 test_that("the floor is the limit a long dense schedule actually reaches", {
@@ -139,59 +139,38 @@ test_that("the floor enforces the same guards as the stage-two entry points", {
 
 test_that("the floor rejects arguments it has no use for", {
   p <- ref_params()
-  # `design` is the one a reader of slope_sample_size() would reach for, and
-  # silently ignoring it would make the result look design-specific.
-  expect_error(slope_sample_size_floor(p, design = c(0, 1, 2)), "unused argument")
+  # `visits` is the one a reader of slope_sample_size() would reach for, and
+  # silently ignoring it would make the result look design-specific. It is not
+  # an argument at all, so R's own matching refuses it.
+  expect_error(slope_sample_size_floor(p, visits = c(0, 1, 2)), "unused argument")
+  expect_error(slope_sample_size_floor(p, dropout = c(0, 0.1)), "unused argument")
   expect_error(slope_sample_size_floor(p, n = 400), "unused argument")
 })
 
-test_that("slope_sample_size_floor() rejects an object it cannot use", {
-  expect_error(slope_sample_size_floor(c(0, 1, 2)), "cannot compute a floor")
-  expect_error(slope_sample_size_floor(trial_design(c(0, 1, 2))), "cannot compute a floor")
-})
-
-# --- slope_sample_size_floor(), result method -------------------------------
-
-test_that("the result method reuses the settings of the call that produced it", {
+test_that("slope_sample_size_floor() takes parameters, not a result", {
+  # It used to be a generic that also accepted a stage-two result and reused
+  # its settings. It is now an ordinary function with the stage-two argument
+  # order, so a result -- or anything else -- is refused by the parameter check.
   p <- ref_params()
-  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33,
-                          power = 0.9, alpha = 0.01)
-  from_result <- slope_sample_size_floor(ss)
-  from_params <- slope_sample_size_floor(p, effectiveness = 0.33,
-                                         power = 0.9, alpha = 0.01)
-  expect_equal(from_result[setdiff(names(from_result), "params")],
-               from_params[setdiff(names(from_params), "params")])
-  expect_lte(from_result$n, ss$n)
+  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
+  expect_error(slope_sample_size_floor(ss), "`params` must be a `slope_params` object")
+  expect_error(slope_sample_size_floor(c(0, 1, 2)), "`params` must be a `slope_params` object")
+  expect_identical(names(formals(slope_sample_size_floor)),
+                   c("params", "power", "effectiveness", "target", "alpha", "per_arm"))
 })
 
-test_that("the result method carries target = \"observed\" through", {
-  treated <- ref_params("treated", slope = -1.852, slope_comparator = -1.104)
-  ss <- slope_sample_size(treated, c(0, 2, 3), target = "observed")
-  flr <- slope_sample_size_floor(ss)
-  expect_identical(flr$target, "observed")
-  expect_equal(flr$tte, ss$tte)
+test_that("the floor at a result's settings bounds that result", {
+  p <- ref_params()
+  ss <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33, power = 0.9, alpha = 0.01)
+  flr <- slope_sample_size_floor(p, power = 0.9, effectiveness = 0.33, alpha = 0.01)
   expect_lte(flr$n, ss$n)
-})
 
-test_that("a slope_power result contributes the power it achieves", {
-  p <- ref_params()
-  pw <- slope_power(p, c(0, 1, 2), n = 450, effectiveness = 0.33)
-  flr <- slope_sample_size_floor(pw)
-  expect_equal(flr$power, pw$power)
-  # The smallest n that could reach that power, so no larger than the n that did.
-  expect_lte(flr$n, pw$n)
-})
-
-test_that("a saturated power is refused rather than reported as infinite", {
-  p <- ref_params()
-  pw <- slope_power(p, c(0, 1, 2), n = 2e5, effectiveness = 0.33)
-  expect_identical(pw$power, 1)
-  expect_error(slope_sample_size_floor(pw), "power is 1 to within double precision")
-})
-
-test_that("the result method rejects settings that belong to the original call", {
-  ss <- slope_sample_size(ref_params(), c(0, 1, 2), effectiveness = 0.33)
-  expect_error(slope_sample_size_floor(ss, power = 0.9), "unused argument")
+  treated <- ref_params("treated", slope = -1.852, slope_comparator = -1.104)
+  ss_obs <- slope_sample_size(treated, c(0, 2, 3), target = "observed")
+  flr_obs <- slope_sample_size_floor(treated, target = "observed")
+  expect_identical(flr_obs$target, "observed")
+  expect_equal(flr_obs$tte, ss_obs$tte)
+  expect_lte(flr_obs$n, ss_obs$n)
 })
 
 # --- the result object ------------------------------------------------------
@@ -261,4 +240,156 @@ test_that("the floor reproduces the vignette's slpower1 figure", {
   expect_identical(slope_sample_size(p1, seq(0, 50, length.out = 501),
                                      effectiveness = 0.33)$n, flr$n)
   expect_gt(slope_sample_size(p1, c(0, 1, 2), effectiveness = 0.33)$n, 2 * flr$n)
+})
+
+# --- slope_power_ceiling() ----------------------------------------------------
+
+test_that("the power ceiling bounds every design's power, and no design beats it", {
+  p <- ref_params()
+  ceil <- slope_power_ceiling(p, n = 300, effectiveness = 0.33)
+  expect_s3_class(ceil, c("slope_power_ceiling", "slope_result"), exact = TRUE)
+  set.seed(11)
+  for (i in 1:25) {
+    v <- sort(c(0, runif(sample.int(5L, 1L), 0.05, 20)))
+    expect_lt(slope_power(p, v, n = 300, effectiveness = 0.33)$power, ceil$power)
+  }
+  # Dropout only ever lowers power, so the ceiling survives it.
+  expect_lt(slope_power(p, c(0, 1, 2, 3), c(0, 0.1, 0.2), n = 300,
+                        effectiveness = 0.33)$power, ceil$power)
+  # A long, dense schedule approaches it.
+  expect_equal(slope_power(p, seq(0, 100, length.out = 1001), n = 300,
+                           effectiveness = 0.33)$power, ceil$power, tolerance = 1e-3)
+})
+
+test_that("the power ceiling and the sample-size floor are inverses", {
+  # The same limiting variance and the same algebra as slope_power() and
+  # slope_sample_size(): the floor sample size reaches the target power at the
+  # ceiling, and one participant per arm fewer does not.
+  p <- ref_params()
+  flr <- slope_sample_size_floor(p, power = 0.9, effectiveness = 0.33)
+  expect_gte(slope_power_ceiling(p, n = flr$n, effectiveness = 0.33)$power, 0.9)
+  expect_lt(slope_power_ceiling(p, n = flr$n - 2, effectiveness = 0.33)$power, 0.9)
+  expect_equal(slope_power_ceiling(p, n = flr$n, effectiveness = 0.33)$var_tte, flr$var_tte)
+})
+
+test_that("slope_power_ceiling() takes slope_power()'s arguments minus the design", {
+  p <- ref_params()
+  expect_identical(names(formals(slope_power_ceiling)),
+                   c("params", "n", "effectiveness", "target", "alpha", "per_arm"))
+  expect_error(slope_power_ceiling(p), "`n` is required")
+  expect_error(slope_power_ceiling(p, n = NULL), "`n` is required")
+  expect_error(slope_power_ceiling(p, n = 1), "n")
+  expect_error(slope_power_ceiling(p, n = 100, visits = c(0, 1, 2)), "unused argument")
+  expect_error(slope_power_ceiling(p, n = 100, power = 0.8), "unused argument")
+  expect_error(slope_power_ceiling(p, n = 100, effectiveness = 0.33, target = "observed"),
+               "only one of")
+  # An odd n is evened down, as in slope_power(), with the request kept.
+  r <- slope_power_ceiling(p, n = 301, effectiveness = 0.33)
+  expect_equal(c(r$n, r$n_per_arm, r$n_requested), c(300, 150, 301))
+  expect_null(r$design)
+})
+
+test_that("the power ceiling carries target = \"observed\" through", {
+  treated <- ref_params("treated", slope = -1.852, slope_comparator = -1.104)
+  ceil <- slope_power_ceiling(treated, n = 300, target = "observed")
+  expect_identical(ceil$target, "observed")
+  expect_true(is.na(ceil$effectiveness))
+  expect_lt(slope_power(treated, c(0, 2, 3), n = 300, target = "observed")$power,
+            ceil$power)
+})
+
+test_that("the power ceiling prints and tabulates like the other results", {
+  p <- ref_params()
+  ceil <- slope_power_ceiling(p, n = 300, effectiveness = 0.33)
+  out <- capture.output(print(ceil))
+  expect_true(any(grepl("Upper bound on power", out, fixed = TRUE)))
+  expect_true(any(grepl("any (the bound holds for all)", out, fixed = TRUE)))
+  expect_true(any(grepl("N per arm", out, fixed = TRUE)))
+  expect_true(any(grepl("specified N = 300", capture.output(print(ceil, per_arm = FALSE)),
+                        fixed = TRUE)))
+
+  rows <- rbind(as.data.frame(slope_power(p, c(0, 1, 2), n = 300, effectiveness = 0.33)),
+                as.data.frame(ceil))
+  expect_identical(rows$solve_for, c("power", "power_ceiling"))
+  expect_true(is.na(rows$n_follow_up[2L]))
+})
+
+# --- slope_sample_size_floor_boot() and slope_power_ceiling_boot() -----------
+
+test_that("the bound bootstraps report the bound itself as the observed value", {
+  p <- paper_fit("slpower1")
+  fb <- suppressWarnings(slope_sample_size_floor_boot(p, effectiveness = 0.33, R = 6,
+                                                      ci_method = "percentile", seed = 1))
+  cb <- suppressWarnings(slope_power_ceiling_boot(p, n = 200, effectiveness = 0.33, R = 6,
+                                                  ci_method = "percentile", seed = 1))
+  expect_s3_class(fb, c("slope_sample_size_floor_boot", "slope_bootstrap"), exact = TRUE)
+  expect_s3_class(cb, c("slope_power_ceiling_boot", "slope_bootstrap"), exact = TRUE)
+  expect_identical(fb$statistic, "n")
+  expect_identical(cb$statistic, "power")
+  expect_equal(fb$observed, slope_sample_size_floor(p, effectiveness = 0.33)$n)
+  expect_equal(cb$observed, slope_power_ceiling(p, n = 200, effectiveness = 0.33)$power)
+
+  # A bootstrapped floor is a sample size: every replicate an even integer, and
+  # the interval widened onto that lattice, exactly as for slope_sample_size_boot().
+  expect_true(all(fb$replicates %% 2 == 0))
+  expect_true(fb$lattice)
+  expect_true(all(fb$ci %% 2 == 0))
+  expect_true(all(cb$replicates > 0 & cb$replicates < 1))
+  expect_false(cb$lattice)
+})
+
+test_that("the bound bootstraps resample exactly as every other bootstrap does", {
+  # Same seed, same subjects drawn, same refits: the slope summary must match
+  # the slope-only bootstrap's to the last replicate.
+  p <- paper_fit("slpower1")
+  ref <- suppressWarnings(slope_params_boot(p, R = 6, ci_method = "percentile", seed = 3))
+  fb <- suppressWarnings(slope_sample_size_floor_boot(p, effectiveness = 0.33, R = 6,
+                                                      ci_method = "percentile", seed = 3))
+  cb <- suppressWarnings(slope_power_ceiling_boot(p, n = 200, effectiveness = 0.33, R = 6,
+                                                  ci_method = "percentile", seed = 3))
+  expect_identical(fb$slope_replicates, ref$replicates)
+  expect_identical(cb$slope_replicates, ref$replicates)
+})
+
+test_that("the floor and the ceiling bootstrap the same target effect", {
+  p <- paper_fit("slpower1")
+  ft <- suppressWarnings(slope_sample_size_floor_boot(p, effectiveness = 0.33, R = 6,
+                                                      statistic = "tte",
+                                                      ci_method = "percentile", seed = 4))
+  ct <- suppressWarnings(slope_power_ceiling_boot(p, n = 200, effectiveness = 0.33, R = 6,
+                                                  statistic = "tte",
+                                                  ci_method = "percentile", seed = 4))
+  expect_identical(ft$replicates, ct$replicates)
+  expect_equal(ft$observed, slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$tte)
+})
+
+test_that("the bound bootstraps take their bound's arguments and refuse the rest", {
+  p <- paper_fit("slpower1")
+  expect_identical(
+    names(formals(slope_sample_size_floor_boot)),
+    c(names(formals(slope_sample_size_floor))[1:5], "statistic", "R", "ci_method",
+      "level", "seed", "progress", "per_arm"))
+  expect_identical(
+    names(formals(slope_power_ceiling_boot)),
+    c(names(formals(slope_power_ceiling))[1:5], "statistic", "R", "ci_method",
+      "level", "seed", "progress", "per_arm"))
+
+  expect_error(slope_power_ceiling_boot(p), "`n` is required")
+  expect_error(slope_sample_size_floor_boot(p, statistic = "power"),
+               "use\\s+slope_power_ceiling_boot\\(\\) instead")
+  expect_error(slope_power_ceiling_boot(p, n = 200, statistic = "n"),
+               "use\\s+slope_sample_size_floor_boot\\(\\) instead")
+  expect_error(slope_sample_size_floor_boot(p, visits = c(0, 1, 2)), "unused argument")
+  expect_error(slope_sample_size_floor_boot(p, R = 0), "R")
+  expect_error(slope_sample_size_floor_boot(ref_params(), R = 5), "no fitted model")
+  expect_error(slope_power_ceiling_boot(ref_params(), n = 200, R = 5), "no fitted model")
+})
+
+test_that("a bound bootstrap prints with its own class name", {
+  p <- paper_fit("slpower1")
+  fb <- suppressWarnings(slope_sample_size_floor_boot(p, effectiveness = 0.33, R = 6,
+                                                      ci_method = "percentile", seed = 1))
+  out <- capture.output(print(fb))
+  expect_identical(out[1L], "<slope_sample_size_floor_boot>")
+  expect_true(any(grepl("per arm", out, fixed = TRUE)))
 })

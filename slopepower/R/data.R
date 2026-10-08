@@ -64,7 +64,7 @@
 #' # Dates to years, as on p.590, then the paper's fit: slope -1.715.
 #' d <- slpower2
 #' d$time <- as.numeric(d$vdate) / 365
-#' slope_params(sdmt ~ time | id, data = d, healthy = case)
+#' slope_params(sdmt ~ time | id, data = d, comparator = "healthy", group = case)
 #'
 #' @seealso [slpower1], [slpower3].
 "slpower2"
@@ -100,7 +100,7 @@
 #'
 #' @examples
 #' # The paper's p.594 fit: control slope -1.852, treated -1.104.
-#' slope_params(sdmt ~ visit | id, data = slpower3, treated = treat)
+#' slope_params(sdmt ~ visit | id, data = slpower3, comparator = "treated", group = treat)
 #'
 #' @seealso [slpower1], [slpower2].
 "slpower3"

@@ -65,7 +65,7 @@ trial <- sim_trial()
 Stage one recovers what happened:
 
 ```{r fit}
-pars <- slope_params(sdmt ~ visit | id, trial, treated = treat)
+pars <- slope_params(sdmt ~ visit | id, trial, comparator = "treated", group = treat)
 pars
 ```
 
@@ -74,7 +74,7 @@ value means the treatment harmed. The proposed trial, throughout, is three years
 with an interim visit at year two:
 
 ```{r design}
-design <- trial_design(c(0, 2, 3))
+visits <- c(0, 2, 3)
 ```
 
 ## Why `target = "observed"` is the wrong tool
@@ -96,10 +96,10 @@ by the same amount:
 
 ```{r sign-cancels}
 flipped <- transform(trial, treat = 1L - treat)
-pars_flipped <- slope_params(sdmt ~ visit | id, flipped, treated = treat)
+pars_flipped <- slope_params(sdmt ~ visit | id, flipped, comparator = "treated", group = treat)
 
-harm    <- suppressWarnings(slope_sample_size(pars, design, target = "observed"))
-benefit <- slope_sample_size(pars_flipped, design, target = "observed")
+harm    <- suppressWarnings(slope_sample_size(pars, visits, target = "observed"))
+benefit <- slope_sample_size(pars_flipped, visits, target = "observed")
 
 data.frame(
   scenario    = c("treatment harmed", "treatment helped (labels swapped)"),
@@ -119,7 +119,7 @@ almost never the trial anyone wants to run.
 only misdirected:
 
 ```{r warn}
-tryCatch(slope_sample_size(pars, design, target = "observed"),
+tryCatch(slope_sample_size(pars, visits, target = "observed"),
          warning = function(w) conditionMessage(w))
 ```
 
@@ -157,7 +157,7 @@ variance components — but supply `effectiveness` instead of
 150 participants contribute to the variance components:
 
 ```{r option-a}
-opt_a <- slope_sample_size(pars, design, effectiveness = 0.25)
+opt_a <- slope_sample_size(pars, visits, effectiveness = 0.25)
 opt_a
 ```
 
@@ -168,7 +168,7 @@ Drop the treated arm and treat what remains as a single untreated cohort:
 ```{r option-b}
 control_only <- subset(trial, treat == 0)
 pars_b <- slope_params(sdmt ~ visit | id, control_only)
-opt_b  <- slope_sample_size(pars_b, design, effectiveness = 0.25)
+opt_b  <- slope_sample_size(pars_b, visits, effectiveness = 0.25)
 opt_b
 ```
 
@@ -243,7 +243,7 @@ true_pars <- slope_params_manual(
   sigma2_slope = truth$s2b, sigma_cov = truth$sab,
   sigma2_residual = truth$s2e
 )
-true_res <- slope_sample_size(true_pars, design, effectiveness = 0.25)
+true_res <- slope_sample_size(true_pars, visits, effectiveness = 0.25)
 c(n = true_res$n, var_tte = true_res$var_tte)
 ```
 
@@ -255,8 +255,8 @@ R_sim <- 300   # the figures quoted in the text come from 2000
 set.seed(1)
 out <- t(vapply(seq_len(R_sim), function(i) {
   d <- sim_trial()
-  p <- slope_params(sdmt ~ visit | id, d, treated = treat)
-  z <- suppressWarnings(slope_sample_size(p, design, effectiveness = 0.25))
+  p <- slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat)
+  z <- suppressWarnings(slope_sample_size(p, visits, effectiveness = 0.25))
   c(slope = p$slope, s2a = p$sigma2_intercept, s2b = p$sigma2_slope,
     sab = p$sigma_cov, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n)
 }, numeric(7)))
@@ -349,8 +349,7 @@ pipeline rather than quote a point estimate:
 
 ```{r bootstrap}
 set.seed(2)
-slope_bootstrap(slope_sample_size(pars, design, effectiveness = 0.25),
-                R = 120, type = "bca")
+slope_sample_size_boot(pars, visits, effectiveness = 0.25, R = 120, ci_method = "bca")
 ```
 
 Use a much larger `R` in earnest — the paper uses 2000. Note that the bias
@@ -367,7 +366,7 @@ bias: at \(r = 2.5\) it is about 48%, at \(r = 6\) about 8%, at \(r = 10\) about
 es <- c(0.15, 0.20, 0.25, 0.33, 0.50)
 data.frame(
   effectiveness = es,
-  n = vapply(es, function(e) slope_sample_size(pars, design, effectiveness = e)$n, 1)
+  n = vapply(es, function(e) slope_sample_size(pars, visits, effectiveness = e)$n, 1)
 )
 ```
 
@@ -410,7 +409,7 @@ None of these is visible in a bootstrap interval.
    variance structure alone. Compare the two fits — it costs one line.
 4. The point estimate of `n` is median-unbiased and its mean is conservative by
    roughly \(3/r^2\). Do not correct for it.
-5. Spend the effort instead on `slope_bootstrap()` and on a sensitivity analysis
+5. Spend the effort instead on `slope_sample_size_boot()` and on a sensitivity analysis
    over `effectiveness` and over options A versus B. That is where the
    uncertainty actually lives.
 
@@ -423,7 +422,7 @@ None of these is visible in a bootstrap interval.
   the two implementations.
 * `?slope_params` -- the three models in full, including `target = "observed"`
   and what it targets.
-* `slope_bootstrap()` -- the tool this vignette recommends spending the
+* `slope_sample_size_boot()` -- the tool this vignette recommends spending the
   sensitivity-analysis effort on instead of correcting for the bias.
 * `vignette("what-is-s-star", package = "slopepower")` -- what the bootstrap is
   putting an interval around: `s*` derived from first principles, and the floor
