@@ -909,6 +909,9 @@ print_data_block <- function(x) {
   if (show_comparator) {
     cat_line(labels$comparator, params$slope_comparator)
   }
+  # Carried into every stage-two result: the answer is only right for a trial
+  # analysed with the same adjustment as stage one.
+  covariate_note(params$covariates)
   invisible(x)
 }
 

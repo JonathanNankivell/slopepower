@@ -71,11 +71,13 @@ boot_frame <- function(params, context) {
 #'   back one at a time, mixing two models within a single interval instead of
 #'   being reported as failures.
 #'
-#' It matters only under `healthy`, and there only through `slope_comparator`.
-#' The model factorises per group (see the `common_variance` note in
-#' [slope_params()]), so the case estimates are invariant; the *controls'* slope
-#' is not, and that is what `slope_difference` -- and so every stage-two answer
-#' -- is measured against. Balanced complete data hides this entirely, because
+#' It matters only under `healthy`. Without covariates it matters only through
+#' `slope_comparator`: the model factorises per group (see the `common_variance`
+#' note in [slope_params()]), so the case estimates are invariant. With
+#' covariates the shared coefficients couple the groups and the case estimates
+#' can move too. Either way the *controls'* slope is not invariant, and that is
+#' what `slope_difference` -- and so every stage-two answer -- is measured
+#' against. Balanced complete data hides this entirely, because
 #' GLS then coincides with OLS whatever the covariance structure; ragged
 #' follow-up does not, and resampling preserves each subject's own visit
 #' pattern, so an unbalanced study stays unbalanced in every replicate.

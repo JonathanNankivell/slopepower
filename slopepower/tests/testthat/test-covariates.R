@@ -167,7 +167,10 @@ test_that("bootstrap and jackknife refits survive a rare factor level going miss
 
 test_that("model.matrix-style covariate formulas are expanded as documented", {
   d <- cov_data()
-  labs <- function(f) unname(attr(covariate_matrix(f, d, "test"), "labels"))
+  labs <- function(f) {
+    unname(covariate_basis(f, covariate_variables(f, d, "test"), d$id,
+                           rep(TRUE, nrow(d)), "test")$labels)
+  }
   expect_equal(labs(~ age * sex), c("age", "sexM", "age:sexM"))
   expect_equal(labs(~ 0 + sex), "sexM")      # always coded against an intercept
   expect_equal(labs(~ sex - 1), "sexM")
@@ -181,4 +184,105 @@ test_that("model.matrix-style covariate formulas are expanded as documented", {
                "offset")
   expect_error(suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age + visit)),
                "`visit` changes during follow-up")
+})
+
+# ---- review fixes: covariate adjustment ------------------------------------
+
+healthy_cov_data <- function(seed = 7) {
+  set.seed(seed)
+  h <- slpower2
+  ids <- unique(h$id)
+  case <- tapply(h$case, h$id, `[`, 1L)[as.character(ids)]
+  # cases older than controls, and age prognostic for slope
+  age <- stats::setNames(stats::rnorm(length(ids), ifelse(case == 1, 55, 40), 8), ids)
+  h$age <- age[as.character(h$id)]
+  h$t <- as.numeric(h$vdate) / 365
+  h$sdmt <- h$sdmt - 0.05 * (h$age - 47) * (h$t - stats::ave(h$t, h$id, FUN = min))
+  h
+}
+
+test_that("the reduced-structure note does not claim case estimates are unaffected under covariates", {
+  h <- healthy_cov_data()
+  p <- suppressMessages(slope_params(sdmt ~ t | id, h, healthy = case,
+                                     covariates = ~ age, common_variance = TRUE))
+  out <- capture.output(print(p))
+  expect_false(any(grepl("Case estimates are unaffected", out, fixed = TRUE)))
+  expect_true(any(grepl("can shift the case", out, fixed = TRUE)))
+})
+
+test_that("poly() works with a covariate recorded on the baseline row only", {
+  d <- cov_data()
+  full <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ poly(age, 2)))
+  d$age[duplicated(d$id)] <- NA
+  p <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ poly(age, 2)))
+  expect_equal(p$slope, full$slope, tolerance = 1e-10)
+  expect_equal(p$sigma2_slope, full$sigma2_slope, tolerance = 1e-10)
+  # and a participant with no value at all is removed rather than failing poly()
+  d$age[d$id == d$id[1]] <- NA
+  q <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ poly(age, 2)))
+  expect_equal(q$n_subjects, length(unique(d$id)) - 1L)
+})
+
+test_that("a data-dependent basis does not depend on how many visits participants have", {
+  d <- cov_data()
+  f <- ~ splines::ns(age, 3)
+  per_participant <- function(dd) {
+    b <- covariate_basis(f, covariate_variables(f, dd, "test"), dd$id,
+                         rep(TRUE, nrow(dd)), "test")$X
+    b[!duplicated(dd$id), , drop = FALSE]
+  }
+  # duplicate every visit of the first ten participants: their weight per visit
+  # doubles, but they are still the same participants
+  extra <- d[d$id %in% unique(d$id)[1:10], ]
+  expect_equal(unname(per_participant(rbind(d, extra))), unname(per_participant(d)))
+})
+
+test_that("a covariate aliased with the group or another covariate is named, not fitted", {
+  h <- healthy_cov_data()
+  h$case_copy <- h$case
+  expect_error(suppressWarnings(suppressMessages(
+    slope_params(sdmt ~ t | id, h, healthy = case, covariates = ~ case_copy))),
+    "fixed by `healthy`")
+  d <- cov_data()
+  d$age2 <- 2 * d$age + 1
+  expect_error(suppressMessages(
+    slope_params(sdmt ~ visit | id, d, covariates = ~ age + age2)),
+    "`age2`, `time:age2` are an exact linear combination")
+})
+
+test_that("under healthy, covariates are centred on the cases", {
+  h <- healthy_cov_data()
+  p <- suppressMessages(slope_params(sdmt ~ t | id, h, healthy = case, covariates = ~ age))
+  g <- nlme::getData(p$fit)
+  first <- !duplicated(g$sp_subject)
+  expect_equal(mean(g$sp_cov_1[first & g$sp_case == 1]), 0, tolerance = 1e-10)
+  # the case slope is the slope at the cases' mean age, which a pooled
+  # centring would have shifted by delta * (case mean - pooled mean)
+  ages <- tapply(h$age, h$id, `[`, 1L)
+  cases <- tapply(h$case, h$id, `[`, 1L) == 1
+  delta <- nlme::fixef(p$fit)[["sp_time:sp_cov_1"]]
+  b <- nlme::fixef(p$fit)
+  expect_equal(p$slope, b[["sp_time"]] + b[["sp_case:sp_time"]])
+  pooled_slope <- p$slope + delta * (mean(ages) - mean(ages[cases]))
+  expect_gt(abs(p$slope - pooled_slope), 0.1)
+})
+
+test_that("the adjustment is recorded on the object and printed through stage two", {
+  d <- cov_data()
+  u <- suppressMessages(slope_params(sdmt ~ visit | id, d))
+  expect_null(u$covariates)
+  a <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age + sex))
+  expect_identical(a$covariates, list(columns = c("age", "sexM"), time = TRUE))
+  a0 <- suppressMessages(slope_params(sdmt ~ visit | id, d, covariates = ~ age,
+                                      covariate_time = FALSE))
+  expect_false(a0$covariates$time)
+  expect_true(grepl("adjusted for baseline covariates age, sexM, and their interactions",
+                    paste(trimws(capture.output(print(a))), collapse = " "), fixed = TRUE))
+  n <- slope_sample_size(a, c(0, 1, 2), effectiveness = 0.5)
+  expect_true(any(grepl("adjusted for baseline covariates",
+                        capture.output(print(n)), fixed = TRUE)))
+  expect_false(any(grepl("adjusted for",
+                         capture.output(print(slope_sample_size(u, c(0, 1, 2),
+                                                                effectiveness = 0.5))),
+                         fixed = TRUE)))
 })
