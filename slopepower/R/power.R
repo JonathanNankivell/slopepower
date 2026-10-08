@@ -15,6 +15,25 @@ PARAM_FIELDS <- c("slope", "slope_comparator", "comparator",
                   "sigma2_intercept", "sigma2_slope", "sigma_cov",
                   "sigma2_residual")
 
+#' Validate the slope and variance components of a `slope_params` object
+#'
+#' The one statement of these invariants, shared by [new_slope_params()] at
+#' construction and [check_params()] at use. `x` is a list carrying the five
+#' fields by name; `prefix` is how the caller's errors name them. Returns the
+#' five values as validated (coerced to double).
+#' @noRd
+check_param_values <- function(x, context, prefix = "") {
+  nm <- function(f) paste0(prefix, f)
+  out <- list(
+    slope            = check_scalar(x$slope, nm("slope"), context),
+    sigma2_intercept = check_variance(x$sigma2_intercept, nm("sigma2_intercept"), context),
+    sigma2_slope     = check_variance(x$sigma2_slope, nm("sigma2_slope"), context),
+    sigma2_residual  = check_variance(x$sigma2_residual, nm("sigma2_residual"), context),
+    sigma_cov        = check_scalar(x$sigma_cov, nm("sigma_cov"), context))
+  check_re_covariance(out$sigma2_intercept, out$sigma2_slope, out$sigma_cov, context)
+  out
+}
+
 #' Validate a `slope_params` object well enough to compute with it
 #' @noRd
 check_params <- function(params, context) {
@@ -28,20 +47,13 @@ check_params <- function(params, context) {
                  context, paste0("`", missing_fields, "`", collapse = ", ")),
          call. = FALSE)
   }
-  check_scalar(params$slope, "params$slope", context)
-  check_variance(params$sigma2_intercept, "params$sigma2_intercept", context)
-  check_variance(params$sigma2_slope, "params$sigma2_slope", context)
-  check_variance(params$sigma2_residual, "params$sigma2_residual", context)
-  check_scalar(params$sigma_cov, "params$sigma_cov", context)
-
-  # new_slope_params() checks this at construction time for both routes into
+  # new_slope_params() checks these at construction time for both routes into
   # the class, but a hand-built `slope_params` object bypasses it entirely --
   # and the marginal covariance built in sigma_at() can stay positive definite
   # even when the random-effects covariance itself is not, because a large
-  # enough sigma2_residual masks it. So it is re-checked here, the one gate
-  # every stage-two calculation funnels through, via the same helper
-  # new_slope_params() uses -- see check_re_covariance() in utils.R.
-  check_re_covariance(params$sigma2_intercept, params$sigma2_slope, params$sigma_cov, context)
+  # enough sigma2_residual masks it. So they are re-checked here, the one gate
+  # every stage-two calculation funnels through, by the same helper.
+  check_param_values(params, context, prefix = "params$")
 
   if (!is.character(params$comparator) || length(params$comparator) != 1L ||
       !params$comparator %in% c("none", "healthy", "treated")) {
@@ -436,6 +448,16 @@ slope_effect_size <- function(params, design,
 # the shared solver
 # ---------------------------------------------------------------------------
 
+#' The effect size the sample-size and power formulas see
+#'
+#' `abs(effect_size) * effectiveness` --- both factors, per CONTRACT.md
+#' section 5.5, where `effectiveness` also appears inside `tte`. That looks
+#' like double counting and is not, which is why the rule is written once.
+#' @noRd
+scale_effect <- function(effect_size, effectiveness) {
+  abs(effect_size) * effectiveness
+}
+
 #' Equation (6): the per-arm sample size a scaled effect needs
 #'
 #' The one place `ceiling((z_{1-alpha/2} + z_{power})^2 / effect^2)` is written.
@@ -444,8 +466,7 @@ slope_effect_size <- function(params, design,
 #' what makes "no design can beat this" a statement about the same arithmetic
 #' rather than about a second implementation of it.
 #'
-#' `scaled_effect` is `abs(effect_size) * effectiveness` --- both factors, per
-#' CONTRACT.md section 5.5.
+#' `scaled_effect` is [scale_effect()]'s value.
 #' @noRd
 size_per_arm <- function(scaled_effect, z_a, power) {
   z_sum_sq <- (z_a + stats::qnorm(power))^2
@@ -538,7 +559,7 @@ solve_slope <- function(params, design, effectiveness,
   comp <- effect_components(params, design, target, effectiveness, context)
 
   z_a <- z_alpha(alpha, context)
-  scaled_effect <- abs(comp$effect_size) * comp$effectiveness
+  scaled_effect <- scale_effect(comp$effect_size, comp$effectiveness)
 
   if (solving_for_n) {
     sized <- size_per_arm(scaled_effect, z_a, power)
@@ -850,6 +871,15 @@ schedule_string <- function(design) {
         collapse = ", ")
 }
 
+#' What every stage-two print method opens with: the data block, then the
+#' planned-study heading and its first line, `alpha`
+#' @noRd
+print_opening_blocks <- function(x) {
+  print_data_block(x)
+  cat("\nParameters for planned study:\n")
+  cat_line("alpha", x$alpha)
+}
+
 #' The "Data characteristics" block, common to both print methods
 #'
 #' Layout follows the Stata command's output closely, which makes results
@@ -879,6 +909,9 @@ print_data_block <- function(x) {
   if (show_comparator) {
     cat_line(labels$comparator, params$slope_comparator)
   }
+  # Carried into every stage-two result: the answer is only right for a trial
+  # analysed with the same adjustment as stage one.
+  covariate_note(params$covariates)
   invisible(x)
 }
 
@@ -922,9 +955,7 @@ print_design_block <- function(x) {
 #' @export
 print.slope_sample_size <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_sample_size()")
-  print_data_block(x)
-  cat("\nParameters for planned study:\n")
-  cat_line("alpha", x$alpha)
+  print_opening_blocks(x)
   cat_line("power", x$power)
   print_design_block(x)
   cat("\n  Estimated sample size:\n")
@@ -953,9 +984,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 #' @export
 print.slope_power <- function(x, ..., per_arm = NULL) {
   per_arm <- display_basis(x, per_arm, "print.slope_power()")
-  print_data_block(x)
-  cat("\nParameters for planned study:\n")
-  cat_line("alpha", x$alpha)
+  print_opening_blocks(x)
   if (per_arm) {
     # `n_requested` has not been evened, so its per-arm figure can be a half
     # participant -- cat_count() (utils.R) prints that decimal rather than

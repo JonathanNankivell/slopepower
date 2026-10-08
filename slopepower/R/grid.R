@@ -356,6 +356,11 @@ expected_visits <- function(design) {
     (1 - sum(design$dropout)) * length(design$visits)
 }
 
+#' The stage-two result fields every grid cell reports, in column order
+#' @noRd
+grid_result_cols <- c("n", "n_per_arm", "power", "alpha", "effectiveness",
+                      "tte", "var_tte", "effect_size")
+
 #' Walk the cross product of a normalised grid, evaluating one design per cell
 #'
 #' `evaluate(design, args)` takes a `trial_design` and the cell's values for the
@@ -374,22 +379,13 @@ grid_evaluate <- function(g, evaluate, context) {
   n_cells <- g$n_cells
   tte_direction <- character(0L)
 
-  # Eight columns, filled in place and returned as a list, made a data frame
+  # The result columns, filled in place and returned as a list, made a data frame
   # once by the caller. Assembling a one-row data frame per cell and
   # rbind()ing the list cost more than the calculation the grid exists to
   # perform -- about 2 ms a cell against 0.6 ms for the sample size itself, so
   # roughly 60% of a grid's total runtime went on building the table rather
   # than filling it.
-  res_cols <- list(
-    n             = numeric(n_cells),
-    n_per_arm     = numeric(n_cells),
-    power         = numeric(n_cells),
-    alpha         = numeric(n_cells),
-    effectiveness = numeric(n_cells),
-    tte           = numeric(n_cells),
-    var_tte       = numeric(n_cells),
-    effect_size   = numeric(n_cells)
-  )
+  res_cols <- sapply(grid_result_cols, function(nm) numeric(n_cells), simplify = FALSE)
 
   # The scalar axes' values for one cell, spliced into the stage-two call. The
   # names are the same in every cell, so the list is built once and refilled by
@@ -421,14 +417,7 @@ grid_evaluate <- function(g, evaluate, context) {
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
     # the other ten columns and discarding them.
-    res_cols$n[k]             <- res$n
-    res_cols$n_per_arm[k]     <- res$n_per_arm
-    res_cols$power[k]         <- res$power
-    res_cols$alpha[k]         <- res$alpha
-    res_cols$effectiveness[k] <- res$effectiveness
-    res_cols$tte[k]           <- res$tte
-    res_cols$var_tte[k]       <- res$var_tte
-    res_cols$effect_size[k]   <- res$effect_size
+    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]]
   }
 
   report_collected(context, tte_direction, n_cells,

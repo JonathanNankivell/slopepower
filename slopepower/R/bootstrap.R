@@ -71,11 +71,13 @@ boot_frame <- function(params, context) {
 #'   back one at a time, mixing two models within a single interval instead of
 #'   being reported as failures.
 #'
-#' It matters only under `healthy`, and there only through `slope_comparator`.
-#' The model factorises per group (see the `common_variance` note in
-#' [slope_params()]), so the case estimates are invariant; the *controls'* slope
-#' is not, and that is what `slope_difference` -- and so every stage-two answer
-#' -- is measured against. Balanced complete data hides this entirely, because
+#' It matters only under `healthy`. Without covariates it matters only through
+#' `slope_comparator`: the model factorises per group (see the `common_variance`
+#' note in [slope_params()]), so the case estimates are invariant. With
+#' covariates the shared coefficients couple the groups and the case estimates
+#' can move too. Either way the *controls'* slope is not invariant, and that is
+#' what `slope_difference` -- and so every stage-two answer -- is measured
+#' against. Balanced complete data hides this entirely, because
 #' GLS then coincides with OLS whatever the covariance structure; ragged
 #' follow-up does not, and resampling preserves each subject's own visit
 #' pattern, so an unbalanced study stays unbalanced in every replicate.
@@ -94,10 +96,10 @@ make_refitter <- function(params) {
   }
   cl <- as.call(c(list(quote(slope_params)), args,
                   if (identical(comparator, "healthy")) {
-                    # Only under `healthy`: slope_params() warns that
-                    # `common_variance` is ignored for the other two, and
-                    # passing it there would earn that warning several hundred
-                    # times over for an argument that changes nothing.
+                    # Only under `healthy`: for the other two slope_params()
+                    # ignores `common_variance` with a warning, so passing it
+                    # there would only ask for a warning -- one per refit,
+                    # muffled below -- about an argument that changes nothing.
                     list(healthy = quote(group),
                          common_variance = isTRUE(params$common_variance))
                   } else if (identical(comparator, "treated")) {
@@ -434,15 +436,16 @@ seed_bootstrap <- function(seed) {
 #' be re-expressed as a literal index at each read site, where getting it wrong
 #' yields a plausible acceleration rather than an error; here `slope_col()`
 #' knows the position because it is the function that chose it.
+#' @param setup As returned by [boot_setup()].
 #' @param computes The statistics' accessors, without the slope.
 #' @return `list(col = function(k), slope_col = function())`, both reading the
 #'   one memoised matrix.
 #' @noRd
-lazy_jackknife <- function(frame, subject_index, refitter, computes) {
+lazy_jackknife <- function(setup, computes) {
   jack <- NULL
   matrix_of <- function() {
     if (is.null(jack)) {
-      jack <<- jackknife_values(frame, subject_index, refitter,
+      jack <<- jackknife_values(setup$frame, setup$subject_index, setup$refitter,
                                 c(computes, list(function(p) p$slope)))
     }
     jack
@@ -569,9 +572,7 @@ boot_replicate_matrix <- function(setup, computes, R, progress, context) {
                   error = function(e) NULL)
     if (!is.null(p)) {
       slopes[b] <- p$slope
-      replicates[b, ] <- vapply(computes,
-                                function(f) tryCatch(f(p), error = function(e) NA_real_),
-                                numeric(1L))
+      replicates[b, ] <- eval_computes(computes, p)
     }
     if (isTRUE(progress) && b %% tick == 0L) {
       message(sprintf("%s: %d of %d replicates", context, b, R))
@@ -634,9 +635,6 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
   # stage-two call made, and under this interface the caller has already run
   # that exact call themselves to produce the object.
   setup <- boot_setup(params, context)
-  frame <- setup$frame
-  subject_index <- setup$subject_index
-  refitter <- setup$refitter
   se <- setup$se
 
   mat <- boot_replicate_matrix(setup, list(compute), R, progress, context)
@@ -669,7 +667,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, type, level,
 
   # One jackknife pass serves both intervals; lazy_jackknife() owns both the
   # memoisation and the convention that the slope accessor is appended last.
-  jack <- lazy_jackknife(frame, subject_index, refitter, list(compute))
+  jack <- lazy_jackknife(setup, list(compute))
 
   main <- boot_interval(good, observed, function() jack$col(1L), type, probs, context, "")
   # The replicate slopes get an interval of their own, so that the printed table
@@ -910,13 +908,6 @@ slope_bootstrap <- function(x, R = 999, type = c("bca", "percentile"), ...,
   UseMethod("slope_bootstrap")
 }
 
-#' Shared body of the two stage-two `slope_bootstrap()` methods
-#'
-#' `slope_bootstrap.slope_sample_size()` and `slope_bootstrap.slope_power()`
-#' differ only in which stage-two function is re-solved on each replicate,
-#' which of the object's own inputs is held fixed while doing so, and which
-#' statistics are on offer; everything else -- matching `statistic`, rejecting
-#' `...`, and the call to `run_bootstrap()` -- is identical.
 #' Build one replicate-statistic closure in an environment of its own
 #'
 #' The four things `compute` reads, and nothing else. See the note at its call
@@ -927,6 +918,13 @@ boot_stage_two_compute <- function(fn, slim, fixed, statistic) {
   function(p) do.call(fn, c(resolve_args(p, slim), fixed))[[statistic]]
 }
 
+#' Shared body of the two stage-two `slope_bootstrap()` methods
+#'
+#' `slope_bootstrap.slope_sample_size()` and `slope_bootstrap.slope_power()`
+#' differ only in which stage-two function is re-solved on each replicate,
+#' which of the object's own inputs is held fixed while doing so, and which
+#' statistics are on offer; everything else -- matching `statistic`, rejecting
+#' `...`, and the call to `run_bootstrap()` -- is identical.
 #' @noRd
 bootstrap_stage_two <- function(x, fn, fixed_name, choices, advice, label,
                                 R, type, statistic, level, seed, progress,
@@ -1023,6 +1021,15 @@ slope_bootstrap.default <- function(x, R = 999, type = c("bca", "percentile"),
     paste(sQuote(class(x)), collapse = "/")), call. = FALSE)
 }
 
+#' Read every statistic off one refit, a failing statistic becoming `NA`
+#'
+#' Shared by the replicate and jackknife loops, which must agree on how a
+#' statistic that cannot be computed off an otherwise good fit is recorded.
+#' @noRd
+eval_computes <- function(computes, p) {
+  vapply(computes, function(f) tryCatch(f(p), error = function(e) NA_real_), numeric(1L))
+}
+
 #' Leave-one-subject-out fits, read for several quantities at once
 #'
 #' The refit is the whole cost of a jackknife; reading a second number off one
@@ -1040,9 +1047,7 @@ jackknife_values <- function(frame, subject_index, refitter, computes) {
     p <- tryCatch(refitter(frame[-subject_index[[i]], , drop = FALSE]),
                   error = function(e) NULL)
     if (!is.null(p)) {
-      jack[i, ] <- vapply(computes,
-                          function(f) tryCatch(f(p), error = function(e) NA_real_),
-                          numeric(1L))
+      jack[i, ] <- eval_computes(computes, p)
     }
   })
   jack

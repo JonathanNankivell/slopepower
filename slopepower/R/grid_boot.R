@@ -44,11 +44,11 @@ grid_cell_args <- function(g) {
 #' giving the sample size [slope_sample_size()] would report against one
 #' resampled replicate's refitted parameters `p` and the cell's own design and
 #' scalar values. It is that function's own arithmetic -- [effect_components()]
-#' then [size_per_arm()], as [solve_slope()] (power.R) runs them -- but the
-#' effect size is shared, through [memo_scaled_effect()], by every cell with
-#' the same design and `effectiveness`: re-solving it once per `power` and
-#' `alpha` level as well made a D x P x A x E grid do D x P x A x E full
-#' solves per replicate, and per jackknife refit, where D x E would do.
+#' then [scale_effect()] and [size_per_arm()], as [solve_slope()] (power.R)
+#' runs them -- but the effect size is shared, through [memo_effect_size()], by
+#' every cell with the same design: re-solving it once per `power`, `alpha`
+#' and `effectiveness` level as well made a D x P x A x E grid do D x P x A x E
+#' full solves per replicate, and per jackknife refit, where D would do.
 #'
 #' `tte` gets one closure per *distinct* `effectiveness` level instead of one
 #' per cell. The target treatment effect is
@@ -92,30 +92,33 @@ grid_boot_computes <- function(g, target, context) {
   # `target = "observed"`, where `effectiveness` is not an axis and
   # `cell_args` carries none; match() pairs NA with NA, so every cell of such
   # a grid collapses onto the single closure it needs.
-  eff <- vapply(cell_args,
-                function(a) if (is.null(a$effectiveness)) NA_real_ else a$effectiveness,
-                numeric(1L))
+  eff <- vapply(cell_args, function(a) a$effectiveness %||% NA_real_, numeric(1L))
   eff_levels <- unique(eff)
   eff_of <- match(eff, eff_levels)
 
-  # The scaled effect size depends on the design and `effectiveness` alone, so
-  # cells differing only in `power` or `alpha` share one solve per replicate.
-  pair <- paste(g$design_of, eff_of)
-  pair_levels <- unique(pair)
-  effect <- lapply(pair_levels, function(key) {
-    k <- match(key, pair)
-    eff_k <- if (is.na(eff[k])) NULL else eff[k]
-    memo_scaled_effect(g$designs[[g$design_of[k]]], eff_k, target, context)
+  # The unscaled effect size depends on the design alone -- `effectiveness`
+  # scales it afterwards, and enters effect_components() only through `tte` --
+  # so every cell of a design shares one solve per replicate, whatever its
+  # `effectiveness`, `power` or `alpha`. Each design's solve is given the
+  # `effectiveness` of its first cell only because effect_components() needs
+  # one to validate.
+  effect <- lapply(seq_along(g$designs), function(d) {
+    e <- eff[match(d, g$design_of)]
+    memo_effect_size(g$designs[[d]], if (is.na(e)) NULL else e, target, context)
   })
-  pair_of <- match(pair, pair_levels)
+
+  # The effectiveness each level scales by. NA is the `target = "observed"`
+  # grid, where target_components() fixes it at 1.
+  eff_scale <- ifelse(is.na(eff_levels), 1, eff_levels)
 
   # alpha and power were validated by the point-estimate grid already solved
   # from these same cells, so z_alpha() is taken once here, not per replicate.
   n <- lapply(seq_len(g$n_cells), function(k) {
-    effect_k <- effect[[pair_of[k]]]
+    effect_k <- effect[[g$design_of[k]]]
+    scale_k <- eff_scale[eff_of[k]]
     z_a <- z_alpha(cell_args[[k]]$alpha, context)
     power_k <- cell_args[[k]]$power
-    function(p) 2 * size_per_arm(effect_k(p), z_a, power_k)$n_per_arm
+    function(p) 2 * size_per_arm(scale_effect(effect_k(p), scale_k), z_a, power_k)$n_per_arm
   })
 
   tte <- lapply(eff_levels, function(e) {
@@ -126,16 +129,15 @@ grid_boot_computes <- function(g, target, context) {
   list(n = n, tte = tte, tte_of = eff_of)
 }
 
-#' One design's scaled effect size against a replicate, remembered for the
-#' replicate
+#' One design's effect size against a replicate, remembered for the replicate
 #'
 #' [boot_replicate_matrix()] and [jackknife_values()] call every column's
-#' closure on the same `p` in turn, so the cells sharing a design and an
-#' `effectiveness` level ask for the same effect size one after another. This
-#' solves it for the first and hands it back to the rest: [effect_components()]
-#' -- the parameter check, the design's positive-definiteness check and every
-#' dropout stratum's variance -- is the whole cost of a stage-two solve, and
-#' [size_per_arm()] after it is a line of arithmetic.
+#' closure on the same `p` in turn, so the cells sharing a design ask for the
+#' same effect size one after another. This solves it for the first and hands
+#' it back to the rest: [effect_components()] -- the parameter check, the
+#' design's positive-definiteness check and every dropout stratum's variance --
+#' is the whole cost of a stage-two solve, and [scale_effect()] and
+#' [size_per_arm()] after it are a line of arithmetic each.
 #'
 #' `identical()` is the key, so a hit is exact rather than heuristic; for the
 #' same object it returns at once on the pointer. Only a success is
@@ -143,16 +145,15 @@ grid_boot_computes <- function(g, target, context) {
 #' asking, each one recorded as its own `NA`, exactly as before. The single
 #' replicate held between calls is the one in hand anyway.
 #'
-#' The value is `abs(effect_size) * effectiveness`, as [solve_slope()]
-#' (power.R) scales it before calling [size_per_arm()].
+#' The value is `effect_size` unscaled; each cell applies its own
+#' `effectiveness` with [scale_effect()], as [solve_slope()] (power.R) does.
 #' @noRd
-memo_scaled_effect <- function(design, effectiveness, target, context) {
+memo_effect_size <- function(design, effectiveness, target, context) {
   last_p <- NULL
   last <- NULL
   function(p) {
     if (!identical(p, last_p)) {
-      comp <- effect_components(p, design, target, effectiveness, context)
-      last <<- abs(comp$effect_size) * comp$effectiveness
+      last <<- effect_components(p, design, target, effectiveness, context)$effect_size
       last_p <<- p
     }
     last
@@ -366,7 +367,7 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL, power = 
   # memoisation run_bootstrap() uses for its own single jackknife, and owns the
   # convention that the slope accessor is appended last -- so this driver reads
   # `slope_col()` rather than counting columns to find it.
-  jack <- lazy_jackknife(setup$frame, setup$subject_index, setup$refitter, computes)
+  jack <- lazy_jackknife(setup, computes)
 
   slope_int <- boot_interval(good_slopes, params$slope, jack$slope_col, type, probs, context,
                              " for the replicate slopes")

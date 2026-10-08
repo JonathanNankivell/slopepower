@@ -286,8 +286,7 @@ trial_design <- function(visits,
 #' @noRd
 build_trial_design <- function(visits, dropout, dropout_type, ctx) {
   visits <- validate_visits(visits, ctx)
-  n_visits <- length(visits)
-  n_intervals <- n_visits - 1L
+  n_intervals <- length(visits) - 1L
 
   dropout <- validate_dropout(dropout, n_intervals, dropout_type, visits, ctx)
   warn_baseline_dropout(dropout, visits, ctx)

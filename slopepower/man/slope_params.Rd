@@ -60,11 +60,16 @@ coded against an intercept, so \code{~ 0 + sex} is the same as \code{~ sex}.
 \code{offset()} terms and \code{.} are refused. A value recorded on any of a
 participant's visits is used for all of them, so a covariate entered on
 the baseline row only is enough; participants with no value at all are
-removed by \code{na.action}. A column that does not vary between participants
-(e.g. an unused factor level) is dropped. Every column is centred at its
-mean over participants, so \code{slope} is the slope of a participant with
+removed by \code{na.action}. Factors, interactions and bases are expanded on
+one row per participant, so a basis's knots or scaling do not depend on
+how many visits each participant has. A column that does not vary between
+participants (e.g. an unused factor level) is dropped. Every column is
+centred at its mean over participants -- over the cases only when
+\code{healthy} is given -- so \code{slope} is the slope of a participant with those
 average covariate values. The returned variance components are then the
-\emph{adjusted} ones. See "Covariate adjustment" below.}
+\emph{adjusted} ones, and the object records the adjustment in \verb{$covariates}.
+A covariate that is an exact linear combination of the group indicator or
+of other covariates is refused. See "Covariate adjustment" below.}
 
 \item{covariate_time}{If \code{TRUE} (default), also include each covariate's
 interaction with time, so covariates can explain differences in slope as
@@ -102,13 +107,15 @@ The returned variance components are always those of the \strong{untreated / cas
 group. When \code{healthy} is supplied the controls contribute only their slope;
 their variance components are estimated and discarded, per paper section 2.3.
 
-Note that for the \code{healthy} scenario the model factorises exactly into two
-independent fits, one per group: the fixed effects \code{y ~ case * time} span the
-same column space as separate per-group intercepts and slopes, the
-random-effects blocks are independent, and the residual variances are
-separate. Consequently \code{common_variance} cannot change the estimates returned
-for the cases -- it only affects how many nuisance parameters are estimated
-for the controls, and therefore whether the fit converges at all.
+Note that for the \code{healthy} scenario without covariates the model factorises
+exactly into two independent fits, one per group: the fixed effects
+\code{y ~ case * time} span the same column space as separate per-group intercepts
+and slopes, the random-effects blocks are independent, and the residual
+variances are separate. Consequently \code{common_variance} cannot change the
+estimates returned for the cases -- it only affects how many nuisance
+parameters are estimated for the controls, and therefore whether the fit
+converges at all. With \code{covariates} this no longer holds; see "Covariate
+adjustment".
 }
 \section{The models fitted}{
 
@@ -144,8 +151,9 @@ returned slope is \eqn{\beta_1}{b1}. Equivalent to
 and, in addition, a \strong{separate} \eqn{G}{G} and a \strong{separate}
 \eqn{\sigma^2_\epsilon}{sigma2_residual} for each group. The slope of the
 cases is \eqn{\beta_1 + \beta_{1g}}{b1 + b1g} and that of the controls
-\eqn{\beta_1}{b1}; the variance components returned are the cases'. The
-model factorises into two independent per-group fits (see above).}
+\eqn{\beta_1}{b1}; the variance components returned are the cases'.
+Without covariates the model factorises into two independent per-group
+fits (see above).}
 \item{\code{treated = z}, with \eqn{z_i = 1}{z[i] = 1} for the treated arm}{
 \deqn{\mu(t) = \beta_0 + \beta_1 t + \beta_p (1 - z_i) t}{
           mu(t) = b0 + b1 * t + bp * (1 - z[i]) * t}
@@ -218,12 +226,22 @@ coefficients are shared by both groups, the random effects and residuals are
 unchanged, and the slope and variance components are extracted exactly as
 before -- they are now conditional on the covariates.
 
+Under \code{healthy} the covariates are centred at the mean of the \strong{cases}, not
+of everyone, because the planned trial enrols cases: \code{slope} is the slope of
+a case with the cases' average covariate values, and \code{slope_comparator} that
+of a healthy control with the same values. Their difference does not depend
+on where the covariates are centred. Under \code{treated} both arms come from the
+trial population, so everyone is used.
+
 Two consequences. First, stage two then assumes the planned trial will be
 analysed with the same adjustment: using adjusted variance components to
-plan an unadjusted analysis overstates power. Second, because the covariate
-coefficients are shared across groups, the \code{healthy} model no longer
-factorises into two independent fits, so \code{common_variance} can now move the
-cases' estimates slightly.
+plan an unadjusted analysis overstates power. The adjustment is recorded in
+the returned object's \verb{$covariates} -- a list of the \code{columns} adjusted for
+and whether their interactions with \code{time} were included, or \code{NULL} -- and
+is printed with the parameters and with every stage-two result. Second,
+because the covariate coefficients are shared across groups, the \code{healthy}
+model no longer factorises into two independent fits, so \code{common_variance}
+can now move the cases' estimates slightly.
 
 Baseline covariates are constant within a participant, so they reduce the
 between-participant variances (\code{sigma2_intercept}, and \code{sigma2_slope} via the

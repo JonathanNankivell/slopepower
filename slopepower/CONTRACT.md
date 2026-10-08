@@ -48,6 +48,8 @@ list(
   n_subjects        = <int>,   # subjects used in the fit; NA for manual
   common_variance   = <lgl>,   # TRUE if the comparator RE block was reduced (Stata `nocontvar`)
   time_shifted      = <lgl>,   # TRUE if any subject's first visit was moved to 0
+  covariates        = <list or NULL>,  # list(columns = <chr>, time = <lgl>): the adjustment
+                               #   the variance components are conditional on; NULL if none
   fit               = <model or NULL>,
   call              = <call>
 )

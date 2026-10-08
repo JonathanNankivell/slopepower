@@ -5,21 +5,6 @@
 # check. New code should prefer slope_params() + trial_design() +
 # slope_sample_size() or slope_power().
 
-#' Warn and reset an argument that does not apply to the chosen model
-#'
-#' Shared shape of `slopepower()`'s three "you supplied this, but the model
-#' you selected doesn't use it" checks: if `condition` holds, warn in
-#' `message` (one `%s` for `context`) and answer `off_value`; otherwise leave
-#' `value` untouched. `condition` already encodes both "was this supplied"
-#' and "does the chosen model use it", since the two differ by argument
-#' (`!is.null(x)` for `casecon`/`treat`, the bare flag for `usetrt`).
-#' @noRd
-warn_unused_arg <- function(value, condition, off_value, message, context) {
-  if (!condition) return(value)
-  warning(sprintf(message, context), call. = FALSE)
-  off_value
-}
-
 #' Sample size or power using the Stata command's interface
 #'
 #' A direct translation of the Stata `slopepower` command of Nash et al. (2021)
@@ -206,7 +191,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   # every slope_sample_size/slope_power result. That would pin slopepower()'s
   # whole frame -- `data` and `work`, a full second copy, included -- in
   # memory for as long as the result exists: the same leak
-  # fit_none_model()/fit_treated_model() in params.R were written to avoid
+  # fit_common_model() in params.R was written to avoid
   # for `params$fit`, one layer up.
   fml <- stats::as.formula(sprintf("`%s` ~ `.slopepower_time` | `%s`", depvar, subject),
                            env = baseenv())
