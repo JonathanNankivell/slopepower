@@ -26,7 +26,7 @@ test_that("slope_var() with dropout validates the design as slope_power() does",
   p <- paper_fit("slpower1")
   expect_error(slope_var(p, c(1, 2, 3), dropout = c(0, 0.1)), "baseline visit at time 0")
   expect_error(suppressWarnings(slope_var(p, c(0, 1, 2), dropout = c(1, 0))),
-               "effect size is zero")
+               "nothing to estimate the slope")
 })
 
 # --- slope_params(): subset and control ----------------------------------------
@@ -48,7 +48,10 @@ test_that("a malformed `subset` is refused", {
   expect_error(slope_params(sdmt ~ visit | id, data = slpower1, subset = c(TRUE, FALSE)),
                "one value per row")
   expect_error(slope_params(sdmt ~ visit | id, data = slpower1, subset = "a"),
-               "logical vector, or row numbers")
+               "distinct row numbers")
+  for (bad in list(c(-1, 2), 0, c(1, 1, 2)))
+    expect_error(slope_params(sdmt ~ visit | id, data = slpower1, subset = bad),
+                 "distinct row numbers")
 })
 
 test_that("`control` defaults to slope_lme_control() and is recorded", {
@@ -63,6 +66,20 @@ test_that("slope_lme_control() overrides some settings and keeps the rest", {
   expect_equal(ctrl$maxIter, 500)
   expect_equal(ctrl[setdiff(names(ctrl), "maxIter")],
                slope_lme_control()[setdiff(names(ctrl), "maxIter")])
+})
+
+test_that("slope_lme_control() refuses settings it cannot pass on", {
+  expect_error(slope_lme_control(500), "must be named")
+  expect_error(slope_lme_control(maxiter = 500), "maxiter.? is not a setting")
+})
+
+test_that("`control` settings that change the model rather than the effort are refused", {
+  expect_error(slope_params(sdmt ~ visit | id, data = slpower1,
+                            control = slope_lme_control(returnObject = TRUE)),
+               "returnObject` must be FALSE")
+  expect_error(slope_params(sdmt ~ visit | id, data = slpower1,
+                            control = slope_lme_control(sigma = 1)),
+               "sigma` must be 0")
 })
 
 test_that("a partial `control` list is refused rather than filled from nlme's defaults", {
@@ -103,6 +120,14 @@ test_that("vcov() agrees with slope_se() under every comparator", {
   }
 })
 
+test_that("an object saved before the rename says how to update it", {
+  p <- unclass(paper_fit("slpower1"))
+  p$sigma_cov <- p$cov_intercept_slope
+  p$cov_intercept_slope <- NULL
+  class(p) <- "slope_params"
+  expect_error(slope_var(p, c(0, 1, 2)), "params\\$cov_intercept_slope <- params\\$sigma_cov")
+})
+
 test_that("vcov() is NA without a fitted model", {
   m <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
                            cov_intercept_slope = 5, sigma2_residual = 10)
@@ -114,7 +139,7 @@ test_that("vcov() is NA without a fitted model", {
 test_that("confint() returns the intervals the bootstrap stored", {
   p <- paper_fit("slpower1")
   b <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), R = 20, seed = 1,
-                                               ci_method = "percentile"))
+                                               ci_method = "percentile", per_arm = FALSE))
   ci <- confint(b)
   expect_identical(dimnames(ci), list(c("n", "slope"), c("2.5 %", "97.5 %")))
   expect_equal(unname(ci["n", ]), b$ci)
@@ -122,6 +147,13 @@ test_that("confint() returns the intervals the bootstrap stored", {
   expect_identical(rownames(confint(b, "slope")), "slope")
   expect_error(confint(b, "power"), "`parm` must be among")
   expect_error(confint(b, level = 0.9), "built at level = 0.95")
+
+  # On the basis print() shows: per arm by default, the total on request.
+  pa <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), R = 20, seed = 1,
+                                                ci_method = "percentile", per_arm = TRUE))
+  expect_identical(rownames(confint(pa)), c("n_per_arm", "slope"))
+  expect_equal(unname(confint(pa, "n")[1, ]), pa$ci / 2)
+  expect_equal(unname(confint(pa, "n", per_arm = FALSE)[1, ]), pa$ci)
 
   bp <- suppressWarnings(slope_params_boot(p, R = 10, seed = 1, ci_method = "percentile"))
   expect_identical(rownames(confint(bp)), "slope")

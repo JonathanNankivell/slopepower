@@ -23,11 +23,14 @@ particularly for the two-block random-effects structure fitted when
 }
 \details{
 It is the default of \code{\link[=slope_params]{slope_params()}}'s \code{control} argument. Pass it with
-arguments to change some settings and keep the rest: anything
-\code{\link[nlme:lmeControl]{nlme::lmeControl()}} accepts overrides the value set here. These settings
-change how hard the optimiser works, never which model is fitted; see "What
-these models do and do not include" in \code{?slope_params} for the model itself,
-which no argument changes. The tolerances this package's tests hold the
+arguments to change some settings and keep the rest: any setting
+\code{\link[nlme:lmeControl]{nlme::lmeControl()}} names overrides the value set here, and a name it does
+not know is refused rather than ignored. These settings change how hard the
+optimiser works, never which model is fitted, so the two that would are
+refused by \code{\link[=slope_params]{slope_params()}}: \code{sigma}, which fixes the residual SD, and
+\code{returnObject = TRUE}, which returns a fit that did not converge as if it
+had. See "What these models do and do not include" in \code{?slope_params} for
+the model itself, which no argument changes. The tolerances this package's tests hold the
 fitted variance components to are calibrated to the defaults.
 }
 \examples{

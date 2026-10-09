@@ -43,8 +43,13 @@ check_params <- function(params, context) {
   }
   missing_fields <- setdiff(PARAM_FIELDS, names(params))
   if (length(missing_fields) > 0L) {
-    stop(sprintf("%s: `params` is missing the field(s) %s.",
-                 context, paste0("`", missing_fields, "`", collapse = ", ")),
+    # Objects saved before the rename carry the old name; say how to update one.
+    renamed <- if ("cov_intercept_slope" %in% missing_fields && "sigma_cov" %in% names(params)) {
+      paste0("\n  `sigma_cov` was renamed `cov_intercept_slope`; for an object saved ",
+             "before that,\n  run params$cov_intercept_slope <- params$sigma_cov.")
+    } else ""
+    stop(sprintf("%s: `params` is missing the field(s) %s.%s",
+                 context, paste0("`", missing_fields, "`", collapse = ", "), renamed),
          call. = FALSE)
   }
   # new_slope_params() checks these at construction time for both routes into
@@ -440,7 +445,8 @@ dropout_strata <- function(params, design, context) {
 
   if (!any(weight > 0)) {
     stop(sprintf(paste0("%s: every participant is expected to drop out before contributing ",
-                        "slope information, so the effect size is zero. Check `dropout`."),
+                        "slope information, so there is nothing to estimate the slope ",
+                        "difference from. Check `dropout`."),
                  context), call. = FALSE)
   }
   list(weight = weight, var = var)

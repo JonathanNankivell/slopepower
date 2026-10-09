@@ -204,11 +204,14 @@ extract_residual <- function(fit, level, context) {
 #' [slope_params()]).
 #'
 #' It is the default of [slope_params()]'s `control` argument. Pass it with
-#' arguments to change some settings and keep the rest: anything
-#' [nlme::lmeControl()] accepts overrides the value set here. These settings
-#' change how hard the optimiser works, never which model is fitted; see "What
-#' these models do and do not include" in `?slope_params` for the model itself,
-#' which no argument changes. The tolerances this package's tests hold the
+#' arguments to change some settings and keep the rest: any setting
+#' [nlme::lmeControl()] names overrides the value set here, and a name it does
+#' not know is refused rather than ignored. These settings change how hard the
+#' optimiser works, never which model is fitted, so the two that would are
+#' refused by [slope_params()]: `sigma`, which fixes the residual SD, and
+#' `returnObject = TRUE`, which returns a fit that did not converge as if it
+#' had. See "What these models do and do not include" in `?slope_params` for
+#' the model itself, which no argument changes. The tolerances this package's tests hold the
 #' fitted variance components to are calibrated to the defaults.
 #'
 #' @param ... Arguments to [nlme::lmeControl()], overriding the settings above.
@@ -224,10 +227,23 @@ extract_residual <- function(fit, level, context) {
 #' @seealso [slope_params()], which uses this for every mixed-model fit.
 #' @export
 slope_lme_control <- function(...) {
+  context <- "slope_lme_control()"
+  overrides <- list(...)
+  known <- names(nlme::lmeControl())
+  nm <- names(overrides) %||% rep("", length(overrides))
+  if (any(nm == "") || anyDuplicated(nm)) {
+    stop(sprintf("%s: every setting must be named once, e.g. slope_lme_control(maxIter = 500).",
+                 context), call. = FALSE)
+  }
+  if (length(unknown <- setdiff(nm, known))) {
+    stop(sprintf("%s: %s %s not a setting of nlme::lmeControl(); it has %s.", context,
+                 paste(sQuote(unknown), collapse = ", "),
+                 if (length(unknown) == 1L) "is" else "are",
+                 paste(known, collapse = ", ")), call. = FALSE)
+  }
   defaults <- list(maxIter = 200, msMaxIter = 200, niterEM = 50,
                    opt = "optim", tolerance = 1e-7, msTol = 1e-8,
                    returnObject = FALSE)
-  overrides <- list(...)
   defaults[names(overrides)] <- overrides
   do.call(nlme::lmeControl, defaults)
 }
@@ -239,6 +255,12 @@ slope_lme_control <- function(...) {
 #' from [slope_lme_control()]'s -- so `control = list(maxIter = 500)` would
 #' silently loosen the tolerances too. Requiring every name
 #' [nlme::lmeControl()] returns catches that, and points at the fix.
+#'
+#' Two settings change the answer rather than the effort, and are refused:
+#' a non-zero `sigma` fixes the residual SD, fitting a different model, and
+#' `returnObject = TRUE` returns a fit that failed to converge as if it had --
+#' which would also switch off the `common_variance` fallback, and let a
+#' bootstrap count failed refits as replicates.
 #' @noRd
 check_lme_control <- function(control, context) {
   if (!is.list(control) || !all(names(nlme::lmeControl()) %in% names(control))) {
@@ -248,6 +270,16 @@ check_lme_control <- function(control, context) {
       "  rest, pass them to it: control = slope_lme_control(maxIter = 500)."),
       context), call. = FALSE)
   }
+  if (!isFALSE(control$returnObject)) {
+    stop(sprintf(paste0(
+      "%s: `control$returnObject` must be FALSE. A fit that did not converge is an\n",
+      "  error here, never a result."), context), call. = FALSE)
+  }
+  if (!identical(as.numeric(control$sigma), 0)) {
+    stop(sprintf(paste0(
+      "%s: `control$sigma` must be 0. A fixed residual SD is a different model,\n",
+      "  not a setting of the optimiser."), context), call. = FALSE)
+  }
   invisible(control)
 }
 
@@ -255,8 +287,10 @@ check_lme_control <- function(control, context) {
 #'
 #' `subset` is evaluated as [nlme::lme()] evaluates its own: in `data`, then
 #' in the calling environment. A logical vector selects rows, with `NA`
-#' treated as `FALSE` as [stats::model.frame()] does; a numeric one indexes
-#' them.
+#' treated as `FALSE` as [stats::model.frame()] does; a numeric one lists row
+#' numbers, each at most once. Negative and zero indices, which `[` would read
+#' as exclusions and as nothing, and repeats, which would fit a visit twice,
+#' are refused.
 #' @noRd
 subset_rows <- function(expr, data, env, n, context) {
   if (is.null(expr)) return(NULL)
@@ -268,11 +302,13 @@ subset_rows <- function(expr, data, env, n, context) {
     }
     return(which(s))
   }
-  if (is.numeric(s) && !anyNA(s) && all(s == round(s)) && all(abs(s) <= n)) {
-    return(seq_len(n)[s])
+  if (is.numeric(s) && !anyNA(s) && all(s == round(s)) && all(s >= 1 & s <= n) &&
+      !anyDuplicated(s)) {
+    return(as.integer(s))
   }
-  stop(sprintf(paste0("%s: `subset` must be a logical vector, or row numbers, selecting ",
-                      "rows of `data`."), context), call. = FALSE)
+  stop(sprintf(paste0("%s: `subset` must be a logical vector, or distinct row numbers ",
+                      "between 1 and %d, selecting rows of `data`."), context, n),
+       call. = FALSE)
 }
 
 #' Fit while muffling the structurally inevitable singular-precision warning

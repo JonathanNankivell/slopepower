@@ -311,10 +311,10 @@ test_that("total dropout errors rather than returning a missing sample size", {
   p <- ref_params()
   expect_error(suppressWarnings(slope_sample_size(p, c(0, 1, 2), c(1, 0),
                                                  effectiveness = 0.33)),
-               "effect size is zero")
+               "nothing to estimate the slope")
   expect_error(suppressWarnings(slope_power(p, c(0, 1, 2), c(1, 0), n = 400,
                                            effectiveness = 0.33)),
-               "effect size is zero")
+               "nothing to estimate the slope")
 })
 
 # --- guards -----------------------------------------------------------------

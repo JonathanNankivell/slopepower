@@ -106,7 +106,10 @@ vcov.slope_params <- function(object, ...) {
 #' (`"n"`, `"power"`, `"tte"` or `"slope"`), and a row for the slope the
 #' resampling perturbed. Both are read from the object, not recomputed, so
 #' they are the intervals `print()` shows -- BCa or percentile as the object
-#' records, and widened to even sample sizes for `n`.
+#' records, widened to even sample sizes for `n`, and for `n` on the same
+#' basis `print()` uses: per arm unless the bootstrap was run with
+#' `per_arm = FALSE`. The row is then named `n_per_arm`, so the basis is
+#' never in doubt.
 #'
 #' @param object A bootstrap result, from [slope_sample_size_boot()],
 #'   [slope_power_boot()], [slope_params_boot()] or the bound bootstraps.
@@ -117,6 +120,10 @@ vcov.slope_params <- function(object, ...) {
 #'   bootstrap was run at, which is the default; for another, rerun the
 #'   bootstrap with that `level` (and the same `seed`).
 #' @param ... Ignored.
+#' @param per_arm For a bootstrapped `n`: `TRUE` for participants per arm,
+#'   `FALSE` for the trial total. Defaults to `NULL`, meaning the basis the
+#'   bootstrap was called with, as in `print()`. `parm` still names the row
+#'   `"n"` either way.
 #'
 #' @return A matrix with one row per `parm` and columns for the lower and
 #'   upper limits, labelled by percentage as [stats::confint()] labels them.
@@ -130,7 +137,7 @@ vcov.slope_params <- function(object, ...) {
 #' confint(b, "n")
 #' }
 #' @export
-confint.slope_bootstrap <- function(object, parm, level = object$level, ...) {
+confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
   rows <- unique(c(object$statistic, "slope"))
   if (missing(parm)) parm <- rows
@@ -146,12 +153,14 @@ confint.slope_bootstrap <- function(object, parm, level = object$level, ...) {
       "  `seed`, for the same replicates)."), context, format(object$level)),
       call. = FALSE)
   }
-  ci <- list(object$ci, object$slope_ci)
+  # The basis print.slope_bootstrap() shows, by the same rule (boot_summary_frame()).
+  halve <- isTRUE(object$lattice) && display_basis(object, per_arm, context)
+  ci <- list(object$ci / if (halve) 2 else 1, object$slope_ci)
   names(ci) <- c(object$statistic, "slope")
   a <- (1 - object$level) / 2
   pct <- paste(format(100 * c(a, 1 - a), trim = TRUE, scientific = FALSE, digits = 3), "%")
   out <- do.call(rbind, ci[parm])
-  dimnames(out) <- list(parm, pct)
+  dimnames(out) <- list(ifelse(halve & parm == "n", "n_per_arm", parm), pct)
   out
 }
 
