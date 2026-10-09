@@ -433,7 +433,10 @@ dropout_strata <- function(params, design, context) {
   dropout <- design$dropout
 
   sigma_full <- sigma_at(params, visits, context)
-  weight <- 1 - sum(dropout)
+  # Clamped: validate_dropout() admits totals up to 1 + DROPOUT_TOL, and a
+  # negative completers' weight would make the weighted sums below negative --
+  # a NaN sample size, and a negative variance from slope_var().
+  weight <- max(0, 1 - sum(dropout))
   var <- treatment_effect_var(sigma_full, visits, context)
   for (j in seq_along(dropout)[-1L]) {
     if (dropout[j] == 0) next

@@ -113,17 +113,17 @@ vcov.slope_params <- function(object, ...) {
 #'
 #' @param object A bootstrap result, from [slope_sample_size_boot()],
 #'   [slope_power_boot()], [slope_params_boot()] or the bound bootstraps.
-#' @param parm Which rows: any of the statistic's name and `"slope"`. Defaults
-#'   to both (one row, for [slope_params_boot()], whose statistic is the
-#'   slope).
+#' @param parm Which rows, by name -- the statistic's and `"slope"` -- or by
+#'   position, as in [stats::confint()]. Defaults to both (one row, for
+#'   [slope_params_boot()], whose statistic is the slope).
 #' @param level The interval's confidence level. It must be the one the
 #'   bootstrap was run at, which is the default; for another, rerun the
 #'   bootstrap with that `level` (and the same `seed`).
 #' @param ... Ignored.
 #' @param per_arm For a bootstrapped `n`: `TRUE` for participants per arm,
 #'   `FALSE` for the trial total. Defaults to `NULL`, meaning the basis the
-#'   bootstrap was called with, as in `print()`. `parm` still names the row
-#'   `"n"` either way.
+#'   bootstrap was called with, as in `print()`. `parm` may name the row
+#'   `"n"` either way, or `"n_per_arm"` when that is what it prints as.
 #'
 #' @return A matrix with one row per `parm` and columns for the lower and
 #'   upper limits, labelled by percentage as [stats::confint()] labels them.
@@ -139,12 +139,20 @@ vcov.slope_params <- function(object, ...) {
 #' @export
 confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
+  # The basis print.slope_bootstrap() shows, by the same rule (boot_summary_frame()).
+  halve <- isTRUE(object$lattice) && display_basis(object, per_arm, context)
   rows <- unique(c(object$statistic, "slope"))
-  if (missing(parm)) parm <- rows
-  bad <- setdiff(parm, rows)
-  if (!is.character(parm) || length(bad)) {
-    stop(sprintf("%s: `parm` must be among %s.", context,
-                 paste(sQuote(rows), collapse = ", ")), call. = FALSE)
+  shown <- ifelse(halve & rows == "n", "n_per_arm", rows)
+  if (missing(parm)) parm <- seq_along(rows)
+  idx <- if (is.numeric(parm)) {
+    if (all(parm %in% seq_along(rows))) parm
+  } else if (is.character(parm)) {
+    # The stored name or the printed one, so a row can be asked for as shown.
+    ifelse(parm %in% rows, match(parm, rows), match(parm, shown))
+  }
+  if (is.null(idx) || anyNA(idx)) {
+    stop(sprintf("%s: `parm` must be among %s, or their positions.", context,
+                 paste(sQuote(unique(c(rows, shown))), collapse = ", ")), call. = FALSE)
   }
   if (!is.numeric(level) || length(level) != 1L || !isTRUE(all.equal(level, object$level))) {
     stop(sprintf(paste0(
@@ -153,14 +161,11 @@ confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per
       "  `seed`, for the same replicates)."), context, format(object$level)),
       call. = FALSE)
   }
-  # The basis print.slope_bootstrap() shows, by the same rule (boot_summary_frame()).
-  halve <- isTRUE(object$lattice) && display_basis(object, per_arm, context)
-  ci <- list(object$ci / if (halve) 2 else 1, object$slope_ci)
-  names(ci) <- c(object$statistic, "slope")
+  ci <- list(object$ci / if (halve) 2 else 1, object$slope_ci)[seq_along(rows)]
   a <- (1 - object$level) / 2
   pct <- paste(format(100 * c(a, 1 - a), trim = TRUE, scientific = FALSE, digits = 3), "%")
-  out <- do.call(rbind, ci[parm])
-  dimnames(out) <- list(ifelse(halve & parm == "n", "n_per_arm", parm), pct)
+  out <- do.call(rbind, ci[idx])
+  dimnames(out) <- list(shown[idx], pct)
   out
 }
 

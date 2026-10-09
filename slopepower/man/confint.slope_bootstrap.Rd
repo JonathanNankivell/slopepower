@@ -10,9 +10,9 @@
 \item{object}{A bootstrap result, from \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}},
 \code{\link[=slope_power_boot]{slope_power_boot()}}, \code{\link[=slope_params_boot]{slope_params_boot()}} or the bound bootstraps.}
 
-\item{parm}{Which rows: any of the statistic's name and \code{"slope"}. Defaults
-to both (one row, for \code{\link[=slope_params_boot]{slope_params_boot()}}, whose statistic is the
-slope).}
+\item{parm}{Which rows, by name -- the statistic's and \code{"slope"} -- or by
+position, as in \code{\link[stats:confint]{stats::confint()}}. Defaults to both (one row, for
+\code{\link[=slope_params_boot]{slope_params_boot()}}, whose statistic is the slope).}
 
 \item{level}{The interval's confidence level. It must be the one the
 bootstrap was run at, which is the default; for another, rerun the
@@ -22,8 +22,8 @@ bootstrap with that \code{level} (and the same \code{seed}).}
 
 \item{per_arm}{For a bootstrapped \code{n}: \code{TRUE} for participants per arm,
 \code{FALSE} for the trial total. Defaults to \code{NULL}, meaning the basis the
-bootstrap was called with, as in \code{print()}. \code{parm} still names the row
-\code{"n"} either way.}
+bootstrap was called with, as in \code{print()}. \code{parm} may name the row
+\code{"n"} either way, or \code{"n_per_arm"} when that is what it prints as.}
 }
 \value{
 A matrix with one row per \code{parm} and columns for the lower and

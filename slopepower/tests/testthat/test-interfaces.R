@@ -22,6 +22,15 @@ test_that("slope_var() with no dropout is the same however it is written", {
   expect_true(is.finite(slope_var(p, c(1, 2, 3))))
 })
 
+test_that("dropout totalling just over 1, within tolerance, gives no negative weight", {
+  # The validator admits totals up to 1 + DROPOUT_TOL; a negative completers'
+  # weight once turned that into a NaN sample size and a negative variance.
+  p <- slope_params_manual(-1.67, 100, 1, 0.5, 10)
+  expect_gt(suppressWarnings(slope_var(p, c(0, 1, 2), dropout = c(1, 5e-9))), 0)
+  expect_false(is.nan(suppressWarnings(
+    slope_sample_size(p, c(0, 1, 2), dropout = c(1, 5e-9))$n)))
+})
+
 test_that("slope_var() with dropout validates the design as slope_power() does", {
   p <- paper_fit("slpower1")
   expect_error(slope_var(p, c(1, 2, 3), dropout = c(0, 0.1)), "baseline visit at time 0")
@@ -154,6 +163,9 @@ test_that("confint() returns the intervals the bootstrap stored", {
   expect_identical(rownames(confint(pa)), c("n_per_arm", "slope"))
   expect_equal(unname(confint(pa, "n")[1, ]), pa$ci / 2)
   expect_equal(unname(confint(pa, "n", per_arm = FALSE)[1, ]), pa$ci)
+  expect_identical(confint(pa, "n_per_arm"), confint(pa, "n"))
+  expect_identical(confint(pa, 2), confint(pa, "slope"))
+  expect_error(confint(pa, 3), "`parm` must be among")
 
   bp <- suppressWarnings(slope_params_boot(p, R = 10, seed = 1, ci_method = "percentile"))
   expect_identical(rownames(confint(bp)), "slope")
