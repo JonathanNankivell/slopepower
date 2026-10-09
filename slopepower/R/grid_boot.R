@@ -514,10 +514,10 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   do.call(structure,
           c(list(df, class = c(cls, "data.frame"),
                  R = R, ci_method = ci_method, statistic = statistic, level = level,
-                 se = setup$se, n_refit_failed = n_refit_failed,
+                 se = setup$check$se, n_refit_failed = n_refit_failed,
                  added_cols = names(added),
                  named = g$named, per_arm = per_arm),
-            slope_replicate_summary(params$slope, good_slopes, slope_int, setup,
+            slope_replicate_summary(params$slope, good_slopes, slope_int, setup$check,
                                     mat$checks[!failed_refit])))
 }
 
