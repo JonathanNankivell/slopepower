@@ -397,8 +397,9 @@ subjects are always the resampling unit, replicate identifiers are always
 regenerated (so a subject drawn twice counts as two people rather than
 colliding), and stratification by group is automatic whenever
 `comparator != "none"`. It also applies the paper's own §2.6 recommendation --
-warning when the fitted slope is under 2.5 times its standard error -- which the
-Stata side leaves you to check by eye.
+warning when the fitted slope (or, against healthy controls, the difference in
+slopes) is under 2.5 times its standard error -- which the Stata side leaves you
+to check by eye.
 
 ## Keeping your old calls working
 

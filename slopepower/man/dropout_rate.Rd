@@ -70,6 +70,12 @@ describes how a numeric \code{dropout} \emph{vector} was written down. The two a
 named apart deliberately: \code{pattern} is how withdrawal behaves over time,
 \code{dropout_scale} how a vector of proportions is to be read.
 
+A rate always has some participants withdrawing before the first follow-up
+visit, and so attending baseline only. They carry no slope information and
+are left out of the calculation, as for any dropout; but since that share is
+an inevitable consequence of the rate rather than a number anyone wrote, it
+is not warned about, as a \code{dropout} vector with a non-zero first element is.
+
 This object only produces the per-visit proportions. What the calculation then
 does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
 what it assumes about why people withdraw --- is described in the "Dropout"

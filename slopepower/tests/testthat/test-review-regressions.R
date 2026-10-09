@@ -569,3 +569,80 @@ test_that("on_lattice() is the one rule for widening and the printed flag", {
   expect_false(on_lattice("tte"))
   expect_false(on_lattice("slope"))
 })
+
+# --- regressions from the full-package review of 6a08093 --------------------
+
+test_that("the section 2.6 check follows the slope difference under healthy controls", {
+  # Controls pulled to within 3% of the cases' slope: the case slope alone is
+  # many times its standard error, but the difference that sizes the trial is
+  # not, and that is what the check has to see.
+  d <- load_paper_data("slpower2")
+  p <- paper_fit("slpower2")
+  shift <- (p$slope - p$slope_comparator) * 0.97
+  d$sdmt[d$case == 0] <- d$sdmt[d$case == 0] + shift * d$time[d$case == 0]
+  q <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy",
+                                     group = case))
+  expect_gt(abs(q$slope) / slope_se(q), 2.5)
+  w <- capture_warnings(b <- slope_sample_size_boot(q, c(0, 1, 2), R = 10, seed = 1,
+                                                    ci_method = "percentile"))
+  expect_true(any(grepl("estimated slope difference", w)))
+  expect_identical(b$straddle_of, "slope difference")
+  diffs_se <- sqrt(sum(c(1, 1, -2) * vcov(q)[c(1, 4, 2)]))
+  expect_equal(b$se, diffs_se)
+  expect_true(any(grepl("refit a slope difference on",
+                        capture.output(print(b)), fixed = TRUE)))
+  # slope_params_boot() bootstraps the slope itself, and is checked on it.
+  sb <- suppressWarnings(slope_params_boot(q, R = 5, seed = 1, ci_method = "percentile"))
+  expect_identical(sb$straddle_of, "slope")
+})
+
+test_that("without a comparator target the check stays on the slope", {
+  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), R = 5,
+                                               seed = 1, ci_method = "percentile"))
+  expect_identical(b$straddle_of, "slope")
+  expect_equal(b$se, slope_se(paper_fit("slpower1")))
+})
+
+test_that("discarded replicates are reported by cause", {
+  expect_identical(boot_failure_text(2L, 2L, 10),
+                   "2 of 10 replicates failed to converge; all were discarded.")
+  expect_match(boot_failure_text(0L, 3L, 10),
+               "^3 of 10 refitted, but the calculation could not be solved")
+  both <- boot_failure_text(1L, 4L, 10)
+  expect_match(both, "1 of 10 replicates failed to converge; 3 of 10 refitted")
+})
+
+test_that("slopepower() refuses n with power before fitting anything", {
+  # One visit each: the fit itself would fail, so reaching the n/power error
+  # shows it came first.
+  d <- data.frame(id = 1:6, visit = 0, sdmt = 50 + 1:6)
+  expect_error(slopepower(d, "sdmt", "id", "visit", schedule = c(1, 2), obs = TRUE,
+                          nocontrols = TRUE, n = 100, power = 0.9),
+               "only one of `n` and `power`")
+})
+
+test_that("a grid computes each design's dropout strata once, not once per cell", {
+  p <- paper_fit("slpower1")
+  calls <- 0L
+  real <- dropout_strata
+  local_mocked_bindings(dropout_strata = function(...) {
+    calls <<- calls + 1L
+    real(...)
+  })
+  g <- slope_power_grid(p, visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)),
+                        n = c(200, 300, 400), effectiveness = c(0.25, 0.5))
+  expect_equal(nrow(g), 12L)
+  expect_equal(calls, 2L)
+})
+
+test_that("a grid checks `params` once, under its own name", {
+  expect_error(slope_power_grid(list(), visits = c(0, 1, 2), n = 200),
+               "^slope_power_grid\\(\\): `params` must be")
+})
+
+test_that("a grid names the cell whose dropout is the wrong length", {
+  expect_error(
+    slope_power_grid(paper_fit("slpower1"), visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)),
+                     dropout = list(x = c(0, 0.1)), n = 200),
+    'design "b".*one element per follow-up visit.*dropout_rate\\(\\)')
+})

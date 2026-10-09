@@ -15,58 +15,6 @@
 # makes newly relevant -- is here.
 # ---------------------------------------------------------------------------
 
-#' Expand a dropout specification for one visit schedule
-#'
-#' The grid's wrapper around `expand_dropout_rate()` (design.R): it adds the
-#' cell label to any message, and applies the length rule to a bare numeric
-#' vector *before* [build_trial_design()] sees it, because a length mismatch
-#' means something specific in a grid -- a fixed vector paired with a schedule
-#' it was not written for -- that a single design cannot exhibit.
-#'
-#' A numeric vector is returned as given, still on `dropout_scale`; a rate is
-#' returned expanded, and so always incremental -- which is why a rate under
-#' `dropout_scale = "cumulative"` is refused here, as [validate_dropout()]
-#' refuses it for a single design.
-#'
-#' @param spec `NULL`, a numeric vector of proportions, or a `dropout_rate`
-#'   object.
-#' @param visits The visit times of the design being evaluated.
-#' @param dropout_scale How a numeric `spec` is written.
-#' @param label The grid label of the dropout specification, named in every
-#'   error message so the failing cell can be identified.
-#' @noRd
-expand_dropout <- function(spec, visits, dropout_scale, context, label) {
-  where <- sprintf(" (dropout = \"%s\")", label)
-
-  if (is.null(spec)) return(NULL)
-
-  if (inherits(spec, "dropout_rate")) {
-    if (identical(dropout_scale, "cumulative")) {
-      stop(sprintf(paste0("%s%s: a dropout_rate() cannot be combined with dropout_scale = ",
-                          "\"cumulative\"; it expands to the proportion withdrawing within ",
-                          "each interval, which is already incremental. Drop the ",
-                          "`dropout_scale` argument, or supply the cumulative proportions ",
-                          "as numeric vectors."),
-                   context, where), call. = FALSE)
-    }
-    return(expand_dropout_rate(spec, visits, context, where))
-  }
-
-  if (is.numeric(spec)) {
-    if (length(spec) != length(visits) - 1L) {
-      stop(sprintf(paste0("%s%s: dropout vector has %d element(s) but the design %s has %d ",
-                          "follow-up visit(s).\n  Use dropout_rate() to express a rate that ",
-                          "applies across designs with different visit schedules."),
-                   context, where, length(spec), fmt_call_vec(visits),
-                   length(visits) - 1L), call. = FALSE)
-    }
-    return(spec)
-  }
-
-  stop(sprintf("%s%s: dropout must be NULL, a numeric vector, or a dropout_rate() object; got %s.",
-               context, where, class(spec)[1L]), call. = FALSE)
-}
-
 # ---------------------------------------------------------------------------
 # argument normalisation
 # ---------------------------------------------------------------------------
@@ -267,21 +215,20 @@ grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
     for (dj in seq_along(drop_list)) {
       dname <- names(drop_list)[dj]
 
-      spec <- drop_list[[dj]]
-      inc <- expand_dropout(spec, v, dropout_scale, context, dname)
-
-      # build_trial_design() warns when the first stratum attends baseline only. That is
-      # correct and expected here -- it fires for most non-zero rates -- so it is
-      # collected and reported once rather than once per design. Matched by
-      # condition class, not message text, so a copy-edit of the warning's
-      # wording in design.R cannot silently break this. An invalid combination
-      # (e.g. a `visits` element not starting at 0) is caught here too, and
-      # named the same way a failure from `evaluate()` in grid_evaluate() is.
+      # The specification goes to build_trial_design() as written, a rate
+      # unexpanded, so a grid validates and expands a cell's dropout by exactly
+      # the rules a single design uses; any error is named by its cell below.
+      #
+      # build_trial_design() warns when a dropout vector's first stratum
+      # attends baseline only. That is collected and reported once rather than
+      # once per design. Matched by condition class, not message text, so a
+      # copy-edit of the warning's wording in design.R cannot silently break
+      # this. An invalid combination (e.g. a `visits` element not starting at
+      # 0) is caught here too, and named the same way a failure from
+      # `evaluate()` in grid_evaluate() is.
       designs[[design_index(di, dj)]] <- tryCatch(
         withCallingHandlers(
-          build_trial_design(v, inc,
-                             if (inherits(spec, "dropout_rate")) "incremental" else dropout_scale,
-                             context),
+          build_trial_design(v, drop_list[[dj]], dropout_scale, context),
           slopepower_baseline_dropout = function(w) {
             baseline_only <<- c(baseline_only, sprintf("%s / %s", vname, dname))
             invokeRestart("muffleWarning")
@@ -800,7 +747,8 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' @noRd
 grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
                            fixed_value, effectiveness, target, alpha, context) {
-  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha)
+  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
+                              context)
   grid_impl(visits, dropout, dropout_scale, spec$scalars, spec$evaluate, context)
 }
 
@@ -826,9 +774,19 @@ grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
 #' body of that function, against a design the grid has already built, and
 #' reports any failure under that function's name, as the cell's message always
 #' has.
+#'
+#' `params` is checked here, once for the whole grid, under the grid's own
+#' name: the cell solver does not check it again (see [effect_components()]).
+#'
+#' A design's dropout strata depend on `params` and the design alone, not on
+#' anything else a cell varies, so the closure keeps the last design's and
+#' hands them to the solver. The design is the slowest-varying axis, so the
+#' cells sharing one are consecutive and each design's strata are computed
+#' once rather than once per level of every other axis.
 #' @noRd
 grid_stage_two_spec <- function(params, fixed_name, fixed_value,
-                                effectiveness, target, alpha) {
+                                effectiveness, target, alpha, context) {
+  check_params(params, context)
   solver <- if (identical(fixed_name, "n")) {
     list(fn = power_result, context = "slope_power()")
   } else {
@@ -841,9 +799,19 @@ grid_stage_two_spec <- function(params, fixed_name, fixed_value,
                                      effectiveness, target)
   scalars$alpha <- alpha
 
+  last_design <- NULL
+  last_strata <- NULL
   list(scalars = scalars,
        evaluate = function(des, args) {
+         if (is.null(last_strata) || !identical(des, last_design)) {
+           # Reset first, so a design whose strata fail is retried, and fails
+           # again, on its next cell rather than inheriting the last design's.
+           last_strata <<- NULL
+           last_strata <<- dropout_strata(params, des, solver$context)
+           last_design <<- des
+         }
          do.call(solver$fn, c(list(params = params, design = des, target = target,
-                                   per_arm = TRUE, context = solver$context), args))
+                                   per_arm = TRUE, context = solver$context,
+                                   strata = last_strata), args))
        })
 }

@@ -392,14 +392,22 @@ target_components <- function(params, target, effectiveness, context) {
 #' The design-dependent half; [target_components()] is the rest. `design` is
 #' the internal object [build_trial_design()] returns, already validated by the
 #' entry point -- so a design warning still precedes a target warning, in the
-#' order they always did.
+#' order they always did. `params` is validated by the entry point too: every
+#' exported function runs [check_params()] (most through [stage_two_design()],
+#' the grids in [grid_stage_two_spec()]), and a bootstrap replicate is built by
+#' [slope_params()] itself. Checking again here repeated an eigendecomposition
+#' on every grid cell and every replicate.
+#'
+#' `strata` is the design's [dropout_strata()], when the caller already has
+#' them: they depend on `params` and `design` alone, so a grid computes them
+#' once per design rather than once per cell.
 #' @noRd
-effect_components <- function(params, design, target, effectiveness, context) {
-  check_params(params, context)
+effect_components <- function(params, design, target, effectiveness, context,
+                              strata = NULL) {
   comp <- target_components(params, target, effectiveness, context)
   slope_difference <- comp$slope_difference
 
-  strata <- dropout_strata(params, design, context)
+  strata <- strata %||% dropout_strata(params, design, context)
   # Summed in stratum order from zero, which is bit-identical to the running sum
   # this replaced: the first addition to 0 is exact.
   eff2 <- 0
@@ -653,10 +661,10 @@ stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
 #' `n_requested` belongs only to the power branch and is added by its caller.
 #' @noRd
 solve_slope <- function(params, design, effectiveness,
-                        target, alpha, n, power, context) {
+                        target, alpha, n, power, context, strata = NULL) {
   solving_for_n <- check_n_or_power(alpha, n, power, context)
 
-  comp <- effect_components(params, design, target, effectiveness, context)
+  comp <- effect_components(params, design, target, effectiveness, context, strata)
 
   z_a <- z_alpha(alpha, context)
   scaled_effect <- scale_effect(comp$effect_size, comp$effectiveness)
@@ -946,10 +954,10 @@ slope_sample_size <- function(params, visits, dropout = NULL,
 #' re-warning about -- the design on every cell or replicate.
 #' @noRd
 sample_size_result <- function(params, design, power, effectiveness = NULL, target,
-                               alpha, per_arm, context) {
+                               alpha, per_arm, context, strata = NULL) {
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
-                     n = NULL, power = power, context = context)
+                     n = NULL, power = power, context = context, strata = strata)
   structure(res, class = c("slope_sample_size", "slope_result"), per_arm = per_arm)
 }
 
@@ -1047,10 +1055,10 @@ slope_power <- function(params, visits, dropout = NULL,
 #' which ignores it.
 #' @noRd
 power_result <- function(params, design, n, effectiveness = NULL, target, alpha,
-                         per_arm, context) {
+                         per_arm, context, strata = NULL) {
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
-                     n = n, power = NULL, context = context)
+                     n = n, power = NULL, context = context, strata = strata)
   res <- add_n_requested(res, n)
   structure(res, class = c("slope_power", "slope_result"), per_arm = per_arm)
 }

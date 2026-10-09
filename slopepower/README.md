@@ -194,7 +194,8 @@ incremental proportions, so it cannot be combined with
 `dropout_scale = "cumulative"`.
 
 Participants who attend baseline only carry no slope information; a non-zero
-first element warns.
+first element of a dropout vector warns. A `dropout_rate()` always has some, and
+does not.
 
 Whatever the proportions, they are handled by the pattern-mixture method of
 Dawson and Lagakos (1991, 1993), as in §2.5 of the paper: participants are

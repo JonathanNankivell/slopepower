@@ -57,6 +57,12 @@ fmt_call_vec <- function(x) {
 #' named apart deliberately: `pattern` is how withdrawal behaves over time,
 #' `dropout_scale` how a vector of proportions is to be read.
 #'
+#' A rate always has some participants withdrawing before the first follow-up
+#' visit, and so attending baseline only. They carry no slope information and
+#' are left out of the calculation, as for any dropout; but since that share is
+#' an inevitable consequence of the rate rather than a number anyone wrote, it
+#' is not warned about, as a `dropout` vector with a non-zero first element is.
+#'
 #' This object only produces the per-visit proportions. What the calculation then
 #' does with them --- the Dawson and Lagakos (1991, 1993) pattern mixture, and
 #' what it assumes about why people withdraw --- is described in the "Dropout"
@@ -118,11 +124,9 @@ print.dropout_rate <- function(x, ...) {
 
 #' Expand a `dropout_rate` into incremental proportions for one schedule
 #'
-#' The single place a rate becomes numbers, called by [validate_dropout()] on
-#' the ordinary path and by `expand_dropout()` (grid.R) on the grid path, so the
-#' two cannot expand the same object differently. `where` carries the grid's
-#' cell label into the message; it is empty for a single-design call, which has
-#' no cell to name.
+#' The single place a rate becomes numbers, called by [validate_dropout()] for
+#' every design, single or in a grid. A grid names the failing cell around the
+#' whole error, in `grid_cell_error()`.
 #'
 #' The two `pattern`s (see [dropout_rate()]) compute the incremental proportions
 #' differently: `"linear"` applies `rate` to the original cohort, so the total
@@ -134,7 +138,7 @@ print.dropout_rate <- function(x, ...) {
 #' regardless, so a bug in this earlier, friendlier check could not let an
 #' invalid total through uncaught.
 #' @noRd
-expand_dropout_rate <- function(spec, visits, ctx, where = "") {
+expand_dropout_rate <- function(spec, visits, ctx) {
   if (identical(spec$pattern, "geometric")) {
     survival <- (1 - spec$rate) ^ (visits / spec$per)
     return(-diff(survival))
@@ -148,9 +152,9 @@ expand_dropout_rate <- function(spec, visits, ctx, where = "") {
   # expanded vector, because the general check would otherwise report a
   # `dropout_rate()` mistake by naming a vector the caller never wrote.
   if (total > 1 + DROPOUT_TOL) {
-    stop(sprintf(paste0("%s%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
+    stop(sprintf(paste0("%s: a rate of %s per %s unit(s) of time over a trial lasting %s ",
                         "implies total dropout of %s, which exceeds 1."),
-                 ctx, where, fmt_num(spec$rate), fmt_num(spec$per),
+                 ctx, fmt_num(spec$rate), fmt_num(spec$per),
                  fmt_num(diff(range(visits))), fmt_num(total)), call. = FALSE)
   }
   increments
@@ -171,8 +175,12 @@ build_trial_design <- function(visits, dropout, dropout_scale, ctx) {
   visits <- validate_visits(visits, ctx)
   n_intervals <- length(visits) - 1L
 
+  # A rate puts someone in the baseline-only stratum whenever it is non-zero,
+  # so warning would only say that a rate is a rate; see ?dropout_rate. The
+  # warning is for a first element the caller wrote.
+  from_rate <- inherits(dropout, "dropout_rate")
   dropout <- validate_dropout(dropout, n_intervals, dropout_scale, visits, ctx)
-  warn_baseline_dropout(dropout, visits, ctx)
+  if (!from_rate) warn_baseline_dropout(dropout, visits, ctx)
 
   structure(
     list(
@@ -330,7 +338,9 @@ check_dropout_length <- function(dropout, visits, name, ctx) {
   if (length(dropout) != n_intervals) {
     stop(sprintf(paste0("%s: `%s` must have one element per follow-up visit: ",
                         "length(visits) - 1 = %d, but length(%s) = %d.",
-                        "\n  visits = %s covers %d follow-up visit%s after baseline."),
+                        "\n  visits = %s covers %d follow-up visit%s after baseline.",
+                        "\n  Use dropout_rate() to express a rate that applies across ",
+                        "schedules of different lengths."),
                  ctx, name, n_intervals, name, length(dropout),
                  fmt_call_vec(visits), n_intervals,
                  if (n_intervals == 1L) "" else "s"), call. = FALSE)

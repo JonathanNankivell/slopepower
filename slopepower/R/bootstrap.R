@@ -446,8 +446,10 @@ lazy_jackknife <- function(setup, computes) {
 #' and a power lies in [0, 1], so that comparison was identically 0 and the
 #' check silently never fired.
 #' @noRd
-slope_replicate_summary <- function(observed_slope, good_slopes, slope_int) {
-  list(straddle = mean(sign(good_slopes) != sign(observed_slope)),
+slope_replicate_summary <- function(observed_slope, good_slopes, slope_int, setup,
+                                    good_checks) {
+  list(straddle = mean(sign(good_checks) != sign(setup$check_observed)),
+       straddle_of = setup$check_label,
        slope_observed = observed_slope,
        slope_replicates = good_slopes,
        slope_mean = mean(good_slopes),
@@ -466,17 +468,21 @@ slope_replicate_summary <- function(observed_slope, good_slopes, slope_int) {
 #' rather than once per cell: the resampling scheme does not know a grid cell
 #' exists.
 #' @noRd
-boot_setup <- function(params, context) {
+boot_setup <- function(params, context, target = NULL) {
   # Section 2.6: if the slope is not large relative to its standard error the
   # replicates can straddle zero, and an interval for the sample size stops
-  # meaning anything.
-  se <- slope_se(params)
-  if (is.finite(se) && se > 0 && abs(params$slope) / se < 2.5) {
-    warning(sprintf(paste0("%s: the estimated slope (%.4g) is only %.2f times its standard error ",
+  # meaning anything. Measured on whatever stage two divides by -- the slope
+  # difference, when the target is a comparator's slope; see boot_check().
+  check <- boot_check(params, target)
+  observed <- check$of(params)
+  se <- check$se
+  if (is.finite(se) && se > 0 && abs(observed) / se < 2.5) {
+    warning(sprintf(paste0("%s: the estimated %s (%.4g) is only %.2f times its standard error ",
                            "(%.4g). Nash et al. (2021, section 2.6) suggest a ratio above 2.5; ",
-                           "below it, bootstrap replicates may include slopes of both signs and ",
+                           "below it, bootstrap replicates may include %ss of both signs and ",
                            "the resulting interval can be meaningless."),
-                    context, params$slope, abs(params$slope) / se, se), call. = FALSE)
+                    context, check$label, observed, abs(observed) / se, se, check$label),
+            call. = FALSE)
   }
 
   frame <- boot_frame(params, context)
@@ -490,7 +496,56 @@ boot_setup <- function(params, context) {
   }
 
   list(frame = frame, subject_index = subject_index, groups = groups,
-      refitter = make_refitter(params), se = se)
+      refitter = make_refitter(params), se = se, check = check$of,
+      check_observed = observed, check_label = check$label)
+}
+
+#' The warning text for discarded replicates, split by cause
+#'
+#' `n_failed` counts every replicate that yielded no statistic; `n_refit` those
+#' among them whose stage-one refit failed, so the rest refitted and failed in
+#' the stage-two calculation itself.
+#' @noRd
+boot_failure_text <- function(n_refit, n_failed, R) {
+  parts <- c(
+    if (n_refit > 0L) sprintf("%d of %d replicates failed to converge", n_refit, R),
+    if (n_failed > n_refit) {
+      sprintf(paste0("%d of %d refitted, but the calculation could not be solved on them ",
+                     "(for instance, a slope difference of zero)"), n_failed - n_refit, R)
+    })
+  paste0(paste(parts, collapse = "; "), "; all were discarded.")
+}
+
+#' What the section 2.6 check is measured on
+#'
+#' The paper's hazard is replicates whose slope changes sign, because a trial
+#' powered to reduce a falling slope and one powered to reduce a rising slope
+#' are different trials. What stage two actually divides by, though, is the
+#' slope *difference*: the slope less the reference it is moved toward. That is
+#' the slope itself when the reference is zero, but under
+#' `comparator = "healthy"` or `target = "observed"` it is the slope less the
+#' comparator's (see [reference_is_comparator()]). There a case slope of -1.0
+#' against a control slope of -0.95 is far from zero while the difference
+#' that sizes the trial is not, and checking the slope alone would pass a
+#' meaningless interval. So the check follows the difference wherever the
+#' difference is what is used.
+#'
+#' `target = NULL` is [slope_params_boot()], which bootstraps the slope itself
+#' and is checked on it whatever the comparator.
+#'
+#' @return A list: `of`, reading the checked quantity off a `slope_params`
+#'   object (the fit or a refit); `se`, its analytic standard error from the
+#'   fitted model, `NA` without one; and `label`, its name for messages.
+#' @noRd
+boot_check <- function(params, target) {
+  if (is.null(target) || !reference_is_comparator(params$comparator, target)) {
+    return(list(of = function(p) p$slope, se = slope_se(params), label = "slope"))
+  }
+  # var(slope - slope_comparator), from the same coefficient mapping as slope_se().
+  V <- vcov(params)
+  se <- sqrt(V[1L, 1L] + V[2L, 2L] - 2 * V[1L, 2L])
+  list(of = function(p) p$slope - p$slope_comparator, se = unname(se),
+       label = "slope difference")
 }
 
 #' Refit `R` resampled replicates, reading one or more statistics off each
@@ -532,12 +587,14 @@ boot_replicate_matrix <- function(setup, computes, R, progress, context) {
 
   replicates <- matrix(NA_real_, nrow = R, ncol = length(computes))
   slopes <- rep(NA_real_, R)
+  checks <- rep(NA_real_, R)
   tick <- max(1L, floor(R / 10))
   suppressWarnings(for (b in seq_len(R)) {
     p <- tryCatch(refitter(resample_frame(frame, subject_index, groups)),
                   error = function(e) NULL)
     if (!is.null(p)) {
       slopes[b] <- p$slope
+      checks[b] <- setup$check(p)
       replicates[b, ] <- eval_computes(computes, p)
     }
     if (isTRUE(progress) && b %% tick == 0L) {
@@ -545,7 +602,7 @@ boot_replicate_matrix <- function(setup, computes, R, progress, context) {
     }
   })
 
-  list(replicates = replicates, slopes = slopes)
+  list(replicates = replicates, slopes = slopes, checks = checks)
 }
 
 #' One statistic's interval, BCa where possible and percentile as its fallback
@@ -592,7 +649,7 @@ boot_interval <- function(theta, observed, jack_col, ci_method, probs, context, 
 #' `"slope_bootstrap"` that the print method dispatches on.
 #' @noRd
 run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, level,
-                          seed, progress, per_arm, context, cls) {
+                          seed, progress, per_arm, context, cls, target = NULL) {
   old_seed <- seed_bootstrap(seed)
   if (!is.null(seed)) on.exit(restore_seed(old_seed), add = TRUE)
 
@@ -600,7 +657,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
   # either way -- `compute` on the original parameters reproduces it -- but the
   # driver has already solved that exact calculation once, warnings and all,
   # and solving it again would repeat them.
-  setup <- boot_setup(params, context)
+  setup <- boot_setup(params, context, target)
   se <- setup$se
 
   mat <- boot_replicate_matrix(setup, list(compute), R, progress, context)
@@ -624,9 +681,14 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
     stop(sprintf("%s: %d of %d replicates failed; not enough succeeded to form an interval.",
                  context, n_failed, R), call. = FALSE)
   }
+  # Two different failures, reported apart: a refit that did not converge is
+  # the optimiser's (and slope_lme_control()'s) business, while a refit whose
+  # stage-two calculation failed -- a zero slope difference, say -- is the
+  # data's. One count for both pointed the reader at the wrong one.
+  n_refit_failed <- sum(is.na(slopes))
   if (n_failed > 0L) {
-    warning(sprintf("%s: %d of %d replicates failed to converge and were discarded.",
-                    context, n_failed, R), call. = FALSE)
+    warning(sprintf("%s: %s", context, boot_failure_text(n_refit_failed, n_failed, R)),
+            call. = FALSE)
   }
 
   probs <- boot_probs(level)
@@ -672,14 +734,17 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
   # and `good_slopes` are one vector under two names and the two means cannot
   # differ. Recomputed rather than aliased, so the helper owes its caller
   # nothing about which statistic was asked for.
-  slope_block <- slope_replicate_summary(params$slope, good_slopes, slope_int)
+  slope_block <- slope_replicate_summary(params$slope, good_slopes, slope_int, setup,
+                                         mat$checks[!failed])
 
   structure(c(list(observed = observed, replicates = good, ci = ci,
                    ci_method = used_method, statistic = statistic, R = R,
-                   n_failed = n_failed, level = level, se = se,
+                   n_failed = n_failed, n_refit_failed = n_refit_failed, level = level,
+                   se = se,
                    boot_mean = mean(good), boot_sd = stats::sd(good),
-                   straddle = slope_block$straddle, lattice = lattice),
-              slope_block[setdiff(names(slope_block), "straddle")]),
+                   straddle = slope_block$straddle, straddle_of = slope_block$straddle_of,
+                   lattice = lattice),
+              slope_block[setdiff(names(slope_block), c("straddle", "straddle_of"))]),
             class = c(cls, "slope_bootstrap"), per_arm = per_arm)
 }
 
@@ -776,11 +841,19 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
 #'   (or `"slope_power_boot"`, or `"slope_params_boot"`), with elements
 #'   `observed`, `replicates`, `ci`, `ci_method` (the method actually used,
 #'   which falls back to `"percentile"` where BCa could not be built),
-#'   `statistic`, `R`, `n_failed`, `level`, `se`, `boot_mean` and `boot_sd`
+#'   `statistic`, `R`, `n_failed` (replicates that yielded no statistic, for
+#'   any reason), `n_refit_failed` (those among them whose model refit failed
+#'   to converge; the rest refitted, but the calculation could not be solved
+#'   on them), `level`, `se`, `boot_mean` and `boot_sd`
 #'   (the mean and SD of `replicates`), `straddle` (the proportion of retained
 #'   replicates whose *refitted slope* has a different sign from the fitted
 #'   slope, whatever `statistic` was asked for --- the section 2.6 hazard
-#'   itself, rather than the analytic proxy for it in `se`), and `lattice`
+#'   itself, rather than the analytic proxy for it in `se`), `straddle_of`
+#'   (`"slope"`, or `"slope difference"` when the target treatment effect is
+#'   measured toward a comparator's slope --- under `comparator = "healthy"`,
+#'   or `target = "observed"` --- since that difference, not the slope, is then
+#'   what the sample size depends on; `straddle` and `se` are measured on it),
+#'   and `lattice`
 #'   (whether `statistic` is `"n"`, decided once here and read by the print
 #'   method rather than re-tested there). The `per_arm` argument is recorded
 #'   as an attribute, not an element, since it changes nothing about these
@@ -1105,7 +1178,7 @@ bootstrap_stage_two <- function(x, fn, fixed_name, statistic, R, ci_method, leve
   slim <- x[intersect(c("design", "target", "alpha", "effectiveness"), names(x))]
   compute <- boot_stage_two_compute(fn, slim, fixed, statistic, context)
   run_bootstrap(x$params, compute, x[[statistic]], statistic, R, ci_method, level,
-                seed, progress, per_arm, context, cls)
+                seed, progress, per_arm, context, cls, target = x$target)
 }
 
 #' Read every statistic off one refit, a failing statistic becoming `NA`
@@ -1291,10 +1364,11 @@ basis_note <- function(per_arm) {
 #' describing it in different voices -- the drift [boot_method_note()] was
 #' extracted to prevent, one note further on.
 #' @noRd
-boot_straddle_note <- function(straddle, n_used) {
-  boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a slope on ",
+boot_straddle_note <- function(straddle, n_used, of = "slope") {
+  boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a %s on ",
                                    "the opposite side of zero from the fitted one."),
-                            round(straddle * n_used), n_used, 100 * straddle))
+                            round(straddle * n_used), n_used, 100 * straddle,
+                            of %||% "slope"))
 }
 
 #' The printed frame: one row for the statistic, on the chosen basis
@@ -1372,12 +1446,21 @@ print.slope_bootstrap <- function(x, ..., per_arm = NULL) {
   # out of `R` -- not out of the replicates that succeeded -- so the denominator
   # here is the number requested, matching what a reader asked for and what the
   # warning above (when there were any failures) already reported.
+  # An object from before `n_refit_failed` existed counted every failure as a
+  # convergence failure, and is printed as it always was.
+  n_refit <- x$n_refit_failed %||% x$n_failed
   cat(boot_note("Note", sprintf(
     "%d/%d (%.1f%%) bootstrap samples failed to converge.",
-    x$n_failed, x$R, 100 * x$n_failed / x$R)),
+    n_refit, x$R, 100 * n_refit / x$R)),
       sep = "\n")
+  if (x$n_failed > n_refit) {
+    cat(boot_note("Note", sprintf(paste0(
+      "%d/%d (%.1f%%) more refitted, but the calculation could not be solved on them ",
+      "(for instance, a slope difference of zero)."),
+      x$n_failed - n_refit, x$R, 100 * (x$n_failed - n_refit) / x$R)), sep = "\n")
+  }
 
-  cat(boot_straddle_note(x$straddle, length(x$replicates)), sep = "\n")
+  cat(boot_straddle_note(x$straddle, length(x$replicates), x$straddle_of), sep = "\n")
 
   # Where the rounding happens, and what follows from it. "mean 357.855" invites
   # the reading that 357.855 is the size the bootstrap recommends and that a

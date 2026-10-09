@@ -542,7 +542,12 @@ against — is not.
 
 Every bootstrap also warns when the fitted slope is less than 2.5× its
 standard error, per the paper's own §2.6 recommendation — a check the Stata
-side leaves to the user to remember to apply by eye.
+side leaves to the user to remember to apply by eye. When the target is
+measured toward a comparator's slope (`comparator = "healthy"`, or
+`target = "observed"`), the check is applied to the slope *difference*
+instead, since that, not the slope, is what the sample size divides by: a
+case slope far from zero beside a control slope almost equal to it would pass
+the slope's check while the bootstrapped sample size is meaningless.
 
 ---
 

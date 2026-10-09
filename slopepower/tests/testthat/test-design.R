@@ -192,12 +192,14 @@ test_that("a rate and the vector it expands to give the same design", {
   expect_equal(rate, hand)
 })
 
-test_that("a rate warns about the baseline-only stratum like any other dropout", {
-  # Not suppressed here: every non-zero rate puts someone in the baseline-only
-  # stratum, and on this path -- unlike the grid, which collects the warning and
-  # reports it once per table -- the user is told each time.
-  expect_warning(design_of(c(0, 1, 2), dropout = dropout_rate(0.05)),
-                 "contribute nothing")
+test_that("a rate does not warn about the baseline-only stratum it always has", {
+  # Every non-zero rate puts someone in the baseline-only stratum, so the
+  # warning would only say that a rate is a rate (see ?dropout_rate). The same
+  # proportions written out as a vector still warn: that first element was
+  # typed by someone.
+  expect_silent(d <- design_of(c(0, 1, 2), dropout = dropout_rate(0.05)))
+  expect_gt(d$dropout[1L], 0)
+  expect_warning(design_of(c(0, 1, 2), dropout = d$dropout), "contribute nothing")
 })
 
 # --- the Stata-form checks this layer restates or repairs --------------------

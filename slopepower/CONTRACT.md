@@ -503,9 +503,12 @@ Errors (not warnings, not silent `NA`):
 Warnings:
 
 - `tte` points away from benefit (i.e. treatment would need to make the slope more extreme)
-- `dropout[1] > 0` (those participants contribute nothing)
+- `dropout[1] > 0` in a dropout vector (those participants contribute nothing); not for a
+  `dropout_rate()`, whose baseline-only share is inevitable rather than written
 - any subject's time origin had to be shifted (`slope_params()`)
-- `abs(slope) / se(slope) < 2.5` in every bootstrap function (paper §2.6)
+- `abs(slope) / se(slope) < 2.5` in every bootstrap function (paper §2.6) — on the slope
+  difference `slope - slope_comparator` instead when the target is measured toward the
+  comparator (`comparator = "healthy"`, or `target = "observed"`)
 - fewer than two replicates succeed for one cell of `slope_sample_size_grid_boot()` — that cell's
   interval columns are `NA` (collected into one warning naming every such cell); the call errors
   only if every cell is starved

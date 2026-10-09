@@ -114,11 +114,19 @@ An object of class \code{c("slope_sample_size_boot", "slope_bootstrap")}
 (or \code{"slope_power_boot"}, or \code{"slope_params_boot"}), with elements
 \code{observed}, \code{replicates}, \code{ci}, \code{ci_method} (the method actually used,
 which falls back to \code{"percentile"} where BCa could not be built),
-\code{statistic}, \code{R}, \code{n_failed}, \code{level}, \code{se}, \code{boot_mean} and \code{boot_sd}
+\code{statistic}, \code{R}, \code{n_failed} (replicates that yielded no statistic, for
+any reason), \code{n_refit_failed} (those among them whose model refit failed
+to converge; the rest refitted, but the calculation could not be solved
+on them), \code{level}, \code{se}, \code{boot_mean} and \code{boot_sd}
 (the mean and SD of \code{replicates}), \code{straddle} (the proportion of retained
 replicates whose \emph{refitted slope} has a different sign from the fitted
 slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
-itself, rather than the analytic proxy for it in \code{se}), and \code{lattice}
+itself, rather than the analytic proxy for it in \code{se}), \code{straddle_of}
+(\code{"slope"}, or \code{"slope difference"} when the target treatment effect is
+measured toward a comparator's slope --- under \code{comparator = "healthy"},
+or \code{target = "observed"} --- since that difference, not the slope, is then
+what the sample size depends on; \code{straddle} and \code{se} are measured on it),
+and \code{lattice}
 (whether \code{statistic} is \code{"n"}, decided once here and read by the print
 method rather than re-tested there). The \code{per_arm} argument is recorded
 as an attribute, not an element, since it changes nothing about these

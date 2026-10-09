@@ -308,7 +308,8 @@ grid_boot_cell_stat <- function(col, jack_col, observed, ci_method, probs, conte
 #'   are shared by every cell: `R`, `ci_method` (as requested), `statistic`
 #'   (`"n"` or `"power"`), `level`, `se`, `n_refit_failed` (replicates whose
 #'   stage-one refit failed, before any per-cell solve is attempted),
-#'   `straddle`, `per_arm` (as requested, or overridden at print time), and
+#'   `straddle`, `straddle_of` (as for [slope_sample_size_boot()]), `per_arm`
+#'   (as requested, or overridden at print time), and
 #'   `slope_observed`, `slope_mean`, `slope_sd`, `slope_ci`,
 #'   `slope_ci_method`, `slope_replicates` -- the same summary of the refitted
 #'   slopes a single-design bootstrap result carries, since the slope is what
@@ -410,14 +411,15 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   # function's -- and an axis added there reaches this grid too. Only the two
   # halves underneath grid_impl() are called separately, since `g` is needed on
   # its own to price each cell several hundred times over.
-  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha)
+  spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
+                              context)
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
   pts <- grid_evaluate(g, spec$evaluate, context)
 
   cc <- grid_boot_computes(g, target, statistic, context)
   computes <- grid_boot_flatten(cc)
 
-  setup <- boot_setup(params, context)
+  setup <- boot_setup(params, context, target)
   mat <- boot_replicate_matrix(setup, computes, R, progress, context)
 
   failed_refit <- is.na(mat$slopes)
@@ -515,7 +517,8 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
                  se = setup$se, n_refit_failed = n_refit_failed,
                  added_cols = names(added),
                  named = g$named, per_arm = per_arm),
-            slope_replicate_summary(params$slope, good_slopes, slope_int)))
+            slope_replicate_summary(params$slope, good_slopes, slope_int, setup,
+                                    mat$checks[!failed_refit])))
 }
 
 #' Subsetting drops the grid-wide summary, not just the class
@@ -761,7 +764,8 @@ print_grid_boot <- function(x, per_arm, context, ...) {
       "no interval could be built for them.")), sep = "\n")
   }
 
-  cat(boot_straddle_note(attr(x, "straddle"), length(attr(x, "slope_replicates"))),
+  cat(boot_straddle_note(attr(x, "straddle"), length(attr(x, "slope_replicates")),
+                         attr(x, "straddle_of")),
       sep = "\n")
 
   if (on_lattice(statistic)) {

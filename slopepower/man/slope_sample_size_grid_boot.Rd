@@ -132,7 +132,8 @@ The table also carries, as attributes rather than columns because they
 are shared by every cell: \code{R}, \code{ci_method} (as requested), \code{statistic}
 (\code{"n"} or \code{"power"}), \code{level}, \code{se}, \code{n_refit_failed} (replicates whose
 stage-one refit failed, before any per-cell solve is attempted),
-\code{straddle}, \code{per_arm} (as requested, or overridden at print time), and
+\code{straddle}, \code{straddle_of} (as for \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}), \code{per_arm}
+(as requested, or overridden at print time), and
 \code{slope_observed}, \code{slope_mean}, \code{slope_sd}, \code{slope_ci},
 \code{slope_ci_method}, \code{slope_replicates} -- the same summary of the refitted
 slopes a single-design bootstrap result carries, since the slope is what
