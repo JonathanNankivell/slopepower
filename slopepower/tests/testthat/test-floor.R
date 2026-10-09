@@ -367,12 +367,12 @@ test_that("the bound bootstraps take their bound's arguments and refuse the rest
   p <- paper_fit("slpower1")
   expect_identical(
     names(formals(slope_sample_size_floor_boot)),
-    c(names(formals(slope_sample_size_floor))[1:5], "statistic", "R", "ci_method",
-      "level", "seed", "progress", "per_arm"))
+    c(names(formals(slope_sample_size_floor)), "statistic", "R", "ci_method", "level", "seed",
+      "progress"))
   expect_identical(
     names(formals(slope_power_ceiling_boot)),
-    c(names(formals(slope_power_ceiling))[1:5], "statistic", "R", "ci_method",
-      "level", "seed", "progress", "per_arm"))
+    c(names(formals(slope_power_ceiling)), "statistic", "R", "ci_method", "level", "seed",
+      "progress"))
 
   expect_error(slope_power_ceiling_boot(p), "`n` is required")
   expect_error(slope_sample_size_floor_boot(p, statistic = "power"),

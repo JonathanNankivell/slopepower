@@ -864,10 +864,10 @@ slope_sample_size_boot <- function(params, visits, dropout = NULL,
                                    dropout_scale = c("incremental", "cumulative"),
                                    power = 0.8, effectiveness = 0.25,
                                    target = c("effectiveness", "observed"),
-                                   alpha = 0.05, statistic = c("n", "tte"),
+                                   alpha = 0.05, per_arm = TRUE,
+                                   statistic = c("n", "tte"),
                                    R = 999, ci_method = c("bca", "percentile"),
-                                   level = 0.95, seed = NULL, progress = FALSE,
-                                   per_arm = TRUE) {
+                                   level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_sample_size_boot()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
@@ -894,10 +894,10 @@ slope_power_boot <- function(params, visits, dropout = NULL,
                              dropout_scale = c("incremental", "cumulative"),
                              n, effectiveness = 0.25,
                              target = c("effectiveness", "observed"),
-                             alpha = 0.05, statistic = c("power", "tte"),
+                             alpha = 0.05, per_arm = TRUE,
+                             statistic = c("power", "tte"),
                              R = 999, ci_method = c("bca", "percentile"),
-                             level = 0.95, seed = NULL, progress = FALSE,
-                             per_arm = TRUE) {
+                             level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_boot()"
   # `is.null(n)` too; see the note on the same guard in slope_power().
   if (missing(n) || is.null(n)) {
@@ -967,10 +967,10 @@ slope_power_boot <- function(params, visits, dropout = NULL,
 #' @export
 slope_sample_size_floor_boot <- function(params, power = 0.8, effectiveness = 0.25,
                                          target = c("effectiveness", "observed"),
-                                         alpha = 0.05, statistic = c("n", "tte"),
+                                         alpha = 0.05, per_arm = TRUE,
+                                         statistic = c("n", "tte"),
                                          R = 999, ci_method = c("bca", "percentile"),
-                                         level = 0.95, seed = NULL, progress = FALSE,
-                                         per_arm = TRUE) {
+                                         level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_sample_size_floor_boot()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
@@ -990,10 +990,10 @@ slope_sample_size_floor_boot <- function(params, power = 0.8, effectiveness = 0.
 #' @export
 slope_power_ceiling_boot <- function(params, n, effectiveness = 0.25,
                                      target = c("effectiveness", "observed"),
-                                     alpha = 0.05, statistic = c("power", "tte"),
+                                     alpha = 0.05, per_arm = TRUE,
+                                     statistic = c("power", "tte"),
                                      R = 999, ci_method = c("bca", "percentile"),
-                                     level = 0.95, seed = NULL, progress = FALSE,
-                                     per_arm = TRUE) {
+                                     level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_ceiling_boot()"
   # `is.null(n)` too; see the note on the same guard in slope_power().
   if (missing(n) || is.null(n)) {

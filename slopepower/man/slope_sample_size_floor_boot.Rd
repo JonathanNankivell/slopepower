@@ -11,13 +11,13 @@ slope_sample_size_floor_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   statistic = c("n", "tte"),
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 
 slope_power_ceiling_boot(
@@ -26,13 +26,13 @@ slope_power_ceiling_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   statistic = c("power", "tte"),
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 }
 \arguments{
@@ -50,6 +50,15 @@ the equivalent of the Stata command's \code{usetrt} option and requires
 parameters estimated from a previous trial.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
+
+\item{per_arm}{For \code{statistic = "n"}, which basis the printed result is on:
+\code{TRUE} (the default) for participants per arm, \code{FALSE} for the trial
+total. Display only -- \code{replicates}, \code{ci}, \code{boot_mean} and \code{boot_sd} are
+always the totals \code{slope_sample_size()} itself returns; \code{per_arm} is
+recorded as an attribute (\code{attr(x, "per_arm")}) and consulted by
+\code{print()}, which halves them for display and can be overridden
+afterwards with \code{print(x, per_arm = FALSE)}. Ignored, but still accepted,
+for any other \code{statistic}, none of which have arms.}
 
 \item{statistic}{Which quantity to bootstrap: the bound (the default --
 \code{"n"} for the floor, \code{"power"} for the ceiling) or the target treatment
@@ -71,15 +80,6 @@ result without reseeding the session; leaving it \code{NULL} draws from, and
 advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
-
-\item{per_arm}{For \code{statistic = "n"}, which basis the printed result is on:
-\code{TRUE} (the default) for participants per arm, \code{FALSE} for the trial
-total. Display only -- \code{replicates}, \code{ci}, \code{boot_mean} and \code{boot_sd} are
-always the totals \code{slope_sample_size()} itself returns; \code{per_arm} is
-recorded as an attribute (\code{attr(x, "per_arm")}) and consulted by
-\code{print()}, which halves them for display and can be overridden
-afterwards with \code{print(x, per_arm = FALSE)}. Ignored, but still accepted,
-for any other \code{statistic}, none of which have arms.}
 
 \item{n}{For \code{slope_power_ceiling_boot()}: total number of participants, as
 in \code{\link[=slope_power_ceiling]{slope_power_ceiling()}}. Required.}

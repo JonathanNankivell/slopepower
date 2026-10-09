@@ -14,12 +14,12 @@ slope_sample_size_grid_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 
 slope_power_grid_boot(
@@ -31,12 +31,12 @@ slope_power_grid_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 }
 \arguments{
@@ -65,6 +65,14 @@ the value itself is what the table reports, in the column of the same name.}
 \item{target}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held constant across the
 grid.}
 
+\item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Unlike
+the plain grids' \code{per_arm} (which reshapes the returned columns), these
+grids always carry both bases -- see the \verb{@return} block below -- and
+\code{per_arm} only sets which one the print method shows by default; the
+stored value can still be reached through the other columns, and a single
+call can be printed either way with \code{print(x, per_arm = ...)}.}
+
 \item{R}{Number of bootstrap replicates. The default is sized for the
 interval this returns rather than for speed; see above before lowering it.}
 
@@ -81,14 +89,6 @@ result without reseeding the session; leaving it \code{NULL} draws from, and
 advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
-
-\item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
-default) for participants per arm, \code{FALSE} for the trial total. Unlike
-the plain grids' \code{per_arm} (which reshapes the returned columns), these
-grids always carry both bases -- see the \verb{@return} block below -- and
-\code{per_arm} only sets which one the print method shows by default; the
-stored value can still be reached through the other columns, and a single
-call can be printed either way with \code{print(x, per_arm = ...)}.}
 
 \item{n}{For \code{slope_power_grid_boot()}: total number of participants, as in
 \code{\link[=slope_power_grid]{slope_power_grid()}}. Required. A single value is held constant across the

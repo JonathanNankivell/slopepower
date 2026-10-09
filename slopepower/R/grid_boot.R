@@ -343,10 +343,9 @@ slope_sample_size_grid_boot <- function(params, visits, dropout = NULL,
                                         dropout_scale = c("incremental", "cumulative"),
                                         power = 0.8, effectiveness = 0.25,
                                         target = c("effectiveness", "observed"),
-                                        alpha = 0.05,
+                                        alpha = 0.05, per_arm = TRUE,
                                         R = 999, ci_method = c("bca", "percentile"),
-                                        level = 0.95, seed = NULL, progress = FALSE,
-                                        per_arm = TRUE) {
+                                        level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_sample_size_grid_boot()"
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
@@ -361,10 +360,9 @@ slope_power_grid_boot <- function(params, visits, dropout = NULL,
                                   dropout_scale = c("incremental", "cumulative"),
                                   n, effectiveness = 0.25,
                                   target = c("effectiveness", "observed"),
-                                  alpha = 0.05,
+                                  alpha = 0.05, per_arm = TRUE,
                                   R = 999, ci_method = c("bca", "percentile"),
-                                  level = 0.95, seed = NULL, progress = FALSE,
-                                  per_arm = TRUE) {
+                                  level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_grid_boot()"
   # `is.null(n)` too; see the note on the same guard in slope_power().
   if (missing(n) || is.null(n)) {
