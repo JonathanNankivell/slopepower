@@ -110,12 +110,12 @@ is_positive_definite <- function(m, tol = 1e-10) {
 #' `sigma2_residual` masks it). One helper means the matrix and the message can
 #' never drift between the two call sites.
 #' @noRd
-check_re_covariance <- function(sigma2_intercept, sigma2_slope, sigma_cov, context) {
-  G <- matrix(c(sigma2_intercept, sigma_cov, sigma_cov, sigma2_slope), 2L, 2L)
+check_re_covariance <- function(sigma2_intercept, sigma2_slope, cov_intercept_slope, context) {
+  G <- matrix(c(sigma2_intercept, cov_intercept_slope, cov_intercept_slope, sigma2_slope), 2L, 2L)
   if (!is_positive_definite(G)) {
     stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
                         "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
-                 context, sigma2_intercept, sigma2_slope, sigma_cov), call. = FALSE)
+                 context, sigma2_intercept, sigma2_slope, cov_intercept_slope), call. = FALSE)
   }
   invisible(NULL)
 }

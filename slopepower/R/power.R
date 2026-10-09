@@ -12,7 +12,7 @@
 #' Required fields of a `slope_params` object
 #' @noRd
 PARAM_FIELDS <- c("slope", "slope_comparator", "comparator",
-                  "sigma2_intercept", "sigma2_slope", "sigma_cov",
+                  "sigma2_intercept", "sigma2_slope", "cov_intercept_slope",
                   "sigma2_residual")
 
 #' Validate the slope and variance components of a `slope_params` object
@@ -25,12 +25,12 @@ PARAM_FIELDS <- c("slope", "slope_comparator", "comparator",
 check_param_values <- function(x, context, prefix = "") {
   nm <- function(f) paste0(prefix, f)
   out <- list(
-    slope            = check_scalar(x$slope, nm("slope"), context),
-    sigma2_intercept = check_variance(x$sigma2_intercept, nm("sigma2_intercept"), context),
-    sigma2_slope     = check_variance(x$sigma2_slope, nm("sigma2_slope"), context),
-    sigma2_residual  = check_variance(x$sigma2_residual, nm("sigma2_residual"), context),
-    sigma_cov        = check_scalar(x$sigma_cov, nm("sigma_cov"), context))
-  check_re_covariance(out$sigma2_intercept, out$sigma2_slope, out$sigma_cov, context)
+    slope               = check_scalar(x$slope, nm("slope"), context),
+    sigma2_intercept    = check_variance(x$sigma2_intercept, nm("sigma2_intercept"), context),
+    sigma2_slope        = check_variance(x$sigma2_slope, nm("sigma2_slope"), context),
+    sigma2_residual     = check_variance(x$sigma2_residual, nm("sigma2_residual"), context),
+    cov_intercept_slope = check_scalar(x$cov_intercept_slope, nm("cov_intercept_slope"), context))
+  check_re_covariance(out$sigma2_intercept, out$sigma2_slope, out$cov_intercept_slope, context)
   out
 }
 
@@ -176,7 +176,7 @@ slope_sigma <- function(params, visits) {
 sigma_at <- function(params, t, context) {
   sigma <- params$sigma2_intercept +
     outer(t, t) * params$sigma2_slope +
-    outer(t, t, "+") * params$sigma_cov +
+    outer(t, t, "+") * params$cov_intercept_slope +
     residual_cov(params, t, context)
 
   if (!is_positive_definite(sigma)) {
@@ -194,8 +194,19 @@ sigma_at <- function(params, t, context) {
 #' \eqn{N} participants per arm is \eqn{s^*/\sqrt{N}}, this single quantity
 #' carries all of the design information needed for the sample-size formula.
 #'
+#' With `dropout`, the result is the *effective* \eqn{s^{*2}}: the variance
+#' that, used in equation (6) in place of the completers' \eqn{s^{*2}}, gives
+#' the same sample size as the dropout-weighted calculation. It is the
+#' weighted harmonic mean of the strata's own \eqn{s^{*2}}, each stratum
+#' weighted by the proportion of participants whose last visit it ends at, and
+#' it is the `var_tte` that [slope_power()] reports for the same design.
+#'
 #' @param params A `slope_params` object.
-#' @param visits Numeric vector of visit times.
+#' @param visits Numeric vector of visit times. Without `dropout`, any strictly
+#'   increasing times will do; with it, the schedule must begin with the
+#'   baseline visit at time 0, as in [slope_power()].
+#' @param dropout,dropout_scale The expected dropout, as in [slope_power()].
+#'   `NULL` (default) assumes every participant attends every visit.
 #'
 #' @return A single positive number, \eqn{s^{*2}}.
 #'
@@ -207,14 +218,24 @@ sigma_at <- function(params, t, context) {
 #' # treatment-effect variance shrinks.
 #' slope_var(pars, c(0, 1, 2, 3))
 #'
+#' # Dropout takes some of it back.
+#' slope_var(pars, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1))
+#'
 #' @seealso [slope_sigma()], the marginal covariance matrix this is built
 #'   from; [slope_se()], the standard error of the fitted slope itself.
 #' @export
-slope_var <- function(params, visits) {
+slope_var <- function(params, visits, dropout = NULL,
+                      dropout_scale = c("incremental", "cumulative")) {
   context <- "slope_var()"
-  check_params(params, context)
-  t <- check_visits(visits, context)
-  treatment_effect_var(sigma_at(params, t, context), t, context)
+  dropout_scale <- match.arg(dropout_scale)
+  if (is.null(dropout)) {
+    check_params(params, context)
+    t <- check_visits(visits, context)
+    return(treatment_effect_var(sigma_at(params, t, context), t, context))
+  }
+  strata <- dropout_strata(params, stage_two_design(params, visits, dropout, dropout_scale,
+                                                    context), context)
+  1 / sum(strata$weight / strata$var)
 }
 
 #' The GLS half of `slope_var()`: everything after `slope_sigma()` has built
@@ -373,39 +394,56 @@ effect_components <- function(params, design, target, effectiveness, context) {
   comp <- target_components(params, target, effectiveness, context)
   slope_difference <- comp$slope_difference
 
+  strata <- dropout_strata(params, design, context)
+  # Summed in stratum order from zero, which is bit-identical to the running sum
+  # this replaced: the first addition to 0 is exact.
+  eff2 <- 0
+  for (k in seq_along(strata$weight)) {
+    eff2 <- eff2 + strata$weight[k] * (slope_difference / sqrt(strata$var[k]))^2
+  }
+  effect_size <- sign(slope_difference) * sqrt(eff2)
+
+  c(comp, list(effect_size = effect_size, var_full = strata$var[1L], design = design))
+}
+
+#' The dropout strata that carry slope information, with their weights and s*^2
+#'
+#' Dawson-Lagakos pattern mixture, the one statement of it shared by
+#' [effect_components()] and [slope_var()]. The completers come first, with
+#' weight `1 - sum(dropout)` and the full schedule's s*^2 -- always present,
+#' even at weight zero, because `var[1]` is what [effect_components()] reports
+#' as `var_full`. Then stratum j, attending `visits[1:j]`, for each j >= 2 with
+#' `dropout[j] > 0`. Stratum 1 sees baseline only and carries no slope
+#' information, so it is skipped -- an infinite stratum-specific sample size
+#' contributes nothing to the sum.
+#'
+#' Stratum j's covariance is exactly the leading j x j submatrix of the full
+#' one (Sigma_ik depends only on visits i and k, not on what other visits
+#' exist), so it is sliced out rather than rebuilt and re-validated from
+#' scratch -- see treatment_effect_var()'s note on why that re-check would be
+#' redundant.
+#' @noRd
+dropout_strata <- function(params, design, context) {
   visits <- design$visits
   dropout <- design$dropout
-  n_follow_up <- length(visits) - 1L
 
   sigma_full <- sigma_at(params, visits, context)
-  var_full <- treatment_effect_var(sigma_full, visits, context)
-  es_full <- slope_difference / sqrt(var_full)
-
-  # Dawson-Lagakos pattern mixture. Stratum j attends visits[1:j]; stratum 1 sees
-  # baseline only and carries no slope information, so it is skipped -- an
-  # infinite stratum-specific sample size contributes nothing to the sum.
-  #
-  # Stratum j's covariance is exactly the leading j x j submatrix of
-  # `sigma_full` (Sigma_ik depends only on visits i and k, not on what other
-  # visits exist), so it is sliced out rather than rebuilt and re-validated
-  # from scratch -- see treatment_effect_var()'s note on why that re-check
-  # would be redundant.
-  eff2 <- (1 - sum(dropout)) * es_full^2
-  for (j in seq_len(n_follow_up)[-1L]) {
+  weight <- 1 - sum(dropout)
+  var <- treatment_effect_var(sigma_full, visits, context)
+  for (j in seq_along(dropout)[-1L]) {
     if (dropout[j] == 0) next
     idx <- seq_len(j)
-    var_j <- treatment_effect_var(sigma_full[idx, idx, drop = FALSE], visits[idx], context)
-    eff2 <- eff2 + dropout[j] * (slope_difference / sqrt(var_j))^2
+    weight <- c(weight, dropout[j])
+    var <- c(var, treatment_effect_var(sigma_full[idx, idx, drop = FALSE], visits[idx],
+                                       context))
   }
 
-  if (eff2 <= 0) {
+  if (!any(weight > 0)) {
     stop(sprintf(paste0("%s: every participant is expected to drop out before contributing ",
                         "slope information, so the effect size is zero. Check `dropout`."),
                  context), call. = FALSE)
   }
-  effect_size <- sign(slope_difference) * sqrt(eff2)
-
-  c(comp, list(effect_size = effect_size, var_full = var_full, design = design))
+  list(weight = weight, var = var)
 }
 
 #' Dropout-weighted standardised effect size

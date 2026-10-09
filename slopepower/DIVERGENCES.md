@@ -44,7 +44,7 @@ forvalues i=1/`tpoints' {
 ```r
 Sigma <- sigma2_intercept +
          outer(t, t) * sigma2_slope +
-         outer(t, t, "+") * sigma_cov +
+         outer(t, t, "+") * cov_intercept_slope +
          diag(sigma2_residual, length(t))
 ```
 
@@ -642,21 +642,30 @@ included, and reports the same very slightly inflated number Stata does.
 
 ---
 
-## 20. Convergence control is fixed and inspectable, not an option
+## 20. Convergence control is an `lmeControl()` list with tightened defaults
 
 **Stata** exposes `ITERate(integer 16000)` and threads it into every `mixed`
 call, leaving the optimiser otherwise at its defaults.
 
-**R** has no such argument. The settings behind every fit live in one
-exported, callable function, `slope_lme_control()` — more iterations than
-`nlme`'s defaults, `opt = "optim"`, and tighter tolerances, chosen because
-the untightened defaults converged less precisely on the two-block
-random-effects structure fitted for `healthy`. It is exported so that the
-settings behind a published number can be inspected and reproduced outside
-the package, **not** so they can be overridden inside it: the model this
-package fits is fixed (see "What these models do and do not include" in
-`?slope_params`), and a tunable optimiser would let two runs of the same call
-disagree with nothing on the returned object to say why.
+**R** takes the whole of `nlme`'s control list instead, as `lme()` does:
+`slope_params(control = )`, defaulting to the exported `slope_lme_control()`
+— more iterations than `nlme`'s defaults, `opt = "optim"`, and tighter
+tolerances, chosen because the untightened defaults converged less precisely
+on the two-block random-effects structure fitted for `healthy`.
+`slope_lme_control(...)` changes some settings and keeps the rest, so
+`iterate()`'s nearest equivalent is `control = slope_lme_control(maxIter = ,
+msMaxIter = )`. A bare `list()` is refused, because `lme()` would fill what
+it leaves out from `nlme`'s stock defaults and silently loosen the
+tolerances.
+
+These settings change how hard the optimiser works, never which model is
+fitted (see "What these models do and do not include" in `?slope_params`).
+The settings a fit used are recorded on the result as `$control`, so two
+runs that disagree say why, and every bootstrap replicate is refitted under
+the same settings as the point estimate. An earlier version of the port took
+no such argument for fear of that disagreement; recording the settings
+answers it, and a fit that needs more iterations to converge is no longer
+stuck.
 
 This is the one place where the port's numbers can differ from Stata's at
 all. `stata-reference/` records the measured size of that difference — every
@@ -712,7 +721,7 @@ one at a time.
 and the least upper bound of power at a given `N` — over *every* visit
 schedule. It falls out of the closed form `s*^2 = 2 / (t' Sigma^-1 t)`
 derived in the `what-is-s-star` vignette, and is
-`2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)`, twice the variance of
+`2 * (sigma2_slope - cov_intercept_slope^2 / sigma2_intercept)`, twice the variance of
 a participant's random slope given their random intercept.
 
 This is an *addition*, not a change: no existing number moves, and the port

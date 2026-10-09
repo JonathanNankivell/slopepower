@@ -6,10 +6,10 @@
 test_that("slope_var_floor() is twice the conditional variance of the random slope", {
   p <- ref_params()
   expect_equal(slope_var_floor(p),
-               2 * (p$sigma2_slope - p$sigma_cov^2 / p$sigma2_intercept))
+               2 * (p$sigma2_slope - p$cov_intercept_slope^2 / p$sigma2_intercept))
 
   # Equivalently, twice the Schur complement of the random-effects covariance.
-  G <- matrix(c(p$sigma2_intercept, p$sigma_cov, p$sigma_cov, p$sigma2_slope), 2L, 2L)
+  G <- matrix(c(p$sigma2_intercept, p$cov_intercept_slope, p$cov_intercept_slope, p$sigma2_slope), 2L, 2L)
   expect_equal(slope_var_floor(p), 2 * (G[2, 2] - G[2, 1] * G[1, 2] / G[1, 1]))
 })
 
@@ -20,7 +20,7 @@ test_that("slope_var_floor() is positive whenever params are valid", {
   # never reaches it.
   expect_gt(slope_var_floor(ref_params()), 0)
   near <- slope_params_manual(slope = -1, sigma2_intercept = 100,
-                              sigma2_slope = 2, sigma_cov = 14.1,
+                              sigma2_slope = 2, cov_intercept_slope = 14.1,
                               sigma2_residual = 10)
   expect_gt(slope_var_floor(near), 0)
   expect_lt(slope_var_floor(near), 0.05)
@@ -48,7 +48,7 @@ test_that("lengthening a two-visit schedule stops short of the floor", {
   # duration. Documented in slope_var_floor()'s details.
   p <- ref_params()
   two_visit_limit <- 2 * (p$sigma2_slope -
-                            p$sigma_cov^2 / (p$sigma2_intercept + p$sigma2_residual))
+                            p$cov_intercept_slope^2 / (p$sigma2_intercept + p$sigma2_residual))
 
   expect_gt(two_visit_limit, slope_var_floor(p))
   expect_equal(slope_var(p, c(0, 1e5)), two_visit_limit, tolerance = 1e-4)
@@ -231,7 +231,7 @@ test_that("the floor reproduces the vignette's slpower1 figure", {
   # Derived by hand in the "What s* is" vignette, section 6.
   z <- qnorm(0.975) + qnorm(0.8)
   by_hand <- 2 * ceiling(z^2 * 2 *
-    (p1$sigma2_slope - p1$sigma_cov^2 / p1$sigma2_intercept) /
+    (p1$sigma2_slope - p1$cov_intercept_slope^2 / p1$sigma2_intercept) /
     (0.33 * abs(p1$slope))^2)
   expect_identical(flr$n, by_hand)
 

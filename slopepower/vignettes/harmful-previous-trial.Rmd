@@ -136,7 +136,7 @@ There is no way to ask for a harmful target except through `target = "observed"`
 Two things, and neither is the treatment effect:
 
 * the **variance components** \(\sigma^2_a, \sigma^2_b, \sigma_{ab}, \sigma^2_\varepsilon\)
-  (`sigma2_intercept`, `sigma2_slope`, `sigma_cov`, `sigma2_residual`), which
+  (`sigma2_intercept`, `sigma2_slope`, `cov_intercept_slope`, `sigma2_residual`), which
   govern \(s_*\) and are the parameters the paper describes as hardest to guess
   a priori (§2.2);
 * the **control-arm slope**, which is the untreated rate of progression in your
@@ -240,7 +240,7 @@ through stage two and compare.
 ```{r truth}
 true_pars <- slope_params_manual(
   slope = truth$slope_control, sigma2_intercept = truth$s2a,
-  sigma2_slope = truth$s2b, sigma_cov = truth$sab,
+  sigma2_slope = truth$s2b, cov_intercept_slope = truth$sab,
   sigma2_residual = truth$s2e
 )
 true_res <- slope_sample_size(true_pars, visits, effectiveness = 0.25)
@@ -258,7 +258,7 @@ out <- t(vapply(seq_len(R_sim), function(i) {
   p <- slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat)
   z <- suppressWarnings(slope_sample_size(p, visits, effectiveness = 0.25))
   c(slope = p$slope, s2a = p$sigma2_intercept, s2b = p$sigma2_slope,
-    sab = p$sigma_cov, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n)
+    sab = p$cov_intercept_slope, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n)
 }, numeric(7)))
 
 truths <- c(slope = truth$slope_control, s2a = truth$s2a, s2b = truth$s2b,

@@ -131,7 +131,7 @@ with the values stated:
 
 ```{r schedules}
 truth <- slope_params_manual(
-  slope = -1.5, sigma2_intercept = 100, sigma2_slope = 1.5, sigma_cov = 3,
+  slope = -1.5, sigma2_intercept = 100, sigma2_slope = 1.5, cov_intercept_slope = 3,
   sigma2_residual = 15,
   correlation = nlme::corExp(c(-1 / log(0.4), 3 / 15), nugget = TRUE))
 

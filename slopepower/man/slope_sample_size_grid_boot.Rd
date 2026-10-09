@@ -177,6 +177,12 @@ one cell of several does not justify discarding a run that may have taken
 several minutes to resample; that cell's interval columns are \code{NA} instead,
 and every such cell is named once in a warning. The grid only stops if not a
 single cell could be bootstrapped at all.
+
+Unlike the single-design bootstraps, these take no \code{statistic}: every cell
+gets an interval for both the quantity solved for and the target treatment
+effect, the two a \code{statistic} would choose between. The \code{tte} interval
+costs next to nothing beside the refits, since it is one column per
+\code{effectiveness} level, not one per cell.
 }
 \examples{
 # No comparator: fitted to all two hundred participants of `slpower1`.

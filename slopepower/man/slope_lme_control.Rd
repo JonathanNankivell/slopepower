@@ -4,7 +4,10 @@
 \alias{slope_lme_control}
 \title{The \code{nlme::lme()} control settings used by every fit}
 \usage{
-slope_lme_control()
+slope_lme_control(...)
+}
+\arguments{
+\item{...}{Arguments to \code{\link[nlme:lmeControl]{nlme::lmeControl()}}, overriding the settings above.}
 }
 \value{
 A list of control settings, as returned by \code{\link[nlme:lmeControl]{nlme::lmeControl()}}.
@@ -19,15 +22,19 @@ particularly for the two-block random-effects structure fitted when
 \code{\link[=slope_params]{slope_params()}}).
 }
 \details{
-There is deliberately no argument to \code{\link[=slope_params]{slope_params()}} for supplying a
-different control object -- see "What these models do and do not include"
-in \code{?slope_params} for why the model this package fits is fixed rather
-than user-tunable. This function exists so the settings behind every fit
-are inspectable and reproducible outside the package, not so they can be
-overridden inside it.
+It is the default of \code{\link[=slope_params]{slope_params()}}'s \code{control} argument. Pass it with
+arguments to change some settings and keep the rest: anything
+\code{\link[nlme:lmeControl]{nlme::lmeControl()}} accepts overrides the value set here. These settings
+change how hard the optimiser works, never which model is fitted; see "What
+these models do and do not include" in \code{?slope_params} for the model itself,
+which no argument changes. The tolerances this package's tests hold the
+fitted variance components to are calibrated to the defaults.
 }
 \examples{
 slope_lme_control()
+
+# More iterations for a fit that is slow to converge.
+slope_lme_control(maxIter = 500, msMaxIter = 500)
 
 }
 \seealso{

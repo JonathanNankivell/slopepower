@@ -94,7 +94,7 @@ Intervals around the bounds of \code{\link[=slope_sample_size_floor]{slope_sampl
 \code{\link[=slope_power_ceiling]{slope_power_ceiling()}}, by the subject-level resampling
 \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} uses: each replicate refits stage one and
 re-solves the bound against the refitted variance components. The bounds
-depend only on \code{sigma2_slope}, \code{sigma_cov} and \code{sigma2_intercept} (through
+depend only on \code{sigma2_slope}, \code{cov_intercept_slope} and \code{sigma2_intercept} (through
 \code{\link[=slope_var_floor]{slope_var_floor()}}) and on the slope difference, so their uncertainty is
 the uncertainty in those --- often a wider interval, relative to the point
 estimate, than a stated design's, because the floor rests entirely on the

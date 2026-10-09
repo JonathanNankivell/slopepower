@@ -97,6 +97,9 @@ make_refitter <- function(params) {
   # Likewise the residual structure: a replicate fitted with independent
   # residuals would put the wrong model's spread around the point estimate.
   args <- c(args, residual_refit_args(params$residual))
+  # And the optimiser settings. An object built before `control` was recorded
+  # has none, and was fitted under the default, which is what NULL leaves.
+  if (!is.null(params$control)) args$control <- params$control
   cl <- as.call(c(list(quote(slope_params)), args,
                   if (identical(comparator, "healthy")) {
                     # Only under `healthy`: for the other two slope_params()
@@ -172,7 +175,7 @@ resample_frame <- function(frame, subject_index, groups) {
 #' # standard error to report.
 #' slope_se(slope_params_manual(
 #'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
+#'   cov_intercept_slope = 5, sigma2_residual = 10
 #' ))
 #'
 #' @seealso [slope_sigma()] and [slope_var()], the other quantities computed
@@ -187,16 +190,26 @@ slope_se <- function(params) {
   b <- tryCatch(nlme::fixef(fit), error = function(e) NULL)
   V <- tryCatch(stats::vcov(fit), error = function(e) NULL)
   if (is.null(b) || is.null(V)) return(NA_real_)
-  # Which terms sum to the slope, by comparator, is params.R's
-  # slope_fixef_parts() -- the same mapping slope_params() itself sums the
-  # *values* of, via fixef_term(), so the two can never name a different set
-  # of coefficients. Every part -- not just an interaction -- is resolved via
-  # resolve_fixef_name() rather than assuming a spelling, exactly as
-  # fixef_term() does: for a single name it degenerates to a plain lookup, so
-  # one call handles both shapes and this can never trust an unresolved name
-  # the way indexing `p` directly would. Getting this wrong used to return NA
-  # silently, which switched off the section 2.6 warning below that is the
-  # entire reason for computing the standard error.
+  terms <- slope_terms(params, b, context)
+  if (is.null(terms)) return(NA_real_)
+  k <- as.numeric(names(b) %in% terms)
+  sqrt(drop(k %*% as.matrix(V) %*% k))
+}
+
+#' The fitted model's coefficient names that sum to the slope, or `NULL`
+#'
+#' Which terms sum to the slope, by comparator, is params.R's
+#' slope_fixef_parts() -- the same mapping slope_params() itself sums the
+#' *values* of, via fixef_term(), so the standard error and the slope can never
+#' name a different set of coefficients. Every part -- not just an interaction
+#' -- is resolved via resolve_fixef_name() rather than assuming a spelling,
+#' exactly as fixef_term() does: for a single name it degenerates to a plain
+#' lookup. Getting this wrong used to return NA silently, which switched off
+#' the section 2.6 warning that is the entire reason [slope_se()] computes the
+#' standard error; so a failure warns, and returns `NULL`. In comparator order:
+#' the first term, when there are two, is the comparator's own slope.
+#' @noRd
+slope_terms <- function(params, b, context) {
   terms <- vapply(slope_fixef_parts(params$comparator),
                   function(p) resolve_fixef_name(b, p),
                   character(1L))
@@ -209,10 +222,9 @@ slope_se <- function(params) {
       "returning NA. If this call came from a bootstrap, its section 2.6 ",
       "check on the slope-to-standard-error ratio was skipped."),
       context, paste(names(b), collapse = ", ")), call. = FALSE)
-    return(NA_real_)
+    return(NULL)
   }
-  k <- as.numeric(names(b) %in% terms)
-  sqrt(drop(k %*% as.matrix(V) %*% k))
+  terms
 }
 
 #' `match.arg()` for `statistic`, with a message that says where the others are
@@ -929,7 +941,7 @@ slope_power_boot <- function(params, visits, dropout = NULL,
 #' [slope_power_ceiling()], by the subject-level resampling
 #' [slope_sample_size_boot()] uses: each replicate refits stage one and
 #' re-solves the bound against the refitted variance components. The bounds
-#' depend only on `sigma2_slope`, `sigma_cov` and `sigma2_intercept` (through
+#' depend only on `sigma2_slope`, `cov_intercept_slope` and `sigma2_intercept` (through
 #' [slope_var_floor()]) and on the slope difference, so their uncertainty is
 #' the uncertainty in those --- often a wider interval, relative to the point
 #' estimate, than a stated design's, because the floor rests entirely on the

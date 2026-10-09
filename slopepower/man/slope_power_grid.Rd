@@ -90,7 +90,7 @@ design needs to reach a target power.
 # model on all two hundred participants.
 pars <- slope_params_manual(
   slope = -1.6725, sigma2_intercept = 111.786636, sigma2_slope = 2.350021,
-  sigma_cov = 2.810881, sigma2_residual = 9.159780
+  cov_intercept_slope = 2.810881, sigma2_residual = 9.159780
 )
 slope_power_grid(
   pars, n = 450, effectiveness = 0.33,

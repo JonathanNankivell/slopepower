@@ -3,6 +3,9 @@
 S3method("[",slope_power_grid_boot)
 S3method("[",slope_sample_size_grid_boot)
 S3method(as.data.frame,slope_result)
+S3method(confint,slope_bootstrap)
+S3method(fixef,slope_params)
+S3method(getVarCov,slope_params)
 S3method(print,dropout_rate)
 S3method(print,slope_bootstrap)
 S3method(print,slope_params)
@@ -13,7 +16,11 @@ S3method(print,slope_sample_size)
 S3method(print,slope_sample_size_floor)
 S3method(print,slope_sample_size_grid_boot)
 S3method(print,trial_design)
+S3method(sigma,slope_params)
+S3method(vcov,slope_params)
 export(dropout_rate)
+export(fixef)
+export(getVarCov)
 export(slope_effect_size)
 export(slope_lme_control)
 export(slope_params)
@@ -59,6 +66,7 @@ importFrom(stats,
   as.formula,
   ave,
   coef,
+  confint,
   na.omit,
   pnorm,
   qnorm,

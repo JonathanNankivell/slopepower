@@ -251,6 +251,12 @@ grid_boot_cell_stat <- function(col, jack_col, observed, ci_method, probs, conte
 #' and every such cell is named once in a warning. The grid only stops if not a
 #' single cell could be bootstrapped at all.
 #'
+#' Unlike the single-design bootstraps, these take no `statistic`: every cell
+#' gets an interval for both the quantity solved for and the target treatment
+#' effect, the two a `statistic` would choose between. The `tte` interval
+#' costs next to nothing beside the refits, since it is one column per
+#' `effectiveness` level, not one per cell.
+#'
 #' @inheritParams slope_sample_size_grid
 #' @inheritParams slope_sample_size_boot
 #' @param n For `slope_power_grid_boot()`: total number of participants, as in

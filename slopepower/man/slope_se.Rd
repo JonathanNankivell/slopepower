@@ -35,7 +35,7 @@ slope_se(pars)
 # standard error to report.
 slope_se(slope_params_manual(
   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10
+  cov_intercept_slope = 5, sigma2_residual = 10
 ))
 
 }

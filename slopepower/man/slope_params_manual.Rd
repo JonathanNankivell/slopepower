@@ -8,7 +8,7 @@ slope_params_manual(
   slope,
   sigma2_intercept,
   sigma2_slope,
-  sigma_cov,
+  cov_intercept_slope,
   sigma2_residual,
   slope_comparator = NA_real_,
   comparator = c("none", "healthy", "treated"),
@@ -24,7 +24,7 @@ slope_params_manual(
 
 \item{sigma2_slope}{Between-subject variance of random slopes.}
 
-\item{sigma_cov}{Covariance of random intercepts and slopes.}
+\item{cov_intercept_slope}{Covariance of random intercepts and slopes.}
 
 \item{sigma2_residual}{Within-subject residual variance.}
 
@@ -64,7 +64,7 @@ section 2.6 anticipates exactly this situation.
 # p.595 of Nash et al. (2021).
 slope_params_manual(
   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10
+  cov_intercept_slope = 5, sigma2_residual = 10
 )
 
 # Case/healthy-control parameters taken from a published paper, with no
@@ -72,7 +72,7 @@ slope_params_manual(
 slope_params_manual(
   slope = -1.672, slope_comparator = -0.5,
   sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10,
+  cov_intercept_slope = 5, sigma2_residual = 10,
   comparator = "healthy"
 )
 
@@ -80,7 +80,7 @@ slope_params_manual(
 # year apart.
 slope_params_manual(
   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10,
+  cov_intercept_slope = 5, sigma2_residual = 10,
   correlation = nlme::corCAR1(0.5)
 )
 

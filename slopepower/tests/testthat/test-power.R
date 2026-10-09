@@ -9,7 +9,7 @@ test_that("slope_sigma() reproduces the closed form printed on paper p.579", {
   p <- ref_params()
   t <- c(0, 1.3, 2.7)
   s2a <- p$sigma2_intercept; s2b <- p$sigma2_slope
-  sab <- p$sigma_cov;        s2e <- p$sigma2_residual
+  sab <- p$cov_intercept_slope;        s2e <- p$sigma2_residual
 
   # Sigma* as printed in the paper, for baseline plus two follow-ups.
   expected <- matrix(c(
@@ -36,7 +36,7 @@ test_that("the residual variance appears only on the diagonal", {
   t <- c(0, 1, 2)
   s <- slope_sigma(p, t)
   # off-diagonal [1,2] has no residual term
-  expect_equal(unname(s[1, 2]), p$sigma2_intercept + t[2] * p$sigma_cov)
+  expect_equal(unname(s[1, 2]), p$sigma2_intercept + t[2] * p$cov_intercept_slope)
   expect_equal(unname(s[1, 1]), p$sigma2_intercept + p$sigma2_residual)
 })
 

@@ -259,12 +259,12 @@ test_that("check_params() rejects a non-PD random-effects matrix even when the m
   # erroring.
   bad <- structure(
     list(slope = -1, slope_comparator = NA_real_, comparator = "none",
-        sigma2_intercept = 1, sigma2_slope = 1, sigma_cov = 100,
+        sigma2_intercept = 1, sigma2_slope = 1, cov_intercept_slope = 100,
         sigma2_residual = 1e6, n_obs = NA_integer_, n_subjects = NA_integer_,
         common_variance = FALSE, time_shifted = FALSE, fit = NULL, call = NULL),
     class = "slope_params")
-  expect_true(is_positive_definite(matrix(c(bad$sigma2_intercept, bad$sigma_cov,
-                                            bad$sigma_cov, bad$sigma2_slope), 2L)) == FALSE)
+  expect_true(is_positive_definite(matrix(c(bad$sigma2_intercept, bad$cov_intercept_slope,
+                                            bad$cov_intercept_slope, bad$sigma2_slope), 2L)) == FALSE)
   expect_error(slope_sample_size(bad, c(0, 1, 2), effectiveness = 0.33),
               "positive definite")
 })
@@ -311,7 +311,7 @@ test_that("the tte-direction warning is deduplicated once per grid, like the bas
   # treated one: effect_components() warns on every cell under
   # target = "observed". Used to fire once per cell instead of once per grid.
   p3 <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                            sigma_cov = 5, sigma2_residual = 10,
+                            cov_intercept_slope = 5, sigma2_residual = 10,
                             slope_comparator = -3, comparator = "treated")
   n_warn <- 0
   withCallingHandlers(
