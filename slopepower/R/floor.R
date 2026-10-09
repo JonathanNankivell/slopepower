@@ -307,13 +307,10 @@ slope_power_ceiling <- function(params, n, effectiveness = 0.25,
                               target = c("effectiveness", "observed"),
                               alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power_ceiling()"
-  # `is.null(n)` too; see the note on the same guard in slope_power().
-  if (missing(n) || is.null(n)) {
-    stop(sprintf(paste0(
-      "%s: `n` is required -- it is the sample size whose highest achievable\n",
-      "  power is being bounded. For the smallest sample size any design could\n",
-      "  need, use slope_sample_size_floor()."), context), call. = FALSE)
-  }
+  require_n(missing(n) || is.null(n), paste0(
+    "it is the sample size whose highest achievable\n",
+    "  power is being bounded. For the smallest sample size any design could\n",
+    "  need, use slope_sample_size_floor()."), context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   floor_result(params, effectiveness, target, alpha, per_arm, context, n = n)
@@ -335,33 +332,11 @@ slope_power_ceiling <- function(params, n, effectiveness = 0.25,
 #'
 #' @export
 print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
-  per_arm <- display_basis(x, per_arm, "print.slope_sample_size_floor()")
-  print_opening_blocks(x)
-  cat_line("power", x$power)
-  print_target_lines(x)
-  # Where print.slope_sample_size() shows the schedule and its dropouts. Saying
-  # so explicitly, rather than omitting the line, is the point of the object:
-  # the reader should not have to wonder which schedule produced the number.
-  cat_line("visit schedule", "any (the bound holds for all)")
-  cat("\n  Lower bound on sample size:\n")
-  cat_n_line(x, per_arm)
-  cat_line("limiting s*^2", x$var_tte)
-  cat("\n")
-  invisible(x)
+  print_n_result(x, per_arm, "print.slope_sample_size_floor()")
 }
 
 #' @rdname print.slope_sample_size_floor
 #' @export
 print.slope_power_ceiling <- function(x, ..., per_arm = NULL) {
-  per_arm <- display_basis(x, per_arm, "print.slope_power_ceiling()")
-  print_opening_blocks(x)
-  cat_specified_n_line(x, per_arm)
-  cat_n_line(x, per_arm, total_label = "actual N")
-  print_target_lines(x)
-  cat_line("visit schedule", "any (the bound holds for all)")
-  cat("\nUpper bound on power:\n")
-  cat_line("power", x$power)
-  cat_line("limiting s*^2", x$var_tte)
-  cat("\n")
-  invisible(x)
+  print_power_result(x, per_arm, "print.slope_power_ceiling()")
 }

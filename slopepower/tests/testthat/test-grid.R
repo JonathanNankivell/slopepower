@@ -64,7 +64,7 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
 })
 
 test_that("a grid row carries exactly what as.data.frame() reports for that cell", {
-  # grid_impl() reads its eight result columns straight off the result object
+  # grid_evaluate() reads its eight result columns straight off the result object
   # rather than through as.data.frame.slope_result(), because routing every
   # cell through that method to keep 8 of its 18 columns was the single most
   # expensive line in the loop. This is the guarantee that bought back: the two

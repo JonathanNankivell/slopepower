@@ -99,6 +99,17 @@ is_positive_definite <- function(m, tol = 1e-10) {
   !is.null(ev) && all(ev > tol * max(1, abs(ev[1L])))
 }
 
+#' The random intercept and slope's 2 x 2 covariance matrix
+#'
+#' Built in one place for the positive-definiteness check below and for
+#' [getVarCov.slope_params()], so the two cannot order the elements differently.
+#' @noRd
+re_cov_matrix <- function(sigma2_intercept, sigma2_slope, cov_intercept_slope) {
+  nm <- c("(Intercept)", "time")
+  matrix(c(sigma2_intercept, cov_intercept_slope, cov_intercept_slope, sigma2_slope),
+         2L, 2L, dimnames = list(nm, nm))
+}
+
 #' Check that a random-effects covariance triple is positive definite
 #'
 #' Shared by [new_slope_params()] -- the single validation point at
@@ -111,8 +122,8 @@ is_positive_definite <- function(m, tol = 1e-10) {
 #' never drift between the two call sites.
 #' @noRd
 check_re_covariance <- function(sigma2_intercept, sigma2_slope, cov_intercept_slope, context) {
-  G <- matrix(c(sigma2_intercept, cov_intercept_slope, cov_intercept_slope, sigma2_slope), 2L, 2L)
-  if (!is_positive_definite(G)) {
+  if (!is_positive_definite(re_cov_matrix(sigma2_intercept, sigma2_slope,
+                                           cov_intercept_slope))) {
     stop(sprintf(paste0("%s: the implied random-effects covariance matrix is not ",
                         "positive definite (var_int = %g, var_slope = %g, cov = %g)."),
                  context, sigma2_intercept, sigma2_slope, cov_intercept_slope), call. = FALSE)
@@ -418,6 +429,22 @@ resolve_fixef_name <- function(b, parts) {
 maybe_add_effectiveness <- function(args, effectiveness, target) {
   if (!identical(target, "observed")) args$effectiveness <- effectiveness
   args
+}
+
+#' Refuse a missing `n` where it is the input, not the answer
+#'
+#' Shared by every function that holds the sample size fixed: [slope_power()],
+#' the ceiling, the power grid, and their bootstraps. `absent` is
+#' `missing(n) || is.null(n)`, worked out by the caller because `missing()` can
+#' only be asked in the function that owns the argument. `is.null(n)` as well:
+#' the solver picks its branch on `is.null()`, so an explicit `n = NULL` -- the
+#' shape a programmatic caller gets from `do.call()` with an unset element --
+#' would otherwise slip past into the solve-for-n branch and fail complaining
+#' about `power`, an argument these functions do not have. `why` finishes the
+#' sentence: what `n` is for here, and where to go instead.
+#' @noRd
+require_n <- function(absent, why, context) {
+  if (absent) stop(sprintf("%s: `n` is required -- %s", context, why), call. = FALSE)
 }
 
 #' Reject `effectiveness` alongside target = "observed"

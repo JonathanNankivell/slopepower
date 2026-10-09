@@ -147,8 +147,8 @@ grid_boot_computes <- function(g, target, statistic, context) {
 #' is the whole cost of a stage-two solve, and [scale_effect()] and
 #' [size_per_arm()] after it are a line of arithmetic each.
 #'
-#' `identical()` is the key, so a hit is exact rather than heuristic; for the
-#' same object it returns at once on the pointer. Only a success is
+#' `identical()` on the parameters is the key, so a hit is exact rather than
+#' heuristic. Only a success is
 #' remembered: a replicate whose solve fails fails again for every cell
 #' asking, each one recorded as its own `NA`, exactly as before. The single
 #' replicate held between calls is the one in hand anyway.
@@ -157,12 +157,17 @@ grid_boot_computes <- function(g, target, statistic, context) {
 #' `effectiveness` with [scale_effect()], as [solve_slope()] (power.R) does.
 #' @noRd
 memo_effect_size <- function(design, effectiveness, target, context) {
-  last_p <- NULL
+  last_key <- NULL
   last <- NULL
   function(p) {
-    if (!identical(p, last_p)) {
+    # Keyed on the parameters without the fitted model, so the closure does not
+    # hold a replicate's whole `lme` fit -- several hundred kB per design --
+    # between calls. Everything effect_components() reads is still in the key.
+    key <- p
+    key$fit <- key$call <- NULL
+    if (!identical(key, last_key)) {
       last <<- effect_components(p, design, target, effectiveness, context)$effect_size
-      last_p <<- p
+      last_key <<- key
     }
     last
   }
@@ -371,13 +376,10 @@ slope_power_grid_boot <- function(params, visits, dropout = NULL,
                                   R = 999, ci_method = c("bca", "percentile"),
                                   level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_grid_boot()"
-  # `is.null(n)` too; see the note on the same guard in slope_power().
-  if (missing(n) || is.null(n)) {
-    stop(sprintf(paste0(
-      "%s: `n` is required -- this grid holds the sample size fixed and bootstraps\n",
-      "  the power each design achieves. For the sample size each design needs,\n",
-      "  use slope_sample_size_grid_boot()."), context), call. = FALSE)
-  }
+  require_n(missing(n) || is.null(n), paste0(
+    "this grid holds the sample size fixed and bootstraps\n",
+    "  the power each design achieves. For the sample size each design needs,\n",
+    "  use slope_sample_size_grid_boot()."), context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   grid_boot_impl(params, visits, dropout, match.arg(dropout_scale), "n", n,
@@ -408,9 +410,9 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   # The point estimates: built through grid_stage_two_spec() (grid.R), the same
   # axis set and the same per-cell closure the plain grid is itself built from,
   # so this table's `n`/`power`/`tte`/... columns cannot drift from that
-  # function's -- and an axis added there reaches this grid too. Only the two
-  # halves underneath grid_impl() are called separately, since `g` is needed on
-  # its own to price each cell several hundred times over.
+  # function's -- and an axis added there reaches this grid too. grid_axes()
+  # and grid_evaluate() are called here directly, since `g` is needed on its
+  # own to price each cell several hundred times over.
   spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
                               context)
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
@@ -707,7 +709,7 @@ print_grid_boot <- function(x, per_arm, context, ...) {
   # approximate -- widen_to_lattice() already moved n_lower/n_upper out to even
   # sizes before they were stored, and the mean and SD are linear. A power has
   # no arms and is shown as stored.
-  divisor <- if (on_lattice(statistic) && per_arm) 2 else 1
+  divisor <- boot_divisor(on_lattice(statistic), per_arm)
   col <- function(suffix) x[[paste0(statistic, suffix)]] / divisor
   cells[[paste0(statistic, "_mean")]] <- col("_mean")
   cells[[paste0(statistic, "_sd")]] <- col("_sd")
@@ -743,9 +745,7 @@ print_grid_boot <- function(x, per_arm, context, ...) {
   cat(basis_note(per_arm), sep = "\n")
   cat(boot_method_note(ci_method, R, level), sep = "\n")
 
-  cat(boot_note("Note", sprintf(paste0(
-    "%d/%d (%.1f%%) bootstrap replicates failed to refit the stage-one model, and were ",
-    "discarded from every cell."), n_refit_failed, R, 100 * n_refit_failed / R)), sep = "\n")
+  cat(boot_refit_note(n_refit_failed, R, ", and were discarded from every cell"), sep = "\n")
 
   # `x$n_failed` counts every replicate that yielded no solved-for value for
   # the cell, refit failures included; the refits are reported on their own
@@ -768,11 +768,7 @@ print_grid_boot <- function(x, per_arm, context, ...) {
                          attr(x, "straddle_of")),
       sep = "\n")
 
-  if (on_lattice(statistic)) {
-    cat(boot_note("Mean, SD", paste0(
-      "each replicate of `n` is rounded up to a whole participant per arm before averaging, ",
-      "so its mean is not a runnable ", if (per_arm) "arm" else "trial", " size.")), sep = "\n")
-  }
+  if (on_lattice(statistic)) cat(boot_mean_note(per_arm), sep = "\n")
 
   if (any(grepl("*", shown_ci, fixed = TRUE), na.rm = TRUE)) {
     cat("  * percentile interval; BCa could not be built there.\n")

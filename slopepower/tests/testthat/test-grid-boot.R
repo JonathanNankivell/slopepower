@@ -242,7 +242,7 @@ test_that("print.slope_sample_size_grid_boot() prints the grid's own columns plu
 
   # A clean run (no refit failures, no starved cells) still reports both
   # notes, per the convention set for print.slope_bootstrap().
-  expect_true(any(grepl("bootstrap replicates failed to refit", lines)))
+  expect_true(any(grepl("bootstrap samples failed to converge", lines)))
   expect_true(any(grepl("of replicates refit a slope on the opposite side", lines)))
 })
 
@@ -439,7 +439,7 @@ test_that("a grid solved for target = \"observed\" prints", {
   # nothing for it to show that the notes do not.
   expect_false(any(grepl("tte_mean", lines, fixed = TRUE)))
   # The notes beneath still print, which they cannot if the frames aborted.
-  expect_true(any(grepl("bootstrap replicates failed to refit", lines)))
+  expect_true(any(grepl("bootstrap samples failed to converge", lines)))
 })
 
 test_that("print.slope_sample_size_grid_boot() falls back to a plain print for a missing summary", {

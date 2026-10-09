@@ -66,10 +66,7 @@ fixef.slope_params <- function(object, ...) {
 #' @export
 getVarCov.slope_params <- function(obj, ...) {
   check_params(obj, "getVarCov()")
-  nm <- c("(Intercept)", "time")
-  matrix(c(obj$sigma2_intercept, obj$cov_intercept_slope,
-           obj$cov_intercept_slope, obj$sigma2_slope),
-         nrow = 2L, dimnames = list(nm, nm))
+  re_cov_matrix(obj$sigma2_intercept, obj$sigma2_slope, obj$cov_intercept_slope)
 }
 
 #' @rdname slope_params_methods
@@ -127,7 +124,7 @@ vcov.slope_params <- function(object, ...) {
 confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
   # The basis print.slope_bootstrap() shows, by the same rule.
-  divisor <- boot_divisor(object, display_basis(object, per_arm, context))
+  divisor <- boot_divisor(object$lattice, display_basis(object, per_arm, context))
   rows <- unique(c(object$statistic, "slope"))
   shown <- ifelse(divisor == 2 & rows == "n", "n_per_arm", rows)
   if (missing(parm)) parm <- seq_along(rows)
