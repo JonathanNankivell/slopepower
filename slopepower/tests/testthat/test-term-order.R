@@ -126,7 +126,7 @@ test_that("results do not depend on column or row order of the data", {
     expect_equal(got$slope_comparator, ref$slope_comparator, tolerance = 1e-8)
     expect_equal(got$sigma2_intercept, ref$sigma2_intercept, tolerance = 1e-6)
     expect_equal(got$sigma2_slope, ref$sigma2_slope, tolerance = 1e-6)
-    expect_equal(got$sigma_cov, ref$sigma_cov, tolerance = 1e-6)
+    expect_equal(got$cov_intercept_slope, ref$cov_intercept_slope, tolerance = 1e-6)
     expect_equal(got$sigma2_residual, ref$sigma2_residual, tolerance = 1e-6)
   }
 })

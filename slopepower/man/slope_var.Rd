@@ -4,12 +4,22 @@
 \alias{slope_var}
 \title{Treatment-effect variance for a notional two-person trial}
 \usage{
-slope_var(params, visits)
+slope_var(
+  params,
+  visits,
+  dropout = NULL,
+  dropout_scale = c("incremental", "cumulative")
+)
 }
 \arguments{
 \item{params}{A \code{slope_params} object.}
 
-\item{visits}{Numeric vector of visit times.}
+\item{visits}{Numeric vector of visit times. Without \code{dropout}, any strictly
+increasing times will do; with it, the schedule must begin with the
+baseline visit at time 0, as in \code{\link[=slope_power]{slope_power()}}.}
+
+\item{dropout, dropout_scale}{The expected dropout, as in \code{\link[=slope_power]{slope_power()}}.
+\code{NULL} (default) assumes every participant attends every visit.}
 }
 \value{
 A single positive number, \eqn{s^{*2}}.
@@ -21,6 +31,14 @@ trial with one participant in each arm, following equation (5) of Nash et al.
 \eqn{N} participants per arm is \eqn{s^*/\sqrt{N}}, this single quantity
 carries all of the design information needed for the sample-size formula.
 }
+\details{
+With \code{dropout}, the result is the \emph{effective} \eqn{s^{*2}}: the variance
+that, used in equation (6) in place of the completers' \eqn{s^{*2}}, gives
+the same sample size as the dropout-weighted calculation. It is the
+weighted harmonic mean of the strata's own \eqn{s^{*2}}, each stratum
+weighted by the proportion of participants whose last visit it ends at, and
+it is the \code{var_tte} that \code{\link[=slope_power]{slope_power()}} reports for the same design.
+}
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 slope_var(pars, c(0, 1, 2))
@@ -28,6 +46,9 @@ slope_var(pars, c(0, 1, 2))
 # A third follow-up visit adds information about the slope, so the
 # treatment-effect variance shrinks.
 slope_var(pars, c(0, 1, 2, 3))
+
+# Dropout takes some of it back.
+slope_var(pars, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1))
 
 }
 \seealso{

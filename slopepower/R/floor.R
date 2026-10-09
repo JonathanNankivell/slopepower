@@ -14,9 +14,9 @@
 #' The closed form, given already-validated parameters
 #'
 #' Positive whenever the random-effects covariance matrix is positive definite,
-#' since `sigma2_slope - sigma_cov^2 / sigma2_intercept` is its Schur
+#' since `sigma2_slope - cov_intercept_slope^2 / sigma2_intercept` is its Schur
 #' complement and positive definiteness makes the determinant
-#' `sigma2_intercept * sigma2_slope - sigma_cov^2` positive. That is enforced
+#' `sigma2_intercept * sigma2_slope - cov_intercept_slope^2` positive. That is enforced
 #' by `check_re_covariance()`, which every route into a `slope_params` object
 #' runs and which `check_params()` re-runs on hand-built ones -- so there is no
 #' zero or negative branch to guard here.
@@ -38,7 +38,7 @@ var_floor <- function(params, context) {
       label_numeric(params$residual$times)),
       call. = FALSE)
   }
-  2 * (params$sigma2_slope - params$sigma_cov^2 / params$sigma2_intercept)
+  2 * (params$sigma2_slope - params$cov_intercept_slope^2 / params$sigma2_intercept)
 }
 
 #' Smallest treatment-effect variance any visit schedule can achieve

@@ -166,9 +166,9 @@ extract_re <- function(fit, int_name, slope_name, context) {
                  context, paste(sQuote(missing), collapse = ", "),
                  paste(sQuote(nm), collapse = ", ")), call. = FALSE)
   }
-  list(sigma2_intercept = as.numeric(G[int_name, int_name]),
-       sigma2_slope     = as.numeric(G[slope_name, slope_name]),
-       sigma_cov        = as.numeric(G[int_name, slope_name]))
+  list(sigma2_intercept    = as.numeric(G[int_name, int_name]),
+       sigma2_slope        = as.numeric(G[slope_name, slope_name]),
+       cov_intercept_slope = as.numeric(G[int_name, slope_name]))
 }
 
 #' Residual variance for one level of a `varIdent` structure, by level name
@@ -203,24 +203,112 @@ extract_residual <- function(fit, level, context) {
 #' `healthy` is supplied (see the `common_variance` note in
 #' [slope_params()]).
 #'
-#' There is deliberately no argument to [slope_params()] for supplying a
-#' different control object -- see "What these models do and do not include"
-#' in `?slope_params` for why the model this package fits is fixed rather
-#' than user-tunable. This function exists so the settings behind every fit
-#' are inspectable and reproducible outside the package, not so they can be
-#' overridden inside it.
+#' It is the default of [slope_params()]'s `control` argument. Pass it with
+#' arguments to change some settings and keep the rest: any setting
+#' [nlme::lmeControl()] names overrides the value set here, and a name it does
+#' not know is refused rather than ignored. These settings change how hard the
+#' optimiser works, never which model is fitted, so the two that would are
+#' refused by [slope_params()]: `sigma`, which fixes the residual SD, and
+#' `returnObject = TRUE`, which returns a fit that did not converge as if it
+#' had. See "What these models do and do not include" in `?slope_params` for
+#' the model itself, which no argument changes. The tolerances this package's tests hold the
+#' fitted variance components to are calibrated to the defaults.
+#'
+#' @param ... Arguments to [nlme::lmeControl()], overriding the settings above.
 #'
 #' @return A list of control settings, as returned by [nlme::lmeControl()].
 #'
 #' @examples
 #' slope_lme_control()
 #'
+#' # More iterations for a fit that is slow to converge.
+#' slope_lme_control(maxIter = 500, msMaxIter = 500)
+#'
 #' @seealso [slope_params()], which uses this for every mixed-model fit.
 #' @export
-slope_lme_control <- function() {
-  nlme::lmeControl(maxIter = 200, msMaxIter = 200, niterEM = 50,
+slope_lme_control <- function(...) {
+  context <- "slope_lme_control()"
+  overrides <- list(...)
+  known <- names(nlme::lmeControl())
+  nm <- names(overrides) %||% rep("", length(overrides))
+  if (any(nm == "") || anyDuplicated(nm)) {
+    stop(sprintf("%s: every setting must be named once, e.g. slope_lme_control(maxIter = 500).",
+                 context), call. = FALSE)
+  }
+  if (length(unknown <- setdiff(nm, known))) {
+    stop(sprintf("%s: %s %s not a setting of nlme::lmeControl(); it has %s.", context,
+                 paste(sQuote(unknown), collapse = ", "),
+                 if (length(unknown) == 1L) "is" else "are",
+                 paste(known, collapse = ", ")), call. = FALSE)
+  }
+  defaults <- list(maxIter = 200, msMaxIter = 200, niterEM = 50,
                    opt = "optim", tolerance = 1e-7, msTol = 1e-8,
                    returnObject = FALSE)
+  defaults[names(overrides)] <- overrides
+  do.call(nlme::lmeControl, defaults)
+}
+
+#' Check that `control` is what nlme::lmeControl() returns
+#'
+#' A list is all `lme()` itself asks for, but a bare list misses every setting
+#' it does not name, and `lme()` fills those from nlme's stock defaults, not
+#' from [slope_lme_control()]'s -- so `control = list(maxIter = 500)` would
+#' silently loosen the tolerances too. Requiring every name
+#' [nlme::lmeControl()] returns catches that, and points at the fix.
+#'
+#' Two settings change the answer rather than the effort, and are refused:
+#' a non-zero `sigma` fixes the residual SD, fitting a different model, and
+#' `returnObject = TRUE` returns a fit that failed to converge as if it had --
+#' which would also switch off the `common_variance` fallback, and let a
+#' bootstrap count failed refits as replicates.
+#' @noRd
+check_lme_control <- function(control, context) {
+  if (!is.list(control) || !all(names(nlme::lmeControl()) %in% names(control))) {
+    stop(sprintf(paste0(
+      "%s: `control` must be a complete set of `lme()` control settings, as\n",
+      "  returned by slope_lme_control(). To change some settings and keep the\n",
+      "  rest, pass them to it: control = slope_lme_control(maxIter = 500)."),
+      context), call. = FALSE)
+  }
+  if (!isFALSE(control$returnObject)) {
+    stop(sprintf(paste0(
+      "%s: `control$returnObject` must be FALSE. A fit that did not converge is an\n",
+      "  error here, never a result."), context), call. = FALSE)
+  }
+  if (!identical(as.numeric(control$sigma), 0)) {
+    stop(sprintf(paste0(
+      "%s: `control$sigma` must be 0. A fixed residual SD is a different model,\n",
+      "  not a setting of the optimiser."), context), call. = FALSE)
+  }
+  invisible(control)
+}
+
+#' Rows of `data` that `subset` keeps, or `NULL` to keep them all
+#'
+#' `subset` is evaluated as [nlme::lme()] evaluates its own: in `data`, then
+#' in the calling environment. A logical vector selects rows, with `NA`
+#' treated as `FALSE` as [stats::model.frame()] does; a numeric one lists row
+#' numbers, each at most once. Negative and zero indices, which `[` would read
+#' as exclusions and as nothing, and repeats, which would fit a visit twice,
+#' are refused.
+#' @noRd
+subset_rows <- function(expr, data, env, n, context) {
+  if (is.null(expr)) return(NULL)
+  s <- eval_column(expr, data, env, context, "subset")
+  if (is.logical(s)) {
+    if (length(s) != n) {
+      stop(sprintf("%s: a logical `subset` must have one value per row of `data` (%d); got %d.",
+                   context, n, length(s)), call. = FALSE)
+    }
+    return(which(s))
+  }
+  if (is.numeric(s) && !anyNA(s) && all(s == round(s)) && all(s >= 1 & s <= n) &&
+      !anyDuplicated(s)) {
+    return(as.integer(s))
+  }
+  stop(sprintf(paste0("%s: `subset` must be a logical vector, or distinct row numbers ",
+                      "between 1 and %d, selecting rows of `data`."), context, n),
+       call. = FALSE)
 }
 
 #' Fit while muffling the structurally inevitable singular-precision warning
@@ -615,6 +703,20 @@ covariate_note <- function(covariates) {
 #'   stratum. Together with `correlation = nlme::corSymm()` this is the fully
 #'   unstructured residual covariance. No other variance function is
 #'   supported.
+#' @param subset Optional expression selecting the rows of `data` to fit to,
+#'   as in [nlme::lme()]: a logical vector (`NA` counts as `FALSE`) or row
+#'   numbers, evaluated in `data` and then in the calling environment, e.g.
+#'   `subset = site != "C"`. Applied before `na.action`, and after a
+#'   baseline-only covariate has been copied to the participant's other
+#'   visits.
+#' @param control The [nlme::lmeControl()] settings for the fit. Defaults to
+#'   [slope_lme_control()], which works the optimiser harder than `nlme`'s own
+#'   defaults; to change one setting and keep the rest, write e.g.
+#'   `control = slope_lme_control(maxIter = 500)`. A bare `list()` is refused,
+#'   because `nlme` would fill the settings it leaves out from its own
+#'   defaults. Recorded on the result as `$control`, so that
+#'   [slope_params_boot()] and the other bootstraps refit every replicate
+#'   under the same settings.
 #'
 #' @details
 #' Three scenarios are supported, matching paper section 2.3:
@@ -660,7 +762,7 @@ covariate_note <- function(covariates) {
 #'
 #' where \eqn{G}{G} is an unstructured 2 by 2 matrix with diagonal
 #' \eqn{\sigma^2_a}{sigma2_intercept}, \eqn{\sigma^2_b}{sigma2_slope} and
-#' off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. By default residuals are
+#' off-diagonal \eqn{\sigma_{ab}}{cov_intercept_slope}. By default residuals are
 #' independent across visits and across participants; `correlation` and
 #' `weights` replace that with a structured residual covariance within each
 #' participant (see "Residual structures"). Only the mean \eqn{\mu}{mu} and the
@@ -895,7 +997,8 @@ slope_params <- function(formula, data,
                          common_variance = NULL,
                          na.action = stats::na.omit,
                          covariates = NULL, covariate_time = TRUE,
-                         correlation = NULL, weights = NULL) {
+                         correlation = NULL, weights = NULL, subset = NULL,
+                         control = slope_lme_control()) {
   context <- "slope_params()"
   cl <- match.call()
   # `group` is an argument of this call, so a symbol in it that is
@@ -920,6 +1023,7 @@ slope_params <- function(formula, data,
   # Checked before anything is evaluated or fitted: these are about what was
   # typed, not about the data.
   spec <- residual_spec(correlation, weights, parts, context)
+  check_lme_control(control, context)
 
   env <- environment(formula) %||% parent.frame()
 
@@ -986,6 +1090,12 @@ slope_params <- function(formula, data,
     dat$sp_row    <- seq_len(n)
     dat$sp_cov_ok <- ifelse(stats::complete.cases(raw), 1, NA_real_)
   }
+
+  # After the covariates are filled, so a baseline-only covariate still reaches
+  # a participant whose baseline row the subset drops; before `na.action`, as
+  # in nlme::lme().
+  keep <- subset_rows(substitute(subset), data, caller, n, context)
+  if (!is.null(keep)) dat <- dat[keep, , drop = FALSE]
 
   dat <- na.action(dat)
   if (nrow(dat) < 3L) {
@@ -1133,7 +1243,7 @@ slope_params <- function(formula, data,
     check_covariate_rank(fixed, dat, basis$labels, comparator, context)
   }
 
-  ctrl <- slope_lme_control()
+  ctrl <- control
   reduced_used <- FALSE
 
   if (comparator != "healthy") {
@@ -1218,22 +1328,23 @@ slope_params <- function(formula, data,
   res <- residual_components(fit, spec, grid, comparator, context)
 
   new_slope_params(
-    slope            = slope,
-    slope_comparator = slope_comparator,
-    comparator       = comparator,
-    sigma2_intercept = re$sigma2_intercept,
-    sigma2_slope     = re$sigma2_slope,
-    sigma_cov        = re$sigma_cov,
-    sigma2_residual  = res$sigma2_residual,
-    residual         = res$residual,
-    n_obs            = nrow(dat),
-    n_subjects       = nlevels(dat$sp_subject),
-    common_variance  = reduced_used,
-    time_shifted     = time_shifted,
-    covariates       = adjusted,
-    fit              = fit,
-    call             = cl,
-    context          = context
+    slope               = slope,
+    slope_comparator    = slope_comparator,
+    comparator          = comparator,
+    sigma2_intercept    = re$sigma2_intercept,
+    sigma2_slope        = re$sigma2_slope,
+    cov_intercept_slope = re$cov_intercept_slope,
+    sigma2_residual     = res$sigma2_residual,
+    residual            = res$residual,
+    n_obs               = nrow(dat),
+    n_subjects          = nlevels(dat$sp_subject),
+    common_variance     = reduced_used,
+    time_shifted        = time_shifted,
+    covariates          = adjusted,
+    control             = control,
+    fit                 = fit,
+    call                = cl,
+    context             = context
   )
 }
 
@@ -1248,7 +1359,7 @@ slope_params <- function(formula, data,
 #' @param slope Slope of the untreated (or case) group, per unit time.
 #' @param sigma2_intercept Between-subject variance of random intercepts.
 #' @param sigma2_slope Between-subject variance of random slopes.
-#' @param sigma_cov Covariance of random intercepts and slopes.
+#' @param cov_intercept_slope Covariance of random intercepts and slopes.
 #' @param sigma2_residual Within-subject residual variance.
 #' @param slope_comparator Slope of the healthy controls or the treated arm.
 #'   Required unless `comparator = "none"`.
@@ -1276,7 +1387,7 @@ slope_params <- function(formula, data,
 #' # p.595 of Nash et al. (2021).
 #' slope_params_manual(
 #'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10
+#'   cov_intercept_slope = 5, sigma2_residual = 10
 #' )
 #'
 #' # Case/healthy-control parameters taken from a published paper, with no
@@ -1284,7 +1395,7 @@ slope_params <- function(formula, data,
 #' slope_params_manual(
 #'   slope = -1.672, slope_comparator = -0.5,
 #'   sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10,
+#'   cov_intercept_slope = 5, sigma2_residual = 10,
 #'   comparator = "healthy"
 #' )
 #'
@@ -1292,7 +1403,7 @@ slope_params <- function(formula, data,
 #' # year apart.
 #' slope_params_manual(
 #'   slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-#'   sigma_cov = 5, sigma2_residual = 10,
+#'   cov_intercept_slope = 5, sigma2_residual = 10,
 #'   correlation = nlme::corCAR1(0.5)
 #' )
 #'
@@ -1300,7 +1411,7 @@ slope_params <- function(formula, data,
 #' @export
 slope_params_manual <- function(slope,
                                 sigma2_intercept, sigma2_slope,
-                                sigma_cov, sigma2_residual,
+                                cov_intercept_slope, sigma2_residual,
                                 slope_comparator = NA_real_,
                                 comparator = c("none", "healthy", "treated"),
                                 correlation = NULL, weights = NULL, times = NULL) {
@@ -1322,22 +1433,23 @@ slope_params_manual <- function(slope,
   }
 
   new_slope_params(
-    slope            = slope,
-    slope_comparator = as.numeric(slope_comparator),
-    comparator       = comparator,
-    sigma2_intercept = sigma2_intercept,
-    sigma2_slope     = sigma2_slope,
-    sigma_cov        = sigma_cov,
-    sigma2_residual  = sigma2_residual,
-    residual         = residual,
-    n_obs            = NA_integer_,
-    n_subjects       = NA_integer_,
-    common_variance  = FALSE,
-    time_shifted     = FALSE,
-    covariates       = NULL,
-    fit              = NULL,
-    call             = cl,
-    context          = context
+    slope               = slope,
+    slope_comparator    = as.numeric(slope_comparator),
+    comparator          = comparator,
+    sigma2_intercept    = sigma2_intercept,
+    sigma2_slope        = sigma2_slope,
+    cov_intercept_slope = cov_intercept_slope,
+    sigma2_residual     = sigma2_residual,
+    residual            = residual,
+    n_obs               = NA_integer_,
+    n_subjects          = NA_integer_,
+    common_variance     = FALSE,
+    time_shifted        = FALSE,
+    covariates          = NULL,
+    control             = NULL,
+    fit                 = NULL,
+    call                = cl,
+    context             = context
   )
 }
 
@@ -1351,31 +1463,32 @@ slope_params_manual <- function(slope,
 #' into `NA` and a coercion warning before it could be reported properly.
 #' @noRd
 new_slope_params <- function(slope, slope_comparator, comparator,
-                             sigma2_intercept, sigma2_slope, sigma_cov,
+                             sigma2_intercept, sigma2_slope, cov_intercept_slope,
                              sigma2_residual, residual, n_obs, n_subjects,
-                             common_variance, time_shifted, covariates, fit,
-                             call, context) {
+                             common_variance, time_shifted, covariates, control,
+                             fit, call, context) {
   v <- check_param_values(list(slope = slope, sigma2_intercept = sigma2_intercept,
                                 sigma2_slope = sigma2_slope, sigma2_residual = sigma2_residual,
-                                sigma_cov = sigma_cov), context)
+                                cov_intercept_slope = cov_intercept_slope), context)
   check_residual(residual, context)
 
   structure(
-    list(slope            = v$slope,
-         slope_comparator = slope_comparator,
-         comparator       = comparator,
-         sigma2_intercept = v$sigma2_intercept,
-         sigma2_slope     = v$sigma2_slope,
-         sigma_cov        = v$sigma_cov,
-         sigma2_residual  = v$sigma2_residual,
-         residual         = residual,
-         n_obs            = n_obs,
-         n_subjects       = n_subjects,
-         common_variance  = common_variance,
-         time_shifted     = time_shifted,
-         covariates       = covariates,
-         fit              = fit,
-         call             = call),
+    list(slope               = v$slope,
+         slope_comparator    = slope_comparator,
+         comparator          = comparator,
+         sigma2_intercept    = v$sigma2_intercept,
+         sigma2_slope        = v$sigma2_slope,
+         cov_intercept_slope = v$cov_intercept_slope,
+         sigma2_residual     = v$sigma2_residual,
+         residual            = residual,
+         n_obs               = n_obs,
+         n_subjects          = n_subjects,
+         common_variance     = common_variance,
+         time_shifted        = time_shifted,
+         covariates          = covariates,
+         control             = control,
+         fit                 = fit,
+         call                = call),
     class = "slope_params")
 }
 
@@ -1438,7 +1551,7 @@ print.slope_params <- function(x, ...) {
   cat("\n")
   cat_line("variance of random intercepts", x$sigma2_intercept)
   cat_line("variance of random slopes", x$sigma2_slope)
-  cat_line("covariance of intercept and slope", x$sigma_cov)
+  cat_line("covariance of intercept and slope", x$cov_intercept_slope)
   print_residual(x)
 
   covariate_note(x$covariates)

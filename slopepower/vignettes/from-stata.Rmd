@@ -52,11 +52,11 @@ convergence -- the optimiser, not the algebra. That is the one place the port's
 numbers can differ from Stata's at all, and it is a consequence of the next
 point.
 
-### Convergence settings are fixed, not an option
+### Convergence settings have tightened defaults
 
 Stata exposes `iterate(16000)` and otherwise leaves `mixed` at its defaults.
-There is no equivalent argument here. The settings behind every fit live in one
-exported function:
+Here `slope_params()` takes `nlme`'s whole control list, as `lme()` does, in its
+`control` argument. The default is one exported function:
 
 ```{r control}
 str(slope_lme_control()[c("maxIter", "msMaxIter", "opt", "tolerance")])
@@ -64,12 +64,11 @@ str(slope_lme_control()[c("maxIter", "msMaxIter", "opt", "tolerance")])
 
 More iterations than `nlme`'s defaults, `opt = "optim"`, and tighter tolerances,
 chosen because the stock settings converged less precisely on the two-block
-random-effects structure fitted for `comparator = "healthy"`. It is exported so the settings
-behind a published number can be inspected and reproduced from outside the
-package -- **not** so they can be overridden from inside it. The model this
-package fits is fixed (see `?slope_params`), and a tunable optimiser would let
-two runs of the same call disagree with nothing on the returned object to say
-why.
+random-effects structure fitted for `comparator = "healthy"`. To change some
+settings and keep the rest, pass them to it:
+`control = slope_lme_control(maxIter = 500)`. These settings change how hard the
+optimiser works, never which model is fitted, and the ones a fit used are kept
+on the result as `$control`, so a bootstrap refits every replicate under them.
 
 ## The translation table
 
@@ -87,7 +86,7 @@ why.
 | `effectiveness(0.33)` | `effectiveness = 0.33` |
 | `usetrt` | `target = "observed"` |
 | `nocontvar` | `common_variance = TRUE` |
-| `iterate(16000)` | *(none -- see `slope_lme_control()`)* |
+| `iterate(16000)` | `control = slope_lme_control(maxIter = 16000, msMaxIter = 16000)` |
 | *(no equivalent)* | `origin = "none"`, `slope_params_manual()`, the grid functions |
 
 Everything in that table is available in one call through the compatibility
@@ -247,7 +246,7 @@ object and a visit schedule. They can be called with no dataset loaded at all:
 ```{r manual}
 pars_published <- slope_params_manual(
   slope = -1.6, sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10
+  cov_intercept_slope = 5, sigma2_residual = 10
 )
 slope_sample_size(pars_published, c(0, 1, 2), effectiveness = 0.33)$n
 ```
@@ -267,7 +266,7 @@ R port says so:
 flat <- slope_params_manual(slope = -1.6, slope_comparator = -1.6,
                             comparator = "treated",
                             sigma2_intercept = 100, sigma2_slope = 2,
-                            sigma_cov = 5, sigma2_residual = 10)
+                            cov_intercept_slope = 5, sigma2_residual = 10)
 slope_sample_size(flat, c(0, 1, 2), target = "observed")
 ```
 
@@ -398,8 +397,9 @@ subjects are always the resampling unit, replicate identifiers are always
 regenerated (so a subject drawn twice counts as two people rather than
 colliding), and stratification by group is automatic whenever
 `comparator != "none"`. It also applies the paper's own §2.6 recommendation --
-warning when the fitted slope is under 2.5 times its standard error -- which the
-Stata side leaves you to check by eye.
+warning when the fitted slope (or, against healthy controls, the difference in
+slopes) is under 2.5 times its standard error -- which the Stata side leaves you
+to check by eye.
 
 ## Keeping your old calls working
 

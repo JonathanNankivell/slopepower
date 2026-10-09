@@ -9,24 +9,24 @@
 
 test_that("slope_params_manual() returns exactly the contract fields", {
   p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                           sigma2_slope = 2, sigma_cov = 5,
+                           sigma2_slope = 2, cov_intercept_slope = 5,
                            sigma2_residual = 10)
   expect_s3_class(p, "slope_params")
   expect_setequal(names(p), c(
     "slope", "slope_comparator", "comparator", "sigma2_intercept",
-    "sigma2_slope", "sigma_cov", "sigma2_residual", "residual", "n_obs", "n_subjects",
-    "common_variance", "time_shifted", "covariates", "fit", "call"))
-  expect_length(names(p), 15L)
+    "sigma2_slope", "cov_intercept_slope", "sigma2_residual", "residual", "n_obs", "n_subjects",
+    "common_variance", "time_shifted", "covariates", "control", "fit", "call"))
+  expect_length(names(p), 16L)
 })
 
 test_that("manually supplied parameters are stored unchanged", {
   p <- slope_params_manual(slope = -1.672, sigma2_intercept = 100,
-                           sigma2_slope = 2, sigma_cov = 5,
+                           sigma2_slope = 2, cov_intercept_slope = 5,
                            sigma2_residual = 10)
   expect_equal(p$slope, -1.672)
   expect_equal(p$sigma2_intercept, 100)
   expect_equal(p$sigma2_slope, 2)
-  expect_equal(p$sigma_cov, 5)
+  expect_equal(p$cov_intercept_slope, 5)
   expect_equal(p$sigma2_residual, 10)
   expect_identical(p$comparator, "none")
   expect_true(is.na(p$slope_comparator))
@@ -37,7 +37,7 @@ test_that("manually supplied parameters are stored unchanged", {
 
 test_that("slope_params_manual() rejects non-positive variance components", {
   base <- list(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-               sigma_cov = 5, sigma2_residual = 10)
+               cov_intercept_slope = 5, sigma2_residual = 10)
   for (nm in c("sigma2_intercept", "sigma2_slope", "sigma2_residual")) {
     args <- base; args[[nm]] <- 0
     expect_error(do.call(slope_params_manual, args), nm)
@@ -50,7 +50,7 @@ test_that("slope_params_manual() rejects a non-positive-definite covariance", {
   # var_int * var_slope < cov^2
   expect_error(
     slope_params_manual(slope = -1, sigma2_intercept = 1, sigma2_slope = 1,
-                        sigma_cov = 5, sigma2_residual = 10),
+                        cov_intercept_slope = 5, sigma2_residual = 10),
     "positive definite"
   )
 })
@@ -59,20 +59,20 @@ test_that("a comparator slope is required unless comparator is 'none'", {
   for (cmp in c("healthy", "treated")) {
     expect_error(
       slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                          sigma_cov = 5, sigma2_residual = 10, comparator = cmp),
+                          cov_intercept_slope = 5, sigma2_residual = 10, comparator = cmp),
       "slope_comparator"
     )
   }
   expect_no_error(
     slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                        sigma_cov = 5, sigma2_residual = 10,
+                        cov_intercept_slope = 5, sigma2_residual = 10,
                         slope_comparator = 0.5, comparator = "healthy")
   )
 })
 
 test_that("a comparator slope is discarded when comparator is 'none'", {
   p <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                           sigma_cov = 5, sigma2_residual = 10,
+                           cov_intercept_slope = 5, sigma2_residual = 10,
                            slope_comparator = 0.5, comparator = "none")
   expect_true(is.na(p$slope_comparator))
 })
@@ -80,7 +80,7 @@ test_that("a comparator slope is discarded when comparator is 'none'", {
 test_that("slope_params_manual() rejects an unknown comparator", {
   expect_error(
     slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                        sigma_cov = 5, sigma2_residual = 10,
+                        cov_intercept_slope = 5, sigma2_residual = 10,
                         slope_comparator = 0.5, comparator = "nonsense")
   )
 })
@@ -137,14 +137,14 @@ test_that("slope_lme_control() is the control slope_params() actually uses", {
                tolerance = 1e-12)
 })
 
-test_that("slope_params() has no control argument to override the settings", {
-  # Deliberate, and documented as such in ?slope_lme_control: the model this
-  # package fits is fixed by the method, so the control object exists to be
-  # inspected rather than replaced. A silently ignored `control =` would be the
-  # worst of both worlds.
+test_that("slope_params()'s `control` reaches lme() rather than being ignored", {
+  # A silently ignored `control =` would be the worst of both worlds: an
+  # optimiser starved of iterations has to make the fit fail.
   d <- load_paper_data("slpower1")
-  expect_error(slope_params(sdmt ~ visit | id, d, control = slope_lme_control()),
-               "unused argument")
+  expect_error(slope_params(sdmt ~ visit | id, d,
+                            control = slope_lme_control(maxIter = 1, msMaxIter = 1,
+                                                        niterEM = 0)),
+               "convergence")
 })
 
 # --- slope_params(): scenario dispatch --------------------------------------
@@ -196,8 +196,8 @@ test_that("fitted variance components are positive and positive definite", {
     expect_gt(p$sigma2_intercept, 0)
     expect_gt(p$sigma2_slope, 0)
     expect_gt(p$sigma2_residual, 0)
-    G <- matrix(c(p$sigma2_intercept, p$sigma_cov,
-                  p$sigma_cov, p$sigma2_slope), 2, 2)
+    G <- matrix(c(p$sigma2_intercept, p$cov_intercept_slope,
+                  p$cov_intercept_slope, p$sigma2_slope), 2, 2)
     expect_gt(det(G), 0)
   }
 })
@@ -478,7 +478,7 @@ test_that("the healthy fit falls back to a reduced structure and says so", {
     slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case, common_variance = TRUE))
   expect_true(forced$common_variance)
   for (nm in c("slope", "slope_comparator", "sigma2_intercept", "sigma2_slope",
-               "sigma_cov", "sigma2_residual")) {
+               "cov_intercept_slope", "sigma2_residual")) {
     expect_equal(p[[nm]], forced[[nm]], tolerance = 1e-12)
   }
 })

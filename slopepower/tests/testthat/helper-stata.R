@@ -239,13 +239,13 @@ stata_manual_params <- function(fitrow) {
                        obs_cases  = "healthy",
                        rct        = "treated")
   slope_params_manual(
-    slope            = fitrow$slope,
-    sigma2_intercept = fitrow$v_intercept,
-    sigma2_slope     = fitrow$v_slope,
-    sigma_cov        = fitrow$cov_islope,
-    sigma2_residual  = fitrow$v_residual,
-    slope_comparator = if (comparator == "none") NA_real_ else fitrow$slope_comp,
-    comparator       = comparator
+    slope               = fitrow$slope,
+    sigma2_intercept    = fitrow$v_intercept,
+    sigma2_slope        = fitrow$v_slope,
+    cov_intercept_slope = fitrow$cov_islope,
+    sigma2_residual     = fitrow$v_residual,
+    slope_comparator    = if (comparator == "none") NA_real_ else fitrow$slope_comp,
+    comparator          = comparator
   )
 }
 

@@ -60,7 +60,7 @@ which is `slope_sigma()`, and \(u = (1,1,\dots,1)^{\mathsf T}\).
 pars <- slope_params_manual(
   slope = -1.8,
   sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov = 5, sigma2_residual = 10
+  cov_intercept_slope = 5, sigma2_residual = 10
 )
 visits <- c(0, 1, 2)
 Sigma <- slope_sigma(pars, visits)
@@ -412,8 +412,8 @@ $$s_*^2 \;=\; \underbrace{\frac{2\sigma_\epsilon^2(2\sigma_a^2 + \sigma_\epsilon
 one_fu <- function(p, t) {
   P <- p$sigma2_intercept + p$sigma2_residual
   2 * p$sigma2_residual * (2 * p$sigma2_intercept + p$sigma2_residual) / (t^2 * P) +
-    4 * p$sigma2_residual * p$sigma_cov / (t * P) +
-    2 * (p$sigma2_slope - p$sigma_cov^2 / P)
+    4 * p$sigma2_residual * p$cov_intercept_slope / (t * P) +
+    2 * (p$sigma2_slope - p$cov_intercept_slope^2 / P)
 }
 tt <- c(0.5, 1, 2, 5, 20, 1000)
 rbind(t = tt,
@@ -449,7 +449,7 @@ c(m1 = slope_var(pars, c(0, 3)),      m2 = slope_var(pars, seq(0, 3, length.out 
   m6 = slope_var(pars, seq(0, 3, length.out = 7)),
   dense_3yr  = slope_var(pars, seq(0, 3,  length.out = 401)),
   dense_20yr = slope_var(pars, seq(0, 20, length.out = 2001)),
-  floor = 2 * (pars$sigma2_slope - pars$sigma_cov^2 / pars$sigma2_intercept))
+  floor = 2 * (pars$sigma2_slope - pars$cov_intercept_slope^2 / pars$sigma2_intercept))
 ```
 
 Because \(N \propto s_*^2\), this is a floor on sample size that no design can
@@ -458,7 +458,7 @@ target:
 
 ```{r floor-n}
 b2 <- 0.33 * abs(p1$slope)
-floor_var <- 2 * (p1$sigma2_slope - p1$sigma_cov^2 / p1$sigma2_intercept)
+floor_var <- 2 * (p1$sigma2_slope - p1$cov_intercept_slope^2 / p1$sigma2_intercept)
 
 c(floor_n_total  = 2 * ceiling(z^2 * floor_var / b2^2),
   achieved_50yr  = slope_sample_size(p1, seq(0, 50, length.out = 501),
@@ -514,7 +514,7 @@ And length alone will not get you there. The \(m = 1\) limit above is
 ```{r floor-two-visit}
 c(two_visits_far_apart = slope_var(p1, c(0, 1e4)),
   two_visit_limit      = 2 * (p1$sigma2_slope -
-                              p1$sigma_cov^2 / (p1$sigma2_intercept + p1$sigma2_residual)),
+                              p1$cov_intercept_slope^2 / (p1$sigma2_intercept + p1$sigma2_residual)),
   floor                = slope_var_floor(p1))
 ```
 

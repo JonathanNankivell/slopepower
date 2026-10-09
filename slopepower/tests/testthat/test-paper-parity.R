@@ -160,11 +160,11 @@ test_that("p.594: powering for a fraction p of the observed effect scales as p^-
   # halving the previous trial's observed effect at source and re-solving must
   # land on the same 1,266.
   halved <- slope_params_manual(
-    slope            = p3$slope,
-    slope_comparator = p3$slope + (p3$slope_comparator - p3$slope) / 2,
-    sigma2_intercept = p3$sigma2_intercept, sigma2_slope = p3$sigma2_slope,
-    sigma_cov        = p3$sigma_cov,        sigma2_residual = p3$sigma2_residual,
-    comparator       = "treated")
+    slope               = p3$slope,
+    slope_comparator    = p3$slope + (p3$slope_comparator - p3$slope) / 2,
+    sigma2_intercept    = p3$sigma2_intercept, sigma2_slope = p3$sigma2_slope,
+    cov_intercept_slope = p3$cov_intercept_slope, sigma2_residual = p3$sigma2_residual,
+    comparator          = "treated")
   expect_equal(suppressWarnings(slope_sample_size(halved, c(0, 2, 3), dropout = c(0.2, 0.1),
                                                  target = "observed"))$n, 1266)
 

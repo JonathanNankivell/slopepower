@@ -14,12 +14,12 @@ slope_sample_size_grid_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 
 slope_power_grid_boot(
@@ -31,12 +31,12 @@ slope_power_grid_boot(
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
+  per_arm = TRUE,
   R = 999,
   ci_method = c("bca", "percentile"),
   level = 0.95,
   seed = NULL,
-  progress = FALSE,
-  per_arm = TRUE
+  progress = FALSE
 )
 }
 \arguments{
@@ -65,6 +65,14 @@ the value itself is what the table reports, in the column of the same name.}
 \item{target}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held constant across the
 grid.}
 
+\item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Unlike
+the plain grids' \code{per_arm} (which reshapes the returned columns), these
+grids always carry both bases -- see the \verb{@return} block below -- and
+\code{per_arm} only sets which one the print method shows by default; the
+stored value can still be reached through the other columns, and a single
+call can be printed either way with \code{print(x, per_arm = ...)}.}
+
 \item{R}{Number of bootstrap replicates. The default is sized for the
 interval this returns rather than for speed; see above before lowering it.}
 
@@ -81,14 +89,6 @@ result without reseeding the session; leaving it \code{NULL} draws from, and
 advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
-
-\item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
-default) for participants per arm, \code{FALSE} for the trial total. Unlike
-the plain grids' \code{per_arm} (which reshapes the returned columns), these
-grids always carry both bases -- see the \verb{@return} block below -- and
-\code{per_arm} only sets which one the print method shows by default; the
-stored value can still be reached through the other columns, and a single
-call can be printed either way with \code{print(x, per_arm = ...)}.}
 
 \item{n}{For \code{slope_power_grid_boot()}: total number of participants, as in
 \code{\link[=slope_power_grid]{slope_power_grid()}}. Required. A single value is held constant across the
@@ -132,7 +132,8 @@ The table also carries, as attributes rather than columns because they
 are shared by every cell: \code{R}, \code{ci_method} (as requested), \code{statistic}
 (\code{"n"} or \code{"power"}), \code{level}, \code{se}, \code{n_refit_failed} (replicates whose
 stage-one refit failed, before any per-cell solve is attempted),
-\code{straddle}, \code{per_arm} (as requested, or overridden at print time), and
+\code{straddle}, \code{straddle_of} (as for \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}), \code{per_arm}
+(as requested, or overridden at print time), and
 \code{slope_observed}, \code{slope_mean}, \code{slope_sd}, \code{slope_ci},
 \code{slope_ci_method}, \code{slope_replicates} -- the same summary of the refitted
 slopes a single-design bootstrap result carries, since the slope is what
@@ -177,6 +178,12 @@ one cell of several does not justify discarding a run that may have taken
 several minutes to resample; that cell's interval columns are \code{NA} instead,
 and every such cell is named once in a warning. The grid only stops if not a
 single cell could be bootstrapped at all.
+
+Unlike the single-design bootstraps, these take no \code{statistic}: every cell
+gets an interval for both the quantity solved for and the target treatment
+effect, the two a \code{statistic} would choose between. The \code{tte} interval
+costs next to nothing beside the refits, since it is one column per
+\code{effectiveness} level, not one per cell.
 }
 \examples{
 # No comparator: fitted to all two hundred participants of `slpower1`.

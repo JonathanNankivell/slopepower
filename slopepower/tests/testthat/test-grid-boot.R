@@ -492,7 +492,7 @@ test_that("slope_sample_size_grid_boot() collects the baseline-dropout warning o
   pars <- small_fit()
   expect_warning(
     slope_sample_size_grid_boot(pars, visits = c(0, 1, 2, 3), effectiveness = 0.33,
-                                dropout = dropout_rate(0.3), R = 4, seed = 1),
+                                dropout = c(0.3, 0.1, 0.1), R = 4, seed = 1),
     "baseline visit only"
   )
 })

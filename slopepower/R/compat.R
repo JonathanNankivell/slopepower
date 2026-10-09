@@ -173,6 +173,18 @@ slopepower <- function(data, depvar, subject, time, schedule,
                     context, format(scale)))
   }
 
+  # The Stata command takes n() or power(), never both, and picks the calculation
+  # from which was given. That single bimodal interface is the thing this port
+  # splits in two, so the branch lives here -- in the compatibility shim whose
+  # job is to mirror Stata -- rather than in the functions it delegates to.
+  # Checked before the fit, like every other check that needs no data.
+  if (!is.null(n) && !is.null(power)) {
+    stop(sprintf(paste0(
+      "%s: supply only one of `n` and `power`.\n",
+      "  `n` gives the power that sample size achieves; `power` gives the sample\n",
+      "  size that reaches it."), context), call. = FALSE)
+  }
+
   # Built now, before the (potentially slow) stage-one fit below, so that a
   # purely syntactic problem with `dropouts` -- the wrong length, or a total
   # over 1 -- is reported without paying for a REML fit first.
@@ -228,16 +240,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   # maybe_add_effectiveness()'s rule to state, not this shim's to restate.
   args <- maybe_add_effectiveness(args, effectiveness %||% 0.25, args$target)
 
-  # The Stata command takes n() or power(), never both, and picks the calculation
-  # from which was given. That single bimodal interface is the thing this port
-  # splits in two, so the branch lives here -- in the compatibility shim whose
-  # job is to mirror Stata -- rather than in the functions it delegates to.
-  if (!is.null(n) && !is.null(power)) {
-    stop(sprintf(paste0(
-      "%s: supply only one of `n` and `power`.\n",
-      "  `n` gives the power that sample size achieves; `power` gives the sample\n",
-      "  size that reaches it."), context), call. = FALSE)
-  }
+  # The branch on which of `n` and `power` was given; see the check before the fit.
   if (!is.null(n)) {
     do.call(power_result, c(args, list(n = n, context = "slope_power()")))
   } else {

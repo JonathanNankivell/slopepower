@@ -352,7 +352,7 @@ test_that("the fitted variance components match Stata's", {
       vtag      = row$vtag,
       intercept = rel_diff(row$v_intercept, p$sigma2_intercept),
       slope_var = rel_diff(row$v_slope,     p$sigma2_slope * f^2),
-      cov       = rel_diff(row$cov_islope,  p$sigma_cov * f),
+      cov       = rel_diff(row$cov_islope,  p$cov_intercept_slope * f),
       residual  = rel_diff(row$v_residual,  p$sigma2_residual),
       slope     = rel_diff(row$slope,       p$slope * f),
       stringsAsFactors = FALSE

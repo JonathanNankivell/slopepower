@@ -89,7 +89,7 @@ test_that("leaving `correlation` and `weights` unset is the original model exact
   expect_null(p$residual)
   expect_null(p$fit$modelStruct$corStruct)
   expect_identical(slope_sigma(p, 0:3)[2, 2],
-                   p$sigma2_intercept + p$sigma2_slope + 2 * p$sigma_cov + p$sigma2_residual)
+                   p$sigma2_intercept + p$sigma2_slope + 2 * p$cov_intercept_slope + p$sigma2_residual)
 })
 
 test_that("a starting value and fixed = TRUE are honoured as in nlme", {
@@ -221,7 +221,7 @@ test_that("the floor is refused for a per-visit structure", {
 
 manual <- function(...) {
   slope_params_manual(slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-                      sigma_cov = 5, sigma2_residual = 10, ...)
+                      cov_intercept_slope = 5, sigma2_residual = 10, ...)
 }
 
 test_that("a stated serial correlation is used as written", {

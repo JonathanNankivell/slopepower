@@ -9,12 +9,12 @@
 ref_params <- function(comparator = "none", slope = -1.672,
                        slope_comparator = NA_real_) {
   slope_params_manual(
-    slope            = slope,
-    sigma2_intercept = 100,
-    sigma2_slope     = 2,
-    sigma_cov        = 5,
-    sigma2_residual  = 10,
-    slope_comparator = slope_comparator,
-    comparator       = comparator
+    slope               = slope,
+    sigma2_intercept    = 100,
+    sigma2_slope        = 2,
+    cov_intercept_slope = 5,
+    sigma2_residual     = 10,
+    slope_comparator    = slope_comparator,
+    comparator          = comparator
   )
 }

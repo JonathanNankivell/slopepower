@@ -120,7 +120,7 @@ base_only <- slope_params(sdmt ~ visit | id, trial, comparator = "treated", grou
                           covariates = ~ age_group + sex, covariate_time = FALSE)
 
 pick <- function(p) unlist(p[c("slope", "slope_comparator", "sigma2_intercept",
-                               "sigma2_slope", "sigma_cov", "sigma2_residual")])
+                               "sigma2_slope", "cov_intercept_slope", "sigma2_residual")])
 round(rbind(unadjusted    = pick(unadj),
             baseline_only = pick(base_only),
             adjusted      = pick(adj)), 3)

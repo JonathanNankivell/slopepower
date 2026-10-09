@@ -22,7 +22,7 @@ Mapping from the paper to code, fixed throughout:
 |---|---|---|
 | σ²_a | `sigma2_intercept` | between-subject variance of random intercepts |
 | σ²_b | `sigma2_slope` | between-subject variance of random slopes |
-| σ_ab | `sigma_cov` | covariance of random intercept and slope |
+| σ_ab | `cov_intercept_slope` | covariance of random intercept and slope |
 | σ²_ε | `sigma2_residual` | within-subject residual variance (at the first of `residual$times` when `residual$sd_ratio` is set) |
 | ρ(s, t) | `residual$correlation`, `residual$coef` | residual correlation between a participant's visits at times s and t; 0 for s ≠ t by default |
 | δ_k | `residual$sd_ratio` | residual SD at visit time k relative to the first (`varIdent()`); 1 by default |
@@ -40,23 +40,24 @@ S3 class `"slope_params"`, a list with **exactly** these fields:
 
 ```r
 list(
-  slope             = <dbl>,   # untreated / case slope, per unit of `time`
-  slope_comparator  = <dbl>,   # healthy-control or treated-arm slope; NA_real_ if none
-  comparator        = <chr>,   # one of "none", "healthy", "treated"
-  sigma2_intercept  = <dbl>,   # > 0
-  sigma2_slope      = <dbl>,   # > 0
-  sigma_cov         = <dbl>,   # unconstrained sign
-  sigma2_residual   = <dbl>,   # > 0
-  n_obs             = <int>,   # observations used in the fit (post NA-removal); NA for manual
-  n_subjects        = <int>,   # subjects used in the fit; NA for manual
-  common_variance   = <lgl>,   # TRUE if the comparator RE block was reduced (Stata `nocontvar`)
-  time_shifted      = <lgl>,   # TRUE if any subject's first visit was moved to 0
-  covariates        = <list or NULL>,  # list(columns = <chr>, time = <lgl>): the adjustment
-                               #   the variance components are conditional on; NULL if none
-  residual          = <list or NULL>,  # the residual structure (section 2.1); NULL = independent
-                               #   residuals of constant variance, the paper's model
-  fit               = <model or NULL>,
-  call              = <call>
+  slope               = <dbl>,   # untreated / case slope, per unit of `time`
+  slope_comparator    = <dbl>,   # healthy-control or treated-arm slope; NA_real_ if none
+  comparator          = <chr>,   # one of "none", "healthy", "treated"
+  sigma2_intercept    = <dbl>,   # > 0
+  sigma2_slope        = <dbl>,   # > 0
+  cov_intercept_slope = <dbl>,   # unconstrained sign
+  sigma2_residual     = <dbl>,   # > 0
+  n_obs               = <int>,   # observations used in the fit (post NA-removal); NA for manual
+  n_subjects          = <int>,   # subjects used in the fit; NA for manual
+  common_variance     = <lgl>,   # TRUE if the comparator RE block was reduced (Stata `nocontvar`)
+  time_shifted        = <lgl>,   # TRUE if any subject's first visit was moved to 0
+  covariates          = <list or NULL>,  # list(columns = <chr>, time = <lgl>): the adjustment
+                                 #   the variance components are conditional on; NULL if none
+  residual            = <list or NULL>,  # the residual structure (section 2.1); NULL = independent
+                                 #   residuals of constant variance, the paper's model
+  control             = <list or NULL>,  # the lmeControl() settings fitted under; NULL for manual
+  fit                 = <model or NULL>,
+  call                = <call>
 )
 ```
 
@@ -306,7 +307,7 @@ For visit times `t = visits` (length `m`, including baseline 0), the marginal co
 ```
 Sigma[i, j] = sigma2_intercept
             + t[i] * t[j] * sigma2_slope
-            + (t[i] + t[j]) * sigma_cov
+            + (t[i] + t[j]) * cov_intercept_slope
             + (i == j) * sigma2_residual
 ```
 
@@ -315,7 +316,7 @@ Vectorised:
 ```r
 Sigma <- sigma2_intercept +
          outer(t, t) * sigma2_slope +
-         outer(t, t, "+") * sigma_cov +
+         outer(t, t, "+") * cov_intercept_slope +
          diag(sigma2_residual, length(t))
 ```
 
@@ -437,7 +438,7 @@ inequality instead.
 No counterpart in Stata or in the paper; derived in the "What s\* is" vignette, section 6.
 
 ```
-slope_var_floor(params) = 2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)
+slope_var_floor(params) = 2 * (sigma2_slope - cov_intercept_slope^2 / sigma2_intercept)
 ```
 
 Twice the Schur complement of the random-effects covariance matrix, i.e. twice `Var(b_i | a_i)`.
@@ -460,8 +461,8 @@ Three facts, each load-bearing for how it is documented:
 - **Dropout can only raise it**, so the bound holds over designs *and* dropout patterns. That is
   why `slope_sample_size_floor()` needs no `visits` or `dropout`, not merely why it has none.
 - **Length alone does not reach it.** Two visits a distance `t` apart converge as `t -> Inf` on
-  `2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`, strictly larger
-  whenever `sigma_cov != 0`: only repeated measurement recovers the whole baseline correction. Do
+  `2 * (sigma2_slope - cov_intercept_slope^2 / (sigma2_intercept + sigma2_residual))`, strictly larger
+  whenever `cov_intercept_slope != 0`: only repeated measurement recovers the whole baseline correction. Do
   not shorten this to "as the trial gets longer" — a reader who lengthens a two-visit trial aims
   at the wrong number, and `test-floor.R` pins the two limits apart.
 
@@ -502,9 +503,12 @@ Errors (not warnings, not silent `NA`):
 Warnings:
 
 - `tte` points away from benefit (i.e. treatment would need to make the slope more extreme)
-- `dropout[1] > 0` (those participants contribute nothing)
+- `dropout[1] > 0` in a dropout vector (those participants contribute nothing); not for a
+  `dropout_rate()`, whose baseline-only share is inevitable rather than written
 - any subject's time origin had to be shifted (`slope_params()`)
-- `abs(slope) / se(slope) < 2.5` in every bootstrap function (paper §2.6)
+- `abs(slope) / se(slope) < 2.5` in every bootstrap function (paper §2.6) — on the slope
+  difference `slope - slope_comparator` instead when the target is measured toward the
+  comparator (`comparator = "healthy"`, or `target = "observed"`)
 - fewer than two replicates succeed for one cell of `slope_sample_size_grid_boot()` — that cell's
   interval columns are `NA` (collected into one warning naming every such cell); the call errors
   only if every cell is starved

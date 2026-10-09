@@ -15,7 +15,9 @@ slope_params(
   covariates = NULL,
   covariate_time = TRUE,
   correlation = NULL,
-  weights = NULL
+  weights = NULL,
+  subset = NULL,
+  control = slope_lme_control()
 )
 }
 \arguments{
@@ -98,6 +100,22 @@ as in \code{nlme}. See "Residual structures" below.}
 stratum. Together with \code{correlation = nlme::corSymm()} this is the fully
 unstructured residual covariance. No other variance function is
 supported.}
+
+\item{subset}{Optional expression selecting the rows of \code{data} to fit to,
+as in \code{\link[nlme:lme]{nlme::lme()}}: a logical vector (\code{NA} counts as \code{FALSE}) or row
+numbers, evaluated in \code{data} and then in the calling environment, e.g.
+\code{subset = site != "C"}. Applied before \code{na.action}, and after a
+baseline-only covariate has been copied to the participant's other
+visits.}
+
+\item{control}{The \code{\link[nlme:lmeControl]{nlme::lmeControl()}} settings for the fit. Defaults to
+\code{\link[=slope_lme_control]{slope_lme_control()}}, which works the optimiser harder than \code{nlme}'s own
+defaults; to change one setting and keep the rest, write e.g.
+\code{control = slope_lme_control(maxIter = 500)}. A bare \code{list()} is refused,
+because \code{nlme} would fill the settings it leaves out from its own
+defaults. Recorded on the result as \verb{$control}, so that
+\code{\link[=slope_params_boot]{slope_params_boot()}} and the other bootstraps refit every replicate
+under the same settings.}
 }
 \value{
 An object of class \code{"slope_params"}. Its \verb{$residual} component is
@@ -168,7 +186,7 @@ independent residuals:
 
 where \eqn{G}{G} is an unstructured 2 by 2 matrix with diagonal
 \eqn{\sigma^2_a}{sigma2_intercept}, \eqn{\sigma^2_b}{sigma2_slope} and
-off-diagonal \eqn{\sigma_{ab}}{sigma_cov}. By default residuals are
+off-diagonal \eqn{\sigma_{ab}}{cov_intercept_slope}. By default residuals are
 independent across visits and across participants; \code{correlation} and
 \code{weights} replace that with a structured residual covariance within each
 participant (see "Residual structures"). Only the mean \eqn{\mu}{mu} and the

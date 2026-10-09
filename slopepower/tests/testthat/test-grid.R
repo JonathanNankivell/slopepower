@@ -253,10 +253,12 @@ test_that("a dropout vector of the wrong length for a design errors helpfully", 
 })
 
 test_that("slope_power_grid() collects the baseline-only warning once", {
-  # The design validator warns per design; the grid should report once, not nine times
+  # The design validator warns per design; the grid should report once, not
+  # once per design. A written-out first element, since a rate's baseline-only
+  # share is not warned about (see ?dropout_rate).
   w <- capture_warnings(slope_power_grid(
-    paper_fit("slpower1"), visits = table1_visits,
-    dropout = list(`10pc` = dropout_rate(0.10)),
+    paper_fit("slpower1"), visits = list(a = c(0, 1, 2), b = c(0, 2, 4), c = c(0, 1, 3)),
+    dropout = list(early = c(0.1, 0.05)),
     n = 450, effectiveness = 0.33))
   expect_length(w, 1L)
   expect_match(w, "baseline visit only")
@@ -405,7 +407,7 @@ test_that("a bad list element is reported against the label of its own row", {
 
   err <- expect_error(slope_power_grid(p, visits = list(a = c(0, 1, 2)),
                                        dropout = list("5%"), n = 450))
-  expect_match(conditionMessage(err), '(dropout = "dropout")', fixed = TRUE)
+  expect_match(conditionMessage(err), 'dropout "dropout" failed', fixed = TRUE)
   expect_match(conditionMessage(err), "got character", fixed = TRUE)
 })
 
@@ -548,7 +550,7 @@ test_that("the baseline-dropout warning counts designs, not cells", {
   # claims to have found the problem in.
   p <- paper_fit("slpower1")
   w <- capture_warnings(slope_sample_size_grid(
-    p, visits = list(annual = 0:3), dropout = dropout_rate(2 / 30),
+    p, visits = list(annual = 0:3), dropout = c(0.05, 0.05, 0.05),
     effectiveness = list(a = 0.2, b = 0.3, c = 0.4)))
   expect_length(w, 1L)
   expect_match(w, "in 1 of 1 combinations", fixed = TRUE)

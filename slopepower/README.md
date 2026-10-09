@@ -194,7 +194,8 @@ incremental proportions, so it cannot be combined with
 `dropout_scale = "cumulative"`.
 
 Participants who attend baseline only carry no slope information; a non-zero
-first element warns.
+first element of a dropout vector warns. A `dropout_rate()` always has some, and
+does not.
 
 Whatever the proportions, they are handled by the pattern-mixture method of
 Dawson and Lagakos (1991, 1993), as in §2.5 of the paper: participants are
@@ -214,10 +215,10 @@ If you have published estimates rather than raw data:
 
 ```r
 pars <- slope_params_manual(
-  slope            = -1.672,
-  sigma2_intercept = 100, sigma2_slope = 2,
-  sigma_cov        = 5,   sigma2_residual = 10,
-  slope_comparator = 0.975, comparator = "healthy"   # optional
+  slope               = -1.672,
+  sigma2_intercept    = 100, sigma2_slope = 2,
+  cov_intercept_slope = 5,   sigma2_residual = 10,
+  slope_comparator    = 0.975, comparator = "healthy"   # optional
 )
 ```
 
@@ -269,7 +270,7 @@ Each of these axes reports its value in the column of the same name (`power`,
 
 Before searching, it is worth knowing what the search can possibly achieve. The
 treatment-effect variance has a greatest lower bound over *all* visit schedules,
-`2 * (sigma2_slope - sigma_cov^2 / sigma2_intercept)`, so the sample size does
+`2 * (sigma2_slope - cov_intercept_slope^2 / sigma2_intercept)`, so the sample size does
 too:
 
 ```r
@@ -300,7 +301,7 @@ columns — so the floor row does not `rbind()` onto that.)
 
 The bound is approached only as the schedule becomes both long *and* dense;
 lengthening a two-visit trial only converges on the higher value
-`2 * (sigma2_slope - sigma_cov^2 / (sigma2_intercept + sigma2_residual))`. The
+`2 * (sigma2_slope - cov_intercept_slope^2 / (sigma2_intercept + sigma2_residual))`. The
 `what-is-s-star` vignette derives all of this.
 
 ## Uncertainty in the stage-one estimates
