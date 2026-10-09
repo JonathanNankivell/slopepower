@@ -185,15 +185,33 @@ resample_frame <- function(frame, subject_index, groups) {
 slope_se <- function(params) {
   context <- "slope_se()"
   check_params(params, context)
+  sqrt(slope_vcov(params, context)[1L, 1L])
+}
+
+#' Sampling covariance of the slopes, from the fitted model
+#'
+#' The body of [vcov.slope_params()], and of [slope_se()] -- the square root
+#' of its first element -- and [boot_check()], so the slope's standard error
+#' and the slope difference's are read off one contrast of the fit's own
+#' covariance matrix. Row 1 sums every term of the slope; row 2, when there is
+#' a comparator, is its own slope: the first term alone. `NA` throughout when
+#' there is no fitted model, or its coefficients cannot be read or named.
+#' `params` arrives validated.
+#' @noRd
+slope_vcov <- function(params, context) {
+  nm <- if (identical(params$comparator, "none")) "slope" else c("slope", "slope_comparator")
+  out <- matrix(NA_real_, length(nm), length(nm), dimnames = list(nm, nm))
   fit <- params$fit
-  if (is.null(fit)) return(NA_real_)
+  if (is.null(fit)) return(out)
   b <- tryCatch(nlme::fixef(fit), error = function(e) NULL)
   V <- tryCatch(stats::vcov(fit), error = function(e) NULL)
-  if (is.null(b) || is.null(V)) return(NA_real_)
+  if (is.null(b) || is.null(V)) return(out)
   terms <- slope_terms(params, b, context)
-  if (is.null(terms)) return(NA_real_)
-  k <- as.numeric(names(b) %in% terms)
-  sqrt(drop(k %*% as.matrix(V) %*% k))
+  if (is.null(terms)) return(out)
+  A <- rbind(as.numeric(names(b) %in% terms),
+             if (length(nm) > 1L) as.numeric(names(b) == terms[[1L]]))
+  out[] <- A %*% as.matrix(V) %*% t(A)
+  out
 }
 
 #' The fitted model's coefficient names that sum to the slope, or `NULL`
@@ -446,10 +464,10 @@ lazy_jackknife <- function(setup, computes) {
 #' and a power lies in [0, 1], so that comparison was identically 0 and the
 #' check silently never fired.
 #' @noRd
-slope_replicate_summary <- function(observed_slope, good_slopes, slope_int, setup,
+slope_replicate_summary <- function(observed_slope, good_slopes, slope_int, check,
                                     good_checks) {
-  list(straddle = mean(sign(good_checks) != sign(setup$check_observed)),
-       straddle_of = setup$check_label,
+  list(straddle = mean(sign(good_checks) != sign(check$observed)),
+       straddle_of = check$label,
        slope_observed = observed_slope,
        slope_replicates = good_slopes,
        slope_mean = mean(good_slopes),
@@ -473,8 +491,8 @@ boot_setup <- function(params, context, target = NULL) {
   # replicates can straddle zero, and an interval for the sample size stops
   # meaning anything. Measured on whatever stage two divides by -- the slope
   # difference, when the target is a comparator's slope; see boot_check().
-  check <- boot_check(params, target)
-  observed <- check$of(params)
+  check <- boot_check(params, target, context)
+  check$observed <- observed <- check$of(params)
   se <- check$se
   if (is.finite(se) && se > 0 && abs(observed) / se < 2.5) {
     warning(sprintf(paste0("%s: the estimated %s (%.4g) is only %.2f times its standard error ",
@@ -496,9 +514,14 @@ boot_setup <- function(params, context, target = NULL) {
   }
 
   list(frame = frame, subject_index = subject_index, groups = groups,
-      refitter = make_refitter(params), se = se, check = check$of,
-      check_observed = observed, check_label = check$label)
+      refitter = make_refitter(params), check = check)
 }
+
+#' What became of a replicate that refitted but could not be solved, in the
+#' run-time warning and the printed note alike
+#' @noRd
+BOOT_SOLVE_FAILED <- paste("refitted, but the calculation could not be solved on them",
+                           "(for instance, a slope difference of zero)")
 
 #' The warning text for discarded replicates, split by cause
 #'
@@ -509,10 +532,7 @@ boot_setup <- function(params, context, target = NULL) {
 boot_failure_text <- function(n_refit, n_failed, R) {
   parts <- c(
     if (n_refit > 0L) sprintf("%d of %d replicates failed to converge", n_refit, R),
-    if (n_failed > n_refit) {
-      sprintf(paste0("%d of %d refitted, but the calculation could not be solved on them ",
-                     "(for instance, a slope difference of zero)"), n_failed - n_refit, R)
-    })
+    if (n_failed > n_refit) sprintf("%d of %d %s", n_failed - n_refit, R, BOOT_SOLVE_FAILED))
   paste0(paste(parts, collapse = "; "), "; all were discarded.")
 }
 
@@ -536,16 +556,15 @@ boot_failure_text <- function(n_refit, n_failed, R) {
 #' @return A list: `of`, reading the checked quantity off a `slope_params`
 #'   object (the fit or a refit); `se`, its analytic standard error from the
 #'   fitted model, `NA` without one; and `label`, its name for messages.
+#'   [boot_setup()] adds `observed`, the quantity on the fit itself.
 #' @noRd
-boot_check <- function(params, target) {
+boot_check <- function(params, target, context) {
+  V <- slope_vcov(params, context)
   if (is.null(target) || !reference_is_comparator(params$comparator, target)) {
-    return(list(of = function(p) p$slope, se = slope_se(params), label = "slope"))
+    return(list(of = function(p) p$slope, se = sqrt(V[1L, 1L]), label = "slope"))
   }
-  # var(slope - slope_comparator), from the same coefficient mapping as slope_se().
-  V <- vcov(params)
-  se <- sqrt(V[1L, 1L] + V[2L, 2L] - 2 * V[1L, 2L])
-  list(of = function(p) p$slope - p$slope_comparator, se = unname(se),
-       label = "slope difference")
+  list(of = function(p) p$slope - p$slope_comparator,
+       se = sqrt(V[1L, 1L] + V[2L, 2L] - 2 * V[1L, 2L]), label = "slope difference")
 }
 
 #' Refit `R` resampled replicates, reading one or more statistics off each
@@ -594,7 +613,7 @@ boot_replicate_matrix <- function(setup, computes, R, progress, context) {
                   error = function(e) NULL)
     if (!is.null(p)) {
       slopes[b] <- p$slope
-      checks[b] <- setup$check(p)
+      checks[b] <- setup$check$of(p)
       replicates[b, ] <- eval_computes(computes, p)
     }
     if (isTRUE(progress) && b %% tick == 0L) {
@@ -658,7 +677,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
   # driver has already solved that exact calculation once, warnings and all,
   # and solving it again would repeat them.
   setup <- boot_setup(params, context, target)
-  se <- setup$se
+  se <- setup$check$se
 
   mat <- boot_replicate_matrix(setup, list(compute), R, progress, context)
   replicates <- mat$replicates[, 1L]
@@ -734,7 +753,7 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
   # and `good_slopes` are one vector under two names and the two means cannot
   # differ. Recomputed rather than aliased, so the helper owes its caller
   # nothing about which statistic was asked for.
-  slope_block <- slope_replicate_summary(params$slope, good_slopes, slope_int, setup,
+  slope_block <- slope_replicate_summary(params$slope, good_slopes, slope_int, setup$check,
                                          mat$checks[!failed])
 
   structure(c(list(observed = observed, replicates = good, ci = ci,
@@ -1364,7 +1383,7 @@ basis_note <- function(per_arm) {
 #' describing it in different voices -- the drift [boot_method_note()] was
 #' extracted to prevent, one note further on.
 #' @noRd
-boot_straddle_note <- function(straddle, n_used, of = "slope") {
+boot_straddle_note <- function(straddle, n_used, of) {
   boot_note("Note", sprintf(paste0("%d/%d (%.1f%%) of replicates refit a %s on ",
                                    "the opposite side of zero from the fitted one."),
                             round(straddle * n_used), n_used, 100 * straddle,
@@ -1386,7 +1405,7 @@ boot_straddle_note <- function(straddle, n_used, of = "slope") {
 #' the half here is never rounded; the mean halves because it is linear.
 #' @noRd
 boot_summary_frame <- function(x, per_arm) {
-  divisor <- if (x$lattice && per_arm) 2 else 1
+  divisor <- boot_divisor(x, per_arm)
   data.frame(
     statistic  = x$statistic,
     calculated = x$observed / divisor,
@@ -1396,6 +1415,16 @@ boot_summary_frame <- function(x, per_arm) {
     stringsAsFactors = FALSE
   )
 }
+
+#' What a bootstrap result's statistic is divided by on the display basis
+#'
+#' The one statement of the rule [boot_summary_frame()] and
+#' [confint.slope_bootstrap()] both apply: a sample size, on the even lattice,
+#' is halved to show it per arm; nothing else has arms. `per_arm` arrives
+#' resolved by [display_basis()]. `isTRUE()`, so an object saved before
+#' `lattice` existed is shown as stored rather than failing.
+#' @noRd
+boot_divisor <- function(x, per_arm) if (isTRUE(x$lattice) && per_arm) 2 else 1
 
 #' Print a bootstrap result
 #'
@@ -1454,10 +1483,9 @@ print.slope_bootstrap <- function(x, ..., per_arm = NULL) {
     n_refit, x$R, 100 * n_refit / x$R)),
       sep = "\n")
   if (x$n_failed > n_refit) {
-    cat(boot_note("Note", sprintf(paste0(
-      "%d/%d (%.1f%%) more refitted, but the calculation could not be solved on them ",
-      "(for instance, a slope difference of zero)."),
-      x$n_failed - n_refit, x$R, 100 * (x$n_failed - n_refit) / x$R)), sep = "\n")
+    cat(boot_note("Note", sprintf("%d/%d (%.1f%%) more %s.",
+      x$n_failed - n_refit, x$R, 100 * (x$n_failed - n_refit) / x$R, BOOT_SOLVE_FAILED)),
+      sep = "\n")
   }
 
   cat(boot_straddle_note(x$straddle, length(x$replicates), x$straddle_of), sep = "\n")

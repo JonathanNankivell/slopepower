@@ -317,7 +317,7 @@ grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
 #' @noRd
 expected_visits <- function(design) {
   sum(design$dropout * seq_along(design$dropout)) +
-    (1 - sum(design$dropout)) * length(design$visits)
+    completers(design) * length(design$visits)
 }
 
 #' The stage-two result fields every grid cell reports, in column order
