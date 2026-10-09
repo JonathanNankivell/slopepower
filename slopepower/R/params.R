@@ -351,7 +351,24 @@ fit_quietly <- function(expr) {
 #' has it on purpose.
 #' @noRd
 fit_common_model <- function(dat, ctrl, fixed, resid) {
-  eval(bquote(nlme::lme(.(fixed), random = ~ sp_time | sp_subject,
+  fit_lme(dat, ctrl, fixed, quote(~ sp_time | sp_subject), resid)
+}
+
+#' The one `lme()` call both models are fitted by
+#'
+#' `random` is a call, inlined by `bquote()` like `fixed` so that `fit$call`
+#' reads as the model fitted. Every formula evaluated here takes this frame as
+#' its environment, and the fit keeps those formulas -- the random-effects
+#' structure, and any `correlation` or `weights` -- so it keeps this frame too.
+#' `dat` is removed from it once the fit is made: `lme()` has already stored
+#' its own copy as `fit$data`, which is what [nlme::getData()] reads, and the
+#' frame's would otherwise be serialized beside it as a second. The fit is
+#' returned without being bound here, so the frame does not hold the fit
+#' itself either.
+#' @noRd
+fit_lme <- function(dat, ctrl, fixed, random, resid) {
+  on.exit(rm(dat))
+  eval(bquote(nlme::lme(.(fixed), random = .(random),
                         correlation = .(resid$correlation),
                         weights = .(resid$weights),
                         data = dat, method = "REML", control = ctrl)))
@@ -379,22 +396,14 @@ with_covariates <- function(f, cov_terms) {
 #' @noRd
 fit_healthy_model <- function(dat, reduced, ctrl, fixed, resid) {
   comparator_block <- if (reduced) {
-    nlme::pdIdent(~ sp_control - 1)
+    quote(nlme::pdIdent(~ sp_control - 1))
   } else {
-    nlme::pdSymm(~ sp_control + sp_control_time - 1)
+    quote(nlme::pdSymm(~ sp_control + sp_control_time - 1))
   }
-  rand <- list(sp_subject = nlme::pdBlocked(list(
+  rand <- bquote(list(sp_subject = nlme::pdBlocked(list(
     nlme::pdSymm(~ sp_case + sp_case_time - 1),
-    comparator_block)))
-  fit_quietly(eval(bquote(
-    nlme::lme(.(fixed),
-              random      = rand,
-              correlation = .(resid$correlation),
-              weights     = .(resid$weights),
-              data        = dat,
-              method  = "REML",
-              control = ctrl)
-  )))
+    .(comparator_block)))))
+  fit_quietly(fit_lme(dat, ctrl, fixed, rand, resid))
 }
 
 # ---- covariates -------------------------------------------------------------
@@ -1243,11 +1252,10 @@ slope_params <- function(formula, data,
     check_covariate_rank(fixed, dat, basis$labels, comparator, context)
   }
 
-  ctrl <- control
   reduced_used <- FALSE
 
   if (comparator != "healthy") {
-    fit <- tryCatch(fit_common_model(dat, ctrl, fixed, resid), error = function(e) {
+    fit <- tryCatch(fit_common_model(dat, control, fixed, resid), error = function(e) {
       if (is.null(spec)) stop(e)
       stop(sprintf(paste0("%s: the mixed model with %s residuals did not converge: %s"),
                    context, residual_label(spec$correlation), conditionMessage(e)),
@@ -1263,7 +1271,7 @@ slope_params <- function(formula, data,
     fit <- NULL
     if (!isTRUE(common_variance)) {
       fit <- tryCatch(
-        fit_healthy_model(dat, reduced = FALSE, ctrl = ctrl, fixed = fixed, resid = resid),
+        fit_healthy_model(dat, reduced = FALSE, ctrl = control, fixed = fixed, resid = resid),
         error = function(e) {
           if (isFALSE(common_variance)) {
             stop(sprintf(paste0("%s: the full model did not converge and ",
@@ -1290,7 +1298,7 @@ slope_params <- function(formula, data,
     }
     if (is.null(fit)) {
       reduced_used <- TRUE
-      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = ctrl, fixed = fixed,
+      fit <- tryCatch(fit_healthy_model(dat, reduced = TRUE, ctrl = control, fixed = fixed,
                                         resid = resid),
                       error = function(e) {
                         stop(sprintf("%s: the mixed model did not converge: %s",
@@ -1420,21 +1428,12 @@ slope_params_manual <- function(slope,
   comparator <- match.arg(comparator)
   residual <- residual_manual(correlation, weights, times, context)
 
-  # The five components are validated and coerced by new_slope_params() below,
-  # which is the single validation point for both routes into the class.
-  if (comparator == "none") {
-    slope_comparator <- NA_real_
-  } else {
-    if (length(slope_comparator) != 1L || is.na(slope_comparator)) {
-      stop(sprintf("%s: `slope_comparator` is required when `comparator` is %s.",
-                   context, sQuote(comparator)), call. = FALSE)
-    }
-    check_scalar(slope_comparator, "slope_comparator", context)
-  }
-
+  # The components, slope_comparator included, are validated and coerced by
+  # new_slope_params() below, the single validation point for both routes into
+  # the class.
   new_slope_params(
     slope               = slope,
-    slope_comparator    = as.numeric(slope_comparator),
+    slope_comparator    = slope_comparator,
     comparator          = comparator,
     sigma2_intercept    = sigma2_intercept,
     sigma2_slope        = sigma2_slope,
@@ -1467,14 +1466,16 @@ new_slope_params <- function(slope, slope_comparator, comparator,
                              sigma2_residual, residual, n_obs, n_subjects,
                              common_variance, time_shifted, covariates, control,
                              fit, call, context) {
-  v <- check_param_values(list(slope = slope, sigma2_intercept = sigma2_intercept,
+  v <- check_param_values(list(slope = slope, slope_comparator = slope_comparator,
+                                comparator = comparator,
+                                sigma2_intercept = sigma2_intercept,
                                 sigma2_slope = sigma2_slope, sigma2_residual = sigma2_residual,
                                 cov_intercept_slope = cov_intercept_slope), context)
   check_residual(residual, context)
 
   structure(
     list(slope               = v$slope,
-         slope_comparator    = slope_comparator,
+         slope_comparator    = v$slope_comparator,
          comparator          = comparator,
          sigma2_intercept    = v$sigma2_intercept,
          sigma2_slope        = v$sigma2_slope,

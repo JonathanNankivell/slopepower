@@ -66,10 +66,7 @@ fixef.slope_params <- function(object, ...) {
 #' @export
 getVarCov.slope_params <- function(obj, ...) {
   check_params(obj, "getVarCov()")
-  nm <- c("(Intercept)", "time")
-  matrix(c(obj$sigma2_intercept, obj$cov_intercept_slope,
-           obj$cov_intercept_slope, obj$sigma2_slope),
-         nrow = 2L, dimnames = list(nm, nm))
+  re_cov_matrix(obj$sigma2_intercept, obj$sigma2_slope, obj$cov_intercept_slope)
 }
 
 #' @rdname slope_params_methods
@@ -82,21 +79,8 @@ sigma.slope_params <- function(object, ...) {
 #' @rdname slope_params_methods
 #' @export
 vcov.slope_params <- function(object, ...) {
-  context <- "vcov()"
-  check_params(object, context)
-  nm <- names(fixef(object))
-  out <- matrix(NA_real_, length(nm), length(nm), dimnames = list(nm, nm))
-  fit <- object$fit
-  if (is.null(fit)) return(out)
-  b <- nlme::fixef(fit)
-  terms <- slope_terms(object, b, context)
-  if (is.null(terms)) return(out)
-  # Row 1 sums every part, as slope_se() does; row 2, when there is a
-  # comparator, is its own slope: the first part alone.
-  A <- rbind(as.numeric(names(b) %in% terms),
-             if (length(nm) > 1L) as.numeric(names(b) == terms[[1L]]))
-  out[] <- A %*% as.matrix(stats::vcov(fit)) %*% t(A)
-  out
+  check_params(object, "vcov()")
+  slope_vcov(object, "vcov()")
 }
 
 #' Confidence intervals from a bootstrap
@@ -139,10 +123,10 @@ vcov.slope_params <- function(object, ...) {
 #' @export
 confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
-  # The basis print.slope_bootstrap() shows, by the same rule (boot_summary_frame()).
-  halve <- isTRUE(object$lattice) && display_basis(object, per_arm, context)
+  # The basis print.slope_bootstrap() shows, by the same rule.
+  divisor <- boot_divisor(object$lattice, display_basis(object, per_arm, context))
   rows <- unique(c(object$statistic, "slope"))
-  shown <- ifelse(halve & rows == "n", "n_per_arm", rows)
+  shown <- ifelse(divisor == 2 & rows == "n", "n_per_arm", rows)
   if (missing(parm)) parm <- seq_along(rows)
   idx <- if (is.numeric(parm)) {
     if (all(parm %in% seq_along(rows))) parm
@@ -161,9 +145,9 @@ confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per
       "  `seed`, for the same replicates)."), context, format(object$level)),
       call. = FALSE)
   }
-  ci <- list(object$ci / if (halve) 2 else 1, object$slope_ci)[seq_along(rows)]
-  a <- (1 - object$level) / 2
-  pct <- paste(format(100 * c(a, 1 - a), trim = TRUE, scientific = FALSE, digits = 3), "%")
+  ci <- list(object$ci / divisor, object$slope_ci)[seq_along(rows)]
+  pct <- paste(format(100 * boot_probs(object$level), trim = TRUE, scientific = FALSE,
+                      digits = 3), "%")
   out <- do.call(rbind, ci[idx])
   dimnames(out) <- list(shown[idx], pct)
   out

@@ -18,14 +18,30 @@ PARAM_FIELDS <- c("slope", "slope_comparator", "comparator",
 #' Validate the slope and variance components of a `slope_params` object
 #'
 #' The one statement of these invariants, shared by [new_slope_params()] at
-#' construction and [check_params()] at use. `x` is a list carrying the five
-#' fields by name; `prefix` is how the caller's errors name them. Returns the
-#' five values as validated (coerced to double).
+#' construction and [check_params()] at use. `x` is a list carrying the slope,
+#' the comparator and its slope, and the four variance components by name;
+#' `prefix` is how the caller's errors name them. Returns the numbers as
+#' validated (coerced to double), `slope_comparator` `NA` without a comparator.
 #' @noRd
 check_param_values <- function(x, context, prefix = "") {
   nm <- function(f) paste0(prefix, f)
+  comparator <- x$comparator
+  if (!is.character(comparator) || length(comparator) != 1L ||
+      !comparator %in% c("none", "healthy", "treated")) {
+    stop(sprintf('%s: `%s` must be one of "none", "healthy", "treated".',
+                 context, nm("comparator")), call. = FALSE)
+  }
+  slope_comparator <- NA_real_
+  if (comparator != "none") {
+    if (length(x$slope_comparator) != 1L || is.na(x$slope_comparator)) {
+      stop(sprintf("%s: `%s` is required when `%s` is %s.", context, nm("slope_comparator"),
+                   nm("comparator"), sQuote(comparator)), call. = FALSE)
+    }
+    slope_comparator <- check_scalar(x$slope_comparator, nm("slope_comparator"), context)
+  }
   out <- list(
     slope               = check_scalar(x$slope, nm("slope"), context),
+    slope_comparator    = slope_comparator,
     sigma2_intercept    = check_variance(x$sigma2_intercept, nm("sigma2_intercept"), context),
     sigma2_slope        = check_variance(x$sigma2_slope, nm("sigma2_slope"), context),
     sigma2_residual     = check_variance(x$sigma2_residual, nm("sigma2_residual"), context),
@@ -62,20 +78,6 @@ check_params <- function(params, context) {
   # `residual` is not in PARAM_FIELDS: an object built before the field
   # existed has none, and NULL is exactly the structure it was built under.
   check_residual(params$residual, context)
-
-  if (!is.character(params$comparator) || length(params$comparator) != 1L ||
-      !params$comparator %in% c("none", "healthy", "treated")) {
-    stop(sprintf('%s: `params$comparator` must be one of "none", "healthy", "treated".',
-                 context), call. = FALSE)
-  }
-  if (params$comparator != "none") {
-    if (!is.numeric(params$slope_comparator) ||
-        length(params$slope_comparator) != 1L ||
-        !is.finite(params$slope_comparator)) {
-      stop(sprintf('%s: `params$comparator` is "%s" but `params$slope_comparator` is not a finite number.',
-                   context, params$comparator), call. = FALSE)
-    }
-  }
   invisible(params)
 }
 
@@ -368,7 +370,7 @@ target_components <- function(params, target, effectiveness, context) {
   # more extreme than the group being treated.
   if (abs(params$slope + tte) > abs(params$slope)) {
     # Classed like the baseline-dropout warning in design.R, and for the same
-    # reason: grid_impl() collects this one specifically, by class, to report
+    # reason: grid_evaluate() collects this one specifically, by class, to report
     # it once per grid rather than once per cell.
     warning(warningCondition(
       sprintf(paste0("%s: the target treatment effect (%.4g) makes the slope more extreme ",
@@ -416,7 +418,7 @@ effect_components <- function(params, design, target, effectiveness, context,
   }
   effect_size <- sign(slope_difference) * sqrt(eff2)
 
-  c(comp, list(effect_size = effect_size, var_full = strata$var[1L], design = design))
+  c(comp, list(effect_size = effect_size, var_full = strata$var[1L]))
 }
 
 #' The dropout strata that carry slope information, with their weights and s*^2
@@ -441,10 +443,9 @@ dropout_strata <- function(params, design, context) {
   dropout <- design$dropout
 
   sigma_full <- sigma_at(params, visits, context)
-  # Clamped: validate_dropout() admits totals up to 1 + DROPOUT_TOL, and a
-  # negative completers' weight would make the weighted sums below negative --
-  # a NaN sample size, and a negative variance from slope_var().
-  weight <- max(0, 1 - sum(dropout))
+  # completers() floors the share at zero; a negative weight would make the
+  # weighted sums below negative -- a NaN sample size, a negative slope_var().
+  weight <- completers(design)
   var <- treatment_effect_var(sigma_full, visits, context)
   for (j in seq_along(dropout)[-1L]) {
     if (dropout[j] == 0) next
@@ -694,7 +695,7 @@ solve_slope <- function(params, design, effectiveness,
   # Solving for n there is no such cancellation, because n_per_arm has been
   # rounded up to a whole participant; the reported value carries that rounding
   # and is very slightly larger, which is what the Stata original reports too.
-  var_tte <- if (!comp$design$has_dropout) {
+  var_tte <- if (!design$has_dropout) {
     comp$var_full
   } else if (solving_for_n) {
     n_per_arm * comp$tte^2 / z_sum_sq
@@ -704,7 +705,7 @@ solve_slope <- function(params, design, effectiveness,
 
   stage_two_result(comp, n_per_arm = n_per_arm, power = power, alpha = alpha,
                    var_tte = var_tte, effect_size = comp$effect_size,
-                   params = params, design = comp$design)
+                   params = params, design = design)
 }
 
 #' Shared documentation for the two stage-two entry points
@@ -1030,18 +1031,10 @@ slope_power <- function(params, visits, dropout = NULL,
                         alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power()"
   per_arm <- check_per_arm(per_arm, context)
-  # `is.null(n)` as well as `missing(n)`: solve_slope() picks its branch on
-  # is.null(), so an explicit n = NULL -- the shape a programmatic caller gets
-  # from do.call() with an unset element -- would otherwise slip past this guard
-  # into the solve-for-n branch and fail complaining about `power`, an argument
-  # this function does not have.
-  if (missing(n) || is.null(n)) {
-    stop(sprintf(paste0(
-      "%s: `n` is required -- it is the sample size whose power is being\n",
-      "  evaluated. To solve for the sample size that achieves a given power,\n",
-      "  use slope_sample_size(params, visits, power = 0.8)."),
-      context), call. = FALSE)
-  }
+  require_n(missing(n) || is.null(n), paste0(
+    "it is the sample size whose power is being\n",
+    "  evaluated. To solve for the sample size that achieves a given power,\n",
+    "  use slope_sample_size(params, visits, power = 0.8)."), context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   design <- stage_two_design(params, visits, dropout, match.arg(dropout_scale), context)
@@ -1136,12 +1129,55 @@ print_target_lines <- function(x) {
 }
 
 #' The tail of the "Parameters for planned study" block, common to both
+#'
+#' A bound over every design ([slope_sample_size_floor()],
+#' [slope_power_ceiling()]) has no `design`. It says so in the schedule's
+#' place rather than leaving the line out: the reader should not have to wonder
+#' which schedule produced the number.
 #' @noRd
 print_design_block <- function(x) {
   design <- x$design
   print_target_lines(x)
+  if (is.null(design)) {
+    cat_line("visit schedule", "any (the bound holds for all)")
+    return(invisible(x))
+  }
   cat_line("number of follow-up visits", length(design$visits) - 1L, digits = 0L)
   cat_line("schedule (and dropouts)", schedule_string(design))
+  invisible(x)
+}
+
+#' The body of the two sample-size print methods, for a design or the floor
+#'
+#' The floor differs only in its heading and in reporting the limiting
+#' \eqn{s^{*2}} it was computed from, both decided by whether `x` has a design.
+#' @noRd
+print_n_result <- function(x, per_arm, context) {
+  per_arm <- display_basis(x, per_arm, context)
+  bound <- is.null(x$design)
+  print_opening_blocks(x)
+  cat_line("power", x$power)
+  print_design_block(x)
+  cat(if (bound) "\n  Lower bound on sample size:\n" else "\n  Estimated sample size:\n")
+  cat_n_line(x, per_arm)
+  if (bound) cat_line("limiting s*^2", x$var_tte)
+  cat("\n")
+  invisible(x)
+}
+
+#' The body of the two power print methods, for a design or the ceiling
+#' @noRd
+print_power_result <- function(x, per_arm, context) {
+  per_arm <- display_basis(x, per_arm, context)
+  bound <- is.null(x$design)
+  print_opening_blocks(x)
+  cat_specified_n_line(x, per_arm)
+  cat_n_line(x, per_arm, total_label = "actual N")
+  print_design_block(x)
+  cat(if (bound) "\nUpper bound on power:\n" else "\nEstimated power:\n")
+  cat_line("power", x$power)
+  if (bound) cat_line("limiting s*^2", x$var_tte)
+  cat("\n")
   invisible(x)
 }
 
@@ -1161,14 +1197,7 @@ print_design_block <- function(x) {
 #'
 #' @export
 print.slope_sample_size <- function(x, ..., per_arm = NULL) {
-  per_arm <- display_basis(x, per_arm, "print.slope_sample_size()")
-  print_opening_blocks(x)
-  cat_line("power", x$power)
-  print_design_block(x)
-  cat("\n  Estimated sample size:\n")
-  cat_n_line(x, per_arm)
-  cat("\n")
-  invisible(x)
+  print_n_result(x, per_arm, "print.slope_sample_size()")
 }
 
 #' Print a slope power calculation
@@ -1190,15 +1219,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 #'
 #' @export
 print.slope_power <- function(x, ..., per_arm = NULL) {
-  per_arm <- display_basis(x, per_arm, "print.slope_power()")
-  print_opening_blocks(x)
-  cat_specified_n_line(x, per_arm)
-  cat_n_line(x, per_arm, total_label = "actual N")
-  print_design_block(x)
-  cat("\nEstimated power:\n")
-  cat_line("power", x$power)
-  cat("\n")
-  invisible(x)
+  print_power_result(x, per_arm, "print.slope_power()")
 }
 
 #' Coerce a stage-two result to a one-row data frame

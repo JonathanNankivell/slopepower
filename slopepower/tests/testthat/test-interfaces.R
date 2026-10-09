@@ -101,9 +101,13 @@ test_that("a bootstrap refits every replicate under the fit's own `control`", {
                     control = slope_lme_control(maxIter = 300))
   cl <- environment(make_refitter(p))$cl
   expect_equal(cl$control$maxIter, 300)
+  # Less the approximate variance-parameter covariance, which no replicate reads.
+  expect_false(cl$control$apVar)
+  expect_true(p$control$apVar)
   # An object from before `control` was recorded refits under the default.
   p$control <- NULL
-  expect_null(environment(make_refitter(p))$cl$control)
+  expect_equal(environment(make_refitter(p))$cl$control,
+               modifyList(slope_lme_control(), list(apVar = FALSE)))
 })
 
 # --- nlme and stats accessors ----------------------------------------------------

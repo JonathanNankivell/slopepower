@@ -193,6 +193,17 @@ build_trial_design <- function(visits, dropout, dropout_scale, ctx) {
   )
 }
 
+#' The proportion expected to attend every visit
+#'
+#' `1 - sum(dropout)`, floored at zero: [validate_dropout()] admits totals up
+#' to `1 + DROPOUT_TOL`, and every reader of the completers' share -- the
+#' pattern mixture in [dropout_strata()], the expected visit count of a grid,
+#' the printed design -- wants zero there, not a negative proportion. One
+#' accessor rather than a stored field, so a design saved before it existed
+#' still answers.
+#' @noRd
+completers <- function(design) max(0, 1 - sum(design$dropout))
+
 #' Warn when the first dropout stratum attends only the baseline visit
 #'
 #' Kept apart from [build_trial_design()] so the condition class, which the
@@ -398,7 +409,7 @@ print.trial_design <- function(x, ...) {
               formatC(cum, format = "f", digits = 3)),
       sep = "")
   cat(sprintf("\n  Completers:  %s attend all %d visits\n",
-              formatC(1 - sum(x$dropout), format = "f", digits = 3), n_visits))
+              formatC(completers(x), format = "f", digits = 3), n_visits))
 
   invisible(x)
 }

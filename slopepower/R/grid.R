@@ -84,7 +84,7 @@ as_scalar_list <- function(x, arg, context) {
 #'
 #' One labeller per axis, so that `as_visits_list()` and `as_dropout_list()`
 #' read the same way. Both tolerate an element they cannot describe: a
-#' non-numeric `visits` entry is rejected by `grid_impl()` with a message that
+#' non-numeric `visits` entry is rejected by `grid_axes()` with a message that
 #' names the element, which needs the element to have a name first.
 #' @noRd
 label_visits <- function(x) if (is.numeric(x)) label_numeric(x) else "design"
@@ -117,7 +117,7 @@ label_scalar <- function(x) if (is.numeric(x) && length(x) == 1L) fmt_num(x) els
 #' Wrap an error from one grid cell with the cell that produced it
 #'
 #' Shared by the `build_trial_design()` call and the `evaluate()` call in
-#' `grid_impl()`'s loops below, so a cell that fails either step is reported the
+#' the loops of `grid_axes()` and `grid_evaluate()`, so a cell that fails either step is reported the
 #' same way: named, rather than surfacing whatever unqualified message the
 #' failing call happens to raise. The cell arrives as its coordinate --- one
 #' named element per axis --- so an axis added to the grid names itself here
@@ -160,7 +160,7 @@ grid_cells <- function(axes) {
 
 #' Normalise a grid's axes and build the columns that describe a cell
 #'
-#' The half of what used to be `grid_impl()` that has nothing to do with
+#' The half of a grid that has nothing to do with
 #' solving a cell: normalising the three kinds of axis, building one
 #' `trial_design` per visits/dropout pair (collecting the baseline-dropout
 #' warning as it goes, since that is a property of the design, not of what is
@@ -172,8 +172,8 @@ grid_cells <- function(axes) {
 #' [slope_sample_size_grid_boot()] can build this once and read the *design*
 #' every cell needs -- `g$designs[[g$design_of[k]]]` -- to build its own
 #' per-cell closures, without [grid_evaluate()]'s plain stage-two solve running
-#' first and being thrown away. `grid_impl()` below still calls both, in the
-#' same order, for the same two grids this always served.
+#' first and being thrown away. [grid_stage_two()] calls both, in that order,
+#' for the two plain grids.
 #'
 #' `scalars` is a named list of the remaining axes -- `effectiveness`, `alpha`,
 #' and whichever of `n` and `power` the grid is not solving for -- each a single
@@ -317,7 +317,7 @@ grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
 #' @noRd
 expected_visits <- function(design) {
   sum(design$dropout * seq_along(design$dropout)) +
-    (1 - sum(design$dropout)) * length(design$visits)
+    completers(design) * length(design$visits)
 }
 
 #' The stage-two result fields every grid cell reports, in column order
@@ -400,21 +400,6 @@ grid_evaluate <- function(g, evaluate, context) {
   res_cols
 }
 
-#' Build and solve a grid: [grid_axes()] then [grid_evaluate()]
-#'
-#' Returns both bases -- `n`/`n_per_arm`, `visits_total`/`visits_per_arm` --
-#' unreduced. [slope_sample_size_grid_boot()] (grid_boot.R) calls
-#' [grid_axes()] and [grid_evaluate()] directly rather than through here, and
-#' needs both bases on the point estimates it re-derives, so the reduction to
-#' one display basis happens above this function, at the two plain grids'
-#' exported boundary -- see [basis_columns()] -- not inside it.
-#' @noRd
-grid_impl <- function(visits, dropout, dropout_scale, scalars, evaluate, context) {
-  g <- grid_axes(visits, dropout, dropout_scale, scalars, context)
-  res <- grid_evaluate(g, evaluate, context)
-  as.data.frame(c(g$out, res), stringsAsFactors = FALSE)
-}
-
 #' Reduce a grid's `n`/`n_per_arm` and `visits_total`/`visits_per_arm` pairs
 #' to one display basis
 #'
@@ -438,25 +423,9 @@ basis_columns <- function(df, per_arm) {
   df
 }
 
-#' Validate `per_arm`, reduce a grid to it, and record the choice
-#'
-#' The shared tail of [slope_sample_size_grid()] and [slope_power_grid()]:
-#' [check_per_arm()] so the two cannot validate the argument differently, then
-#' [basis_columns()], then the attribute a caller can later recover with
-#' `attr(x, "per_arm")` -- the plain grids have no print method to consult it
-#' at print time, so it is documentation rather than machinery, but it is the
-#' one place a reader can confirm which basis a table already in hand is on.
-#' @noRd
-finish_grid <- function(df, per_arm, context) {
-  per_arm <- check_per_arm(per_arm, context)
-  out <- basis_columns(df, per_arm)
-  attr(out, "per_arm") <- per_arm
-  out
-}
-
 #' Report one class of collected per-cell warning, once for the whole grid
 #'
-#' Both collectors in [grid_impl()] owe the user the same sentence -- how many
+#' Both collectors, in [grid_axes()] and [grid_evaluate()], owe the user the same sentence -- how many
 #' of how many combinations, and which -- and differ only in what they then say
 #' about it. Writing the preamble twice let the two drift; `tail` supplies just
 #' the clause that differs, with a single `%s` where the cell list goes.
@@ -604,22 +573,17 @@ slope_power_grid <- function(params, visits, dropout = NULL,
                              target = c("effectiveness", "observed"),
                              alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power_grid()"
-  # `is.null(n)` too; see the note on the same guard in slope_power(). Without
-  # it the failure surfaces from inside the loop, wrapped in a per-cell message,
-  # and complains about `power` rather than the missing `n`.
-  if (missing(n) || is.null(n)) {
-    stop(sprintf(paste0(
-      "%s: `n` is required -- this grid holds the sample size fixed and reports\n",
-      "  the power each design achieves. For the sample size each design needs,\n",
-      "  use slope_sample_size_grid()."), context), call. = FALSE)
-  }
+  # Here before the loop, or a missing `n` surfaces from inside it, wrapped in
+  # a per-cell message.
+  require_n(missing(n) || is.null(n), paste0(
+    "this grid holds the sample size fixed and reports\n",
+    "  the power each design achieves. For the sample size each design needs,\n",
+    "  use slope_sample_size_grid()."), context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  finish_grid(
-    grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "n", n,
-                   effectiveness, target, alpha, context),
-    per_arm, context)
+  grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "n", n,
+                 effectiveness, target, alpha, per_arm, context)
 }
 
 #' Compare the sample size many candidate trial designs need
@@ -726,10 +690,8 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  finish_grid(
-    grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "power", power,
-                   effectiveness, target, alpha, context),
-    per_arm, context)
+  grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "power", power,
+                 effectiveness, target, alpha, per_arm, context)
 }
 
 #' Shared body of the two grid functions
@@ -737,8 +699,16 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' [slope_power_grid()] and [slope_sample_size_grid()] differ only in which
 #' argument holds the value they hold fixed across the grid (`n` vs `power`)
 #' and so which stage-two calculation is re-solved per cell; everything else --
-#' deciding whether `effectiveness` is an axis, and the call to `grid_impl()`
-#' -- is identical, so both call through here.
+#' building the axes, solving every cell, and reducing the table to one display
+#' basis -- is identical, so both call through here.
+#'
+#' Both bases are built first -- `n`/`n_per_arm`, `visits_total`/
+#' `visits_per_arm` -- and reduced to the one `per_arm` asks for only at the
+#' end, by [basis_columns()]; [slope_sample_size_grid_boot()] calls
+#' [grid_axes()] and [grid_evaluate()] directly because it keeps both. The
+#' `per_arm` attribute records which basis a table already in hand is on.
+#' `per_arm` is checked after the cells are solved, as it always was, so a
+#' grid wrong in both reports the cell.
 #'
 #' `fixed_name`/`fixed_value` rather than a pre-built one-element list: the
 #' name comes from a literal at each call site, so `stats::setNames()` here
@@ -746,10 +716,16 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' `list(power = power)` beside two otherwise-identical blocks.
 #' @noRd
 grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
-                           fixed_value, effectiveness, target, alpha, context) {
+                           fixed_value, effectiveness, target, alpha, per_arm, context) {
   spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
                               context)
-  grid_impl(visits, dropout, dropout_scale, spec$scalars, spec$evaluate, context)
+  g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
+  df <- as.data.frame(c(g$out, grid_evaluate(g, spec$evaluate, context)),
+                      stringsAsFactors = FALSE)
+  per_arm <- check_per_arm(per_arm, context)
+  out <- basis_columns(df, per_arm)
+  attr(out, "per_arm") <- per_arm
+  out
 }
 
 #' Which stage-two arguments are grid axes, and how a cell is priced
@@ -758,7 +734,7 @@ grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
 #' grid to hand: the scalar axis set, and the closure that solves one cell.
 #' Split out because [slope_sample_size_grid_boot()] (grid_boot.R) needs both,
 #' but needs `grid_axes()` and `grid_evaluate()` kept apart rather than run
-#' back to back by [grid_impl()] -- it prices each cell several hundred times
+#' back to back by [grid_stage_two()] -- it prices each cell several hundred times
 #' over its own resampled parameters, off the `g` that `grid_axes()` builds.
 #'
 #' Written once rather than reproduced there, because *which arguments are
