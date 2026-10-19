@@ -1244,6 +1244,9 @@ print.slope_power <- function(x, ..., per_arm = NULL) {
 #' bound it reports holds
 #' for every visit schedule and so is attached to none of them.
 #'
+#' `n_requested` is the `n` a power row was asked for, before it was made
+#' even; `NA` for a sample-size row, where `n` is the answer.
+#'
 #' @param x A `slope_sample_size`, `slope_power`, `slope_sample_size_floor` or
 #'   `slope_power_ceiling` object.
 #' @param row.names,optional Passed on for consistency with the generic; ignored.
@@ -1271,6 +1274,8 @@ as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ..
     power            = x$power,
     n                = x$n,
     n_per_arm        = x$n_per_arm,
+    # The power branch's `n` as supplied, before evening; NA for a sample size.
+    n_requested      = as.numeric(x$n_requested %||% NA_real_),
     effectiveness    = x$effectiveness,
     target           = x$target,
     tte              = x$tte,

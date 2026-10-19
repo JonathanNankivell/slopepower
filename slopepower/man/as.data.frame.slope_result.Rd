@@ -35,6 +35,9 @@ have no such switch.
 A \code{"n_floor"} or \code{"power_ceiling"} row has \code{n_follow_up = NA}, because the
 bound it reports holds
 for every visit schedule and so is attached to none of them.
+
+\code{n_requested} is the \code{n} a power row was asked for, before it was made
+even; \code{NA} for a sample-size row, where \code{n} is the answer.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)

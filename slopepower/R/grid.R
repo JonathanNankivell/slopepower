@@ -322,8 +322,12 @@ expected_visits <- function(design) {
 }
 
 #' The stage-two result fields every grid cell reports, in column order
+#'
+#' `n_requested` is the `n` a power cell was asked for, before evening, so rows
+#' for 101 and 100 stay distinguishable; `NA` in a sample-size grid, where
+#' nothing was requested.
 #' @noRd
-grid_result_cols <- c("n", "n_per_arm", "power", "alpha", "effectiveness",
+grid_result_cols <- c("n", "n_per_arm", "n_requested", "power", "alpha", "effectiveness",
                       "tte", "var_tte", "effect_size")
 
 #' Walk the cross product of a normalised grid, evaluating one design per cell
@@ -375,14 +379,14 @@ grid_evaluate <- function(g, evaluate, context) {
       error = grid_cell_error(context, g$labels_at(k))
     )
 
-    # The eight result columns are read straight off `res`. That is the same
+    # The nine result columns are read straight off `res`. That is the same
     # thing as.data.frame.slope_result() reports -- it copies each of these
-    # eight from `x` unchanged -- and routing through it instead was the single
+    # nine from `x` unchanged -- and routing through it instead was the single
     # most expensive line in the loop, at 1.3 ms a cell. The guarantee that
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
     # the other ten columns and discarding them.
-    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]]
+    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]] %||% NA_real_
   }
 
   report_collected(context, tte_direction, n_cells,
@@ -411,11 +415,14 @@ grid_evaluate <- function(g, evaluate, context) {
 #' `visits` column, each holding the chosen basis. Assigning over the existing
 #' `n` and `visits_total` columns rather than rebuilding the frame keeps their
 #' original position; deleting `n_per_arm` and `visits_per_arm` then closes
-#' the gap they leave, and the rename is the only reordering.
+#' the gap they leave, and the rename is the only reordering. `n_requested`,
+#' stored as a total like `n`, is halved with it, as print.slope_power() shows
+#' "specified N per arm".
 #' @noRd
 basis_columns <- function(df, per_arm) {
   if (per_arm) {
     df$n <- df$n_per_arm
+    df$n_requested <- df$n_requested / 2
     df$visits_total <- df$visits_per_arm
   }
   df$n_per_arm <- NULL
@@ -481,11 +488,14 @@ report_collected <- function(context, cells, k, tail) {
 #'
 #' @return A data frame with one row per combination of the axes supplied, with
 #'   columns `design`, `dropout`, `scheduled_visits`, `last_visit`,
-#'   `dropout_total`, `n`, `power`, `alpha`, `effectiveness`, `tte`, `var_tte`,
-#'   `effect_size` and `visits`. `power` is what varies; `n` is constant
-#'   unless it was itself given several values. `n` and `visits` are on the
-#'   basis `per_arm` selects -- participants (or visits) per arm by default,
-#'   or the trial total under `per_arm = FALSE`. `visits` is `n` times the
+#'   `dropout_total`, `n`, `n_requested`, `power`, `alpha`, `effectiveness`,
+#'   `tte`, `var_tte`, `effect_size` and `visits`. `power` is what varies; `n`
+#'   is constant unless it was itself given several values. `n` is the sample
+#'   size actually used, made even for 1:1 allocation; `n_requested` is the `n`
+#'   as given, so an odd request stays distinguishable from the even one below
+#'   it. `n`, `n_requested` and `visits` are on the basis `per_arm` selects --
+#'   participants (or visits) per arm by default, or the trial total under
+#'   `per_arm = FALSE`. `visits` is `n` times the
 #'   expected number of visits one participant attends -- `scheduled_visits`
 #'   itself when `dropout_total` is zero, less otherwise, since a participant
 #'   who withdraws still contributes the visits attended before doing so (see
@@ -612,7 +622,7 @@ slope_power_grid <- function(params, visits, dropout = NULL,
 #'
 #' @return A data frame with the same columns as [slope_power_grid()]. `n` is
 #'   what varies; `power` is constant unless it was itself given several
-#'   values.
+#'   values. `n_requested` is `NA`, since no `n` was given.
 #'
 #' @examples
 #' # No comparator: measured toward a slope of zero, fitted to all two
