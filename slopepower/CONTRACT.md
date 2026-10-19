@@ -204,7 +204,9 @@ here and `power` the output.
 
 There is **no `solve_for` field**: the class carries that information. `as.data.frame()` still
 emits a `solve_for` column, derived from the class, so that rows from both functions bind into one
-interpretable table. Column names are identical across both classes and every comparator.
+interpretable table, and an `n_requested` column, `NA` for a sample-size row; the grids carry the
+same column, so a request for 101 is not mistaken for one of 100. Column names are identical
+across both classes and every comparator.
 
 ### 4.3 `slope_sample_size_floor`
 
@@ -244,13 +246,13 @@ that column *names* are identical across classes is unaffected.
 
 Not `slope_result` subclasses — a grid was always a data frame rather than a `slope_result`, and
 these are grids. S3 class `c("slope_sample_size_grid_boot", "data.frame")` or
-`c("slope_power_grid_boot", "data.frame")`: the fifteen columns `grid_evaluate()` computes for a
+`c("slope_power_grid_boot", "data.frame")`: the sixteen columns `grid_evaluate()` computes for a
 grid cell — both `n`/`n_per_arm` and both `visits_total`/`visits_per_arm`, unreduced — plus eleven
 more: `<s>_mean`, `<s>_sd`, `<s>_lower`, `<s>_upper`, `tte_mean`, `tte_sd`, `tte_lower`,
 `tte_upper`, `tte_ci_method`, `ci_method`, `n_failed`, where `<s>` is the solved-for statistic,
-`n` or `power`. (The plain grids themselves return thirteen of those fifteen — see "Display
+`n` or `power`. (The plain grids themselves return fourteen of those sixteen — see "Display
 basis" below — so this object's own data frame carries two more columns than that function's
-return value, not the same fifteen.) `ci_method` and `tte_ci_method` are separate because the two
+return value, not the same sixteen.) `ci_method` and `tte_ci_method` are separate because the two
 intervals have separate bias corrections and separate jackknife columns: either can fall back
 from BCa to percentile without the other, and the printed table marks each column with the
 method it actually used. Only `n` is on the even-participant lattice; a power interval is neither
@@ -291,7 +293,7 @@ The two plain grids, `slope_sample_size_grid()` and `slope_power_grid()`, are th
 They are undecorated data frames with no print method to consult an attribute at print time, so
 for them `per_arm` instead shapes the *returned* data: the `n`/`n_per_arm` and
 `visits_total`/`visits_per_arm` pairs each collapse to a single `n`/`visits` column on the chosen
-basis (`basis_columns()`, `R/grid.R`), and the object carries thirteen columns, not fifteen. The
+basis (`basis_columns()`, `R/grid.R`), and the object carries fourteen columns, not sixteen. The
 attribute is still recorded, so a table already in hand can be identified, but there is no
 surviving twin column to fall back on — unlike every other function in this section, where both
 bases are always retrievable from the object itself.

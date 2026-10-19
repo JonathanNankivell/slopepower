@@ -64,9 +64,9 @@ test_that("slope_power_grid() agrees with slope_power() cell by cell", {
 })
 
 test_that("a grid row carries exactly what as.data.frame() reports for that cell", {
-  # grid_evaluate() reads its eight result columns straight off the result object
+  # grid_evaluate() reads its nine result columns straight off the result object
   # rather than through as.data.frame.slope_result(), because routing every
-  # cell through that method to keep 8 of its 18 columns was the single most
+  # cell through that method to keep 9 of its 19 columns was the single most
   # expensive line in the loop. This is the guarantee that bought back: the two
   # must report the same numbers for the same object, so that a grid row and a
   # bound as.data.frame() row can never disagree.
@@ -74,7 +74,7 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
   # `n` is compared with `per_arm = FALSE`, so it reads as the same total
   # basis_columns() would otherwise reduce it away from; the per-arm basis is
   # covered separately below.
-  shared <- c("n", "power", "alpha", "effectiveness",
+  shared <- c("n", "n_requested", "power", "alpha", "effectiveness",
               "tte", "var_tte", "effect_size")
   p <- paper_fit("slpower1")
 
@@ -574,4 +574,19 @@ test_that("dropout_scale applies to every numeric vector in a grid's dropout lis
     slope_power_grid(p, visits = 0:3, dropout = list(r = dropout_rate(0.05)),
                      dropout_scale = "cumulative", n = 400),
     "cannot be combined with dropout_scale")
+})
+
+test_that("a power grid keeps the requested n, so odd and even requests stay apart", {
+  p <- paper_fit("slpower1")
+  total <- slope_power_grid(p, c(0, 1, 2), n = c(101, 100, 200), per_arm = FALSE)
+  expect_equal(total$n, c(100, 100, 200))
+  expect_equal(total$n_requested, c(101, 100, 200))
+  # On the per-arm basis it is halved with `n`, as print.slope_power() shows it.
+  arm <- slope_power_grid(p, c(0, 1, 2), n = c(101, 100, 200))
+  expect_equal(arm$n_requested, c(50.5, 50, 100))
+  # Nothing is requested in a sample-size grid.
+  expect_true(all(is.na(slope_sample_size_grid(p, c(0, 1, 2))$n_requested)))
+  # And a single result's row carries it too.
+  expect_equal(as.data.frame(slope_power(p, c(0, 1, 2), n = 101))$n_requested, 101)
+  expect_true(is.na(as.data.frame(slope_sample_size(p, c(0, 1, 2)))$n_requested))
 })

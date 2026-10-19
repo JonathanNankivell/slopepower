@@ -286,20 +286,21 @@ grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
                               USE.NAMES = FALSE)[design_of]
   )
 
-  # The scalar axes' values for one cell, as an index into each axis rather
-  # than the value itself, so grid_evaluate() can refill one shared args list
-  # by position instead of reassembling and renaming it n_cells times.
+  # Scalar axis `j`'s value at cell `k`: the one statement of the cell-to-value
+  # mapping, read by grid_evaluate() to refill one shared args list by position
+  # and by grid_cell_args() (grid_boot.R) to keep each cell's own.
   scalar_idx <- lapply(names(scalar_lists), function(nm) cells[[nm]])
+  scalar_at <- function(j, k) scalar_lists[[j]][[scalar_idx[[j]][k]]]
 
   # `visit_list`, `drop_list` and `axes` are deliberately not returned: they are
   # the raw material this function normalises, and everything downstream reads
   # what was built from them -- `designs`/`design_of`, `named`, `labels_at`,
-  # `scalar_idx`. Returning them too made the bundle read as the grid's shape
+  # `scalar_at`. Returning them too made the bundle read as the grid's shape
   # while five of eleven fields were scaffolding, and kept the whole normalised
   # visit list alive for the life of a grid that no longer refers to it.
   list(scalar_lists = scalar_lists,
       designs = designs, design_of = design_of, n_cells = n_cells,
-      named = named, labels_at = labels_at, scalar_idx = scalar_idx,
+      named = named, labels_at = labels_at, scalar_at = scalar_at,
       out = out)
 }
 
@@ -321,8 +322,12 @@ expected_visits <- function(design) {
 }
 
 #' The stage-two result fields every grid cell reports, in column order
+#'
+#' `n_requested` is the `n` a power cell was asked for, before evening, so rows
+#' for 101 and 100 stay distinguishable; `NA` in a sample-size grid, where
+#' nothing was requested.
 #' @noRd
-grid_result_cols <- c("n", "n_per_arm", "power", "alpha", "effectiveness",
+grid_result_cols <- c("n", "n_per_arm", "n_requested", "power", "alpha", "effectiveness",
                       "tte", "var_tte", "effect_size")
 
 #' Walk the cross product of a normalised grid, evaluating one design per cell
@@ -357,7 +362,7 @@ grid_evaluate <- function(g, evaluate, context) {
   args <- lapply(scalar_lists, function(levels) levels[[1L]])
 
   for (k in seq_len(n_cells)) {
-    for (j in seq_along(args)) args[[j]] <- scalar_lists[[j]][[g$scalar_idx[[j]][k]]]
+    for (j in seq_along(args)) args[[j]] <- g$scalar_at(j, k)
 
     # effect_components() warns, by the same class mechanism the baseline
     # warning in grid_axes() uses, when the target treatment effect makes the
@@ -374,14 +379,14 @@ grid_evaluate <- function(g, evaluate, context) {
       error = grid_cell_error(context, g$labels_at(k))
     )
 
-    # The eight result columns are read straight off `res`. That is the same
+    # The nine result columns are read straight off `res`. That is the same
     # thing as.data.frame.slope_result() reports -- it copies each of these
-    # eight from `x` unchanged -- and routing through it instead was the single
+    # nine from `x` unchanged -- and routing through it instead was the single
     # most expensive line in the loop, at 1.3 ms a cell. The guarantee that
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
     # the other ten columns and discarding them.
-    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]]
+    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]] %||% NA_real_
   }
 
   report_collected(context, tte_direction, n_cells,
@@ -410,11 +415,14 @@ grid_evaluate <- function(g, evaluate, context) {
 #' `visits` column, each holding the chosen basis. Assigning over the existing
 #' `n` and `visits_total` columns rather than rebuilding the frame keeps their
 #' original position; deleting `n_per_arm` and `visits_per_arm` then closes
-#' the gap they leave, and the rename is the only reordering.
+#' the gap they leave, and the rename is the only reordering. `n_requested`,
+#' stored as a total like `n`, is halved with it, as print.slope_power() shows
+#' "specified N per arm".
 #' @noRd
 basis_columns <- function(df, per_arm) {
   if (per_arm) {
     df$n <- df$n_per_arm
+    df$n_requested <- df$n_requested / 2
     df$visits_total <- df$visits_per_arm
   }
   df$n_per_arm <- NULL
@@ -480,11 +488,14 @@ report_collected <- function(context, cells, k, tail) {
 #'
 #' @return A data frame with one row per combination of the axes supplied, with
 #'   columns `design`, `dropout`, `scheduled_visits`, `last_visit`,
-#'   `dropout_total`, `n`, `power`, `alpha`, `effectiveness`, `tte`, `var_tte`,
-#'   `effect_size` and `visits`. `power` is what varies; `n` is constant
-#'   unless it was itself given several values. `n` and `visits` are on the
-#'   basis `per_arm` selects -- participants (or visits) per arm by default,
-#'   or the trial total under `per_arm = FALSE`. `visits` is `n` times the
+#'   `dropout_total`, `n`, `n_requested`, `power`, `alpha`, `effectiveness`,
+#'   `tte`, `var_tte`, `effect_size` and `visits`. `power` is what varies; `n`
+#'   is constant unless it was itself given several values. `n` is the sample
+#'   size actually used, made even for 1:1 allocation; `n_requested` is the `n`
+#'   as given, so an odd request stays distinguishable from the even one below
+#'   it. `n`, `n_requested` and `visits` are on the basis `per_arm` selects --
+#'   participants (or visits) per arm by default, or the trial total under
+#'   `per_arm = FALSE`. `visits` is `n` times the
 #'   expected number of visits one participant attends -- `scheduled_visits`
 #'   itself when `dropout_total` is zero, less otherwise, since a participant
 #'   who withdraws still contributes the visits attended before doing so (see
@@ -575,7 +586,7 @@ slope_power_grid <- function(params, visits, dropout = NULL,
   context <- "slope_power_grid()"
   # Here before the loop, or a missing `n` surfaces from inside it, wrapped in
   # a per-cell message.
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "this grid holds the sample size fixed and reports\n",
     "  the power each design achieves. For the sample size each design needs,\n",
     "  use slope_sample_size_grid()."), context)
@@ -611,7 +622,7 @@ slope_power_grid <- function(params, visits, dropout = NULL,
 #'
 #' @return A data frame with the same columns as [slope_power_grid()]. `n` is
 #'   what varies; `power` is constant unless it was itself given several
-#'   values.
+#'   values. `n_requested` is `NA`, since no `n` was given.
 #'
 #' @examples
 #' # No comparator: measured toward a slope of zero, fitted to all two
@@ -707,8 +718,8 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' end, by [basis_columns()]; [slope_sample_size_grid_boot()] calls
 #' [grid_axes()] and [grid_evaluate()] directly because it keeps both. The
 #' `per_arm` attribute records which basis a table already in hand is on.
-#' `per_arm` is checked after the cells are solved, as it always was, so a
-#' grid wrong in both reports the cell.
+#' `per_arm` is checked first, as every other entry point does, so a wrong one
+#' costs nothing rather than a whole grid's solve.
 #'
 #' `fixed_name`/`fixed_value` rather than a pre-built one-element list: the
 #' name comes from a literal at each call site, so `stats::setNames()` here
@@ -717,12 +728,12 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' @noRd
 grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
                            fixed_value, effectiveness, target, alpha, per_arm, context) {
+  per_arm <- check_per_arm(per_arm, context)
   spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
                               context)
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
   df <- as.data.frame(c(g$out, grid_evaluate(g, spec$evaluate, context)),
                       stringsAsFactors = FALSE)
-  per_arm <- check_per_arm(per_arm, context)
   out <- basis_columns(df, per_arm)
   attr(out, "per_arm") <- per_arm
   out

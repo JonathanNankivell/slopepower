@@ -70,11 +70,17 @@ test_that("a comparator slope is required unless comparator is 'none'", {
   )
 })
 
-test_that("a comparator slope is discarded when comparator is 'none'", {
-  p <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
-                           cov_intercept_slope = 5, sigma2_residual = 10,
-                           slope_comparator = 0.5, comparator = "none")
+test_that("a comparator slope is discarded, with a warning, when comparator is 'none'", {
+  # Silently, a forgotten `comparator` would power toward zero change instead.
+  expect_warning(
+    p <- slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
+                             cov_intercept_slope = 5, sigma2_residual = 10,
+                             slope_comparator = 0.5),
+    "`slope_comparator` applies only when")
   expect_true(is.na(p$slope_comparator))
+  expect_no_warning(
+    slope_params_manual(slope = -1, sigma2_intercept = 100, sigma2_slope = 2,
+                        cov_intercept_slope = 5, sigma2_residual = 10))
 })
 
 test_that("slope_params_manual() rejects an unknown comparator", {

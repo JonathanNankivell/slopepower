@@ -120,6 +120,9 @@ test_that("slope_params() refuses structures it cannot use, saying why", {
   expect_error(fit(weights = varIdent(form = ~ 1 | id)), "varIdent\\(form = ~ 1 \\| time\\)")
   expect_error(fit(weights = varPower()), "must be an nlme `varIdent\\(\\)`")
   expect_error(fit(weights = varIdent(c("1" = 2), form = ~ 1 | time)), "initial or fixed")
+  # nlme keeps fixed ratios as a named numeric attribute, not as TRUE
+  expect_error(fit(weights = varIdent(form = ~ 1 | time, fixed = c("3" = 3))),
+               "initial or fixed")
 })
 
 test_that("corAR1() is refused on non-integer times, pointing to corCAR1()", {
@@ -148,6 +151,17 @@ test_that("under `healthy`, varIdent() needs every visit time in each group", {
                                              group = case,
                                              weights = varIdent(form = ~ 1 | visit))),
                "Among the cases, time\\(s\\) 3 have fewer")
+})
+
+test_that("the reduced-structure note does not claim case estimates are unaffected under a correlation", {
+  # The correlation parameters are shared by both groups, so the controls'
+  # structure can move the cases' estimates even without covariates.
+  d <- load_paper_data("slpower2")
+  p <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
+                                     correlation = corCAR1(), common_variance = TRUE))
+  out <- capture.output(print(p))
+  expect_false(any(grepl("Case estimates are unaffected", out, fixed = TRUE)))
+  expect_true(any(grepl("residual correlation parameters are shared", out, fixed = TRUE)))
 })
 
 test_that("two measurements at one time within a participant are refused", {

@@ -33,7 +33,7 @@
 grid_cell_args <- function(g) {
   lapply(seq_len(g$n_cells), function(k) {
     stats::setNames(
-      lapply(seq_along(g$scalar_lists), function(j) g$scalar_lists[[j]][[g$scalar_idx[[j]][k]]]),
+      lapply(seq_along(g$scalar_lists), function(j) g$scalar_at(j, k)),
       names(g$scalar_lists))
   })
 }
@@ -305,7 +305,7 @@ grid_boot_cell_stat <- function(col, jack_col, observed, ci_method, probs, conte
 #'       without the other -- even when `ci_method = "bca"` was requested. `NA`
 #'       for an interval that could not be built at all.}
 #'     \item{`n_failed`}{How many of the `R` replicates failed to yield the
-#'       solved-for quantity for that cell -- refits that failed to converge,
+#'       solved-for quantity for that cell -- refits that failed (for any reason),
 #'       plus any resample whose stage-two solve itself failed -- out of `R`.}
 #'   }
 #'
@@ -376,7 +376,7 @@ slope_power_grid_boot <- function(params, visits, dropout = NULL,
                                   R = 999, ci_method = c("bca", "percentile"),
                                   level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_grid_boot()"
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "this grid holds the sample size fixed and bootstraps\n",
     "  the power each design achieves. For the sample size each design needs,\n",
     "  use slope_sample_size_grid_boot()."), context)

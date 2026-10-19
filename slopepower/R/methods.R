@@ -124,9 +124,10 @@ vcov.slope_params <- function(object, ...) {
 confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
   # The basis print.slope_bootstrap() shows, by the same rule.
-  divisor <- boot_divisor(object$lattice, display_basis(object, per_arm, context))
+  halves <- boot_halves(object$lattice, display_basis(object, per_arm, context))
+  divisor <- if (halves) 2 else 1
   rows <- unique(c(object$statistic, "slope"))
-  shown <- ifelse(divisor == 2 & rows == "n", "n_per_arm", rows)
+  shown <- ifelse(halves & rows == "n", "n_per_arm", rows)
   if (missing(parm)) parm <- seq_along(rows)
   idx <- if (is.numeric(parm)) {
     if (all(parm %in% seq_along(rows))) parm

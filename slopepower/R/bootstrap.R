@@ -101,6 +101,9 @@ make_refitter <- function(params) {
   # Hessian of the variance parameters, which nothing reads off a replicate --
   # its standard errors come from vcov(), the fixed effects' -- and which cost
   # 9-23% of every refit. The observed fit keeps it, for nlme::intervals().
+  # Dropping it can change which replicates fail only through a Hessian with
+  # non-finite entries, which eigen() inside nlme's lmeApVar() refuses; a
+  # merely non-positive-definite one comes back as a string, not an error.
   # An object built before `control` was recorded was fitted under the default.
   args$control <- params$control %||% slope_lme_control()
   args$control$apVar <- FALSE
@@ -496,7 +499,7 @@ boot_setup <- function(params, context, target = NULL) {
   # meaning anything. Measured on whatever stage two divides by -- the slope
   # difference, when the target is a comparator's slope; see boot_check().
   check <- boot_check(params, target, context)
-  check$observed <- observed <- check$of(params)
+  observed <- check$observed
   se <- check$se
   if (is.finite(se) && se > 0 && abs(observed) / se < 2.5) {
     warning(sprintf(paste0("%s: the estimated %s (%.4g) is only %.2f times its standard error ",
@@ -535,7 +538,7 @@ BOOT_SOLVE_FAILED <- paste("refitted, but the calculation could not be solved on
 #' @noRd
 boot_failure_text <- function(n_refit, n_failed, R) {
   parts <- c(
-    if (n_refit > 0L) sprintf("%d of %d replicates failed to converge", n_refit, R),
+    if (n_refit > 0L) sprintf("%d of %d replicates failed to refit", n_refit, R),
     if (n_failed > n_refit) sprintf("%d of %d %s", n_failed - n_refit, R, BOOT_SOLVE_FAILED))
   paste0(paste(parts, collapse = "; "), "; all were discarded.")
 }
@@ -559,16 +562,19 @@ boot_failure_text <- function(n_refit, n_failed, R) {
 #'
 #' @return A list: `of`, reading the checked quantity off a `slope_params`
 #'   object (the fit or a refit); `se`, its analytic standard error from the
-#'   fitted model, `NA` without one; and `label`, its name for messages.
-#'   [boot_setup()] adds `observed`, the quantity on the fit itself.
+#'   fitted model, `NA` without one; `label`, its name for messages; and
+#'   `observed`, the quantity on `params` itself.
 #' @noRd
 boot_check <- function(params, target, context) {
   V <- slope_vcov(params, context)
-  if (is.null(target) || !reference_is_comparator(params$comparator, target)) {
-    return(list(of = function(p) p$slope, se = sqrt(V[1L, 1L]), label = "slope"))
+  check <- if (is.null(target) || !reference_is_comparator(params$comparator, target)) {
+    list(of = function(p) p$slope, se = sqrt(V[1L, 1L]), label = "slope")
+  } else {
+    list(of = function(p) p$slope - p$slope_comparator,
+         se = sqrt(V[1L, 1L] + V[2L, 2L] - 2 * V[1L, 2L]), label = "slope difference")
   }
-  list(of = function(p) p$slope - p$slope_comparator,
-       se = sqrt(V[1L, 1L] + V[2L, 2L] - 2 * V[1L, 2L]), label = "slope difference")
+  check$observed <- check$of(params)
+  check
 }
 
 #' Refit `R` resampled replicates, reading one or more statistics off each
@@ -996,7 +1002,7 @@ slope_power_boot <- function(params, visits, dropout = NULL,
                              R = 999, ci_method = c("bca", "percentile"),
                              level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_boot()"
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "it is the sample size whose power is being\n",
     "  bootstrapped. For an interval around the sample size a target power\n",
     "  needs, use slope_sample_size_boot()."), context)
@@ -1089,7 +1095,7 @@ slope_power_ceiling_boot <- function(params, n, effectiveness = 0.25,
                                      R = 999, ci_method = c("bca", "percentile"),
                                      level = 0.95, seed = NULL, progress = FALSE) {
   context <- "slope_power_ceiling_boot()"
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "it is the sample size whose highest achievable\n",
     "  power is being bootstrapped. For an interval around the smallest sample\n",
     "  size any design could need, use slope_sample_size_floor_boot()."), context)
@@ -1403,7 +1409,7 @@ boot_summary_frame <- function(x, per_arm) {
   )
 }
 
-#' What a bootstrap result's statistic is divided by on the display basis
+#' Whether a bootstrap result's statistic is shown per arm
 #'
 #' The one statement of the rule [boot_summary_frame()] and
 #' [confint.slope_bootstrap()] both apply: a sample size, on the even lattice,
@@ -1411,15 +1417,20 @@ boot_summary_frame <- function(x, per_arm) {
 #' resolved by [display_basis()]; `lattice` is the result's own flag, or for a
 #' grid, [on_lattice()] of its statistic. `isTRUE()`, so an object saved before
 #' `lattice` existed is shown as stored rather than failing.
+#' [boot_divisor()] is the number this implies.
 #' @noRd
-boot_divisor <- function(lattice, per_arm) if (isTRUE(lattice) && per_arm) 2 else 1
+boot_halves <- function(lattice, per_arm) isTRUE(lattice) && per_arm
+
+#' What a bootstrap result's statistic is divided by on the display basis
+#' @noRd
+boot_divisor <- function(lattice, per_arm) if (boot_halves(lattice, per_arm)) 2 else 1
 
 #' The refit-failure note, shared by both bootstrap print methods
 #'
 #' `across`, for a grid, says the failure cost every cell, not just one.
 #' @noRd
 boot_refit_note <- function(n_refit, R, across = "") {
-  boot_note("Note", sprintf("%d/%d (%.1f%%) bootstrap samples failed to converge%s.",
+  boot_note("Note", sprintf("%d/%d (%.1f%%) bootstrap samples failed to refit%s.",
                             n_refit, R, 100 * n_refit / R, across))
 }
 

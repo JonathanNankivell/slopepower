@@ -307,7 +307,7 @@ slope_power_ceiling <- function(params, n, effectiveness = 0.25,
                               target = c("effectiveness", "observed"),
                               alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power_ceiling()"
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "it is the sample size whose highest achievable\n",
     "  power is being bounded. For the smallest sample size any design could\n",
     "  need, use slope_sample_size_floor()."), context)
@@ -332,11 +332,11 @@ slope_power_ceiling <- function(params, n, effectiveness = 0.25,
 #'
 #' @export
 print.slope_sample_size_floor <- function(x, ..., per_arm = NULL) {
-  print_n_result(x, per_arm, "print.slope_sample_size_floor()")
+  print_n_result(x, per_arm, "print.slope_sample_size_floor()", bound = TRUE)
 }
 
 #' @rdname print.slope_sample_size_floor
 #' @export
 print.slope_power_ceiling <- function(x, ..., per_arm = NULL) {
-  print_power_result(x, per_arm, "print.slope_power_ceiling()")
+  print_power_result(x, per_arm, "print.slope_power_ceiling()", bound = TRUE)
 }

@@ -49,11 +49,14 @@ carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_
 \value{
 A data frame with one row per combination of the axes supplied, with
 columns \code{design}, \code{dropout}, \code{scheduled_visits}, \code{last_visit},
-\code{dropout_total}, \code{n}, \code{power}, \code{alpha}, \code{effectiveness}, \code{tte}, \code{var_tte},
-\code{effect_size} and \code{visits}. \code{power} is what varies; \code{n} is constant
-unless it was itself given several values. \code{n} and \code{visits} are on the
-basis \code{per_arm} selects -- participants (or visits) per arm by default,
-or the trial total under \code{per_arm = FALSE}. \code{visits} is \code{n} times the
+\code{dropout_total}, \code{n}, \code{n_requested}, \code{power}, \code{alpha}, \code{effectiveness},
+\code{tte}, \code{var_tte}, \code{effect_size} and \code{visits}. \code{power} is what varies; \code{n}
+is constant unless it was itself given several values. \code{n} is the sample
+size actually used, made even for 1:1 allocation; \code{n_requested} is the \code{n}
+as given, so an odd request stays distinguishable from the even one below
+it. \code{n}, \code{n_requested} and \code{visits} are on the basis \code{per_arm} selects --
+participants (or visits) per arm by default, or the trial total under
+\code{per_arm = FALSE}. \code{visits} is \code{n} times the
 expected number of visits one participant attends -- \code{scheduled_visits}
 itself when \code{dropout_total} is zero, less otherwise, since a participant
 who withdraws still contributes the visits attended before doing so (see

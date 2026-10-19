@@ -50,7 +50,7 @@ carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_
 \value{
 A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n} is
 what varies; \code{power} is constant unless it was itself given several
-values.
+values. \code{n_requested} is \code{NA}, since no \code{n} was given.
 }
 \description{
 The companion to \code{\link[=slope_power_grid]{slope_power_grid()}}: holds the target power fixed and reports

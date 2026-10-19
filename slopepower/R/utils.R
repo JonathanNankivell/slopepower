@@ -434,17 +434,20 @@ maybe_add_effectiveness <- function(args, effectiveness, target) {
 #' Refuse a missing `n` where it is the input, not the answer
 #'
 #' Shared by every function that holds the sample size fixed: [slope_power()],
-#' the ceiling, the power grid, and their bootstraps. `absent` is
-#' `missing(n) || is.null(n)`, worked out by the caller because `missing()` can
-#' only be asked in the function that owns the argument. `is.null(n)` as well:
+#' the ceiling, the power grid, and their bootstraps. Called as
+#' `require_n(n, ...)`: `missing()` follows the promise back to the caller, so
+#' it is `TRUE` here exactly when the caller's `n` was not supplied.
+#' `is.null(n)` as well:
 #' the solver picks its branch on `is.null()`, so an explicit `n = NULL` -- the
 #' shape a programmatic caller gets from `do.call()` with an unset element --
 #' would otherwise slip past into the solve-for-n branch and fail complaining
 #' about `power`, an argument these functions do not have. `why` finishes the
 #' sentence: what `n` is for here, and where to go instead.
 #' @noRd
-require_n <- function(absent, why, context) {
-  if (absent) stop(sprintf("%s: `n` is required -- %s", context, why), call. = FALSE)
+require_n <- function(n, why, context) {
+  if (missing(n) || is.null(n)) {
+    stop(sprintf("%s: `n` is required -- %s", context, why), call. = FALSE)
+  }
 }
 
 #' Reject `effectiveness` alongside target = "observed"
