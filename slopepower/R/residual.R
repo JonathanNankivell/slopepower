@@ -89,7 +89,7 @@ residual_spec <- function(correlation, weights, parts, context) {
         "at all; other strata would make the variance depend on something other than time."),
         context, time_text), call. = FALSE)
     }
-    if (length(unclass(weights)) || isTRUE(attr(weights, "fixed"))) {
+    if (length(unclass(weights)) || length(attr(weights, "fixed"))) {
       stop(sprintf(paste0(
         "%s: `weights` must not carry initial or fixed values here; slope_params() ",
         "estimates the variance ratios. To state them, use slope_params_manual()."),

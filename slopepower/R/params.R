@@ -389,6 +389,23 @@ with_covariates <- function(f, cov_terms) {
                     env = environment(f))
 }
 
+#' What the healthy-controls model shares between cases and controls
+#'
+#' Without covariates or a residual correlation the model factorises per
+#' group, so the controls' random-effects structure cannot move the cases'
+#' estimates. Shared covariate coefficients couple the groups, and so do shared
+#' correlation parameters (CONTRACT.md section 2: nlme fits one correlation
+#' structure per model); per-visit variances do not, being stratified by group.
+#' @return The shared parts as one phrase, or `character()` when there are none.
+#' @noRd
+shared_by_groups <- function(covariates, correlation) {
+  parts <- c(if (covariates) "covariate coefficients",
+             if (!is.null(correlation) && !identical(correlation, "none")) {
+               "residual correlation parameters"
+             })
+  if (length(parts)) paste(parts, collapse = " and ") else character()
+}
+
 #' @param resid The `correlation` and `weights` calls, from [residual_calls()].
 #'   Under `healthy` the `weights` are always there: each group's own residual
 #'   variance, crossed with the visit when visit-specific variances were asked
@@ -1279,17 +1296,15 @@ slope_params <- function(formula, data,
                                 "structure. Underlying error: %s"),
                          context, conditionMessage(e)), call. = FALSE)
           }
-          # Without covariates the model factorises per group, so the reduced
-          # structure cannot move the cases' estimates; the shared covariate
-          # coefficients couple the groups, and then it can.
+          shared <- shared_by_groups(length(cov_terms) > 0L, spec$correlation)
           message(sprintf(paste0("%s: the full random-effects structure for healthy ",
                                  "controls did not converge; falling back to a ",
                                  "random intercept only for controls (equivalent to ",
                                  "the Stata `nocontvar` option). %s"), context,
-                          if (length(cov_terms)) {
-                            paste0("Because the covariate coefficients are shared by ",
-                                   "both groups, this can shift the estimates ",
-                                   "returned for cases slightly.")
+                          if (length(shared)) {
+                            sprintf(paste0("Because the %s are shared by both groups, ",
+                                           "this can shift the estimates returned for ",
+                                           "cases slightly."), shared)
                           } else {
                             "This does not affect the estimates returned for cases."
                           }))
@@ -1426,6 +1441,12 @@ slope_params_manual <- function(slope,
   context <- "slope_params_manual()"
   cl <- match.call()
   comparator <- match.arg(comparator)
+  # A forgotten `comparator` would otherwise power toward zero change, not the
+  # comparator's slope, with nothing said.
+  slope_comparator <- warn_unused_arg(
+    slope_comparator, comparator == "none" && !all(is.na(slope_comparator)), NA_real_,
+    paste0("%s: `slope_comparator` applies only when `comparator` is \"healthy\" or ",
+           "\"treated\"; ignoring it."), context)
   residual <- residual_manual(correlation, weights, times, context)
 
   # The components, slope_comparator included, are validated and coerced by
@@ -1565,10 +1586,11 @@ print.slope_params <- function(x, ...) {
   }
   if (isTRUE(x$common_variance)) {
     cat("\nNote: reduced random-effects structure used for healthy controls\n")
-    # The shared covariate coefficients couple the two groups; see the
-    # fallback message in slope_params().
-    cat(if (is.null(x$covariates)) "      (Stata `nocontvar`). Case estimates are unaffected.\n"
-        else "      (Stata `nocontvar`). With covariates, this can shift the case\n      estimates slightly.\n")
+    shared <- shared_by_groups(!is.null(x$covariates), x$residual$correlation)
+    cat(if (!length(shared)) "      (Stata `nocontvar`). Case estimates are unaffected.\n"
+        else sprintf(paste0("      (Stata `nocontvar`). Because the %s are shared\n",
+                            "      by both groups, this can shift the case estimates slightly.\n"),
+                     shared))
   }
   if (isTRUE(x$time_shifted)) {
     cat("\nNote: subject times were shifted so each first visit is time zero.\n")

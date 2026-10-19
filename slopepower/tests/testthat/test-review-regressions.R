@@ -605,11 +605,11 @@ test_that("without a comparator target the check stays on the slope", {
 
 test_that("discarded replicates are reported by cause", {
   expect_identical(boot_failure_text(2L, 2L, 10),
-                   "2 of 10 replicates failed to converge; all were discarded.")
+                   "2 of 10 replicates failed to refit; all were discarded.")
   expect_match(boot_failure_text(0L, 3L, 10),
                "^3 of 10 refitted, but the calculation could not be solved")
   both <- boot_failure_text(1L, 4L, 10)
-  expect_match(both, "1 of 10 replicates failed to converge; 3 of 10 refitted")
+  expect_match(both, "1 of 10 replicates failed to refit; 3 of 10 refitted")
 })
 
 test_that("slopepower() refuses n with power before fitting anything", {
@@ -645,4 +645,21 @@ test_that("a grid names the cell whose dropout is the wrong length", {
     slope_power_grid(paper_fit("slpower1"), visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)),
                      dropout = list(x = c(0, 0.1)), n = 200),
     'design "b".*one element per follow-up visit.*dropout_rate\\(\\)')
+})
+
+test_that("a design-specific result without its design is not printed as a bound", {
+  # The bound label follows the class the print method dispatched on, not the
+  # absence of a `design` field.
+  p <- ref_params()
+  n <- slope_sample_size(p, c(0, 1, 2))
+  n$design <- NULL
+  out <- capture.output(print(n))
+  expect_true(any(grepl("Estimated sample size", out, fixed = TRUE)))
+  expect_false(any(grepl("bound", out, fixed = TRUE)))
+
+  pw <- slope_power(p, c(0, 1, 2), n = 300)
+  pw$design <- NULL
+  out <- capture.output(print(pw))
+  expect_true(any(grepl("Estimated power", out, fixed = TRUE)))
+  expect_false(any(grepl("bound", out, fixed = TRUE)))
 })

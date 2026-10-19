@@ -315,7 +315,7 @@ test_that("a bootstrap discards replicates that fail to refit, and says so", {
   # The count in the message is the count on the object -- the number that
   # tells the caller how much of the requested R they actually got. `R` itself
   # records what was asked for, not what survived.
-  expect_match(w, sprintf("%d of 10 replicates failed to converge; all were discarded",
+  expect_match(w, sprintf("%d of 10 replicates failed to refit; all were discarded",
                           b$n_failed), fixed = TRUE)
   # Every failure here is a refit's: the slope is the statistic, so there is
   # no calculation left to fail.
@@ -795,14 +795,14 @@ test_that("print.slope_bootstrap() always reports the convergence failures, zero
                                                effectiveness = 0.33, R = 6, seed = 5))
   b$n_failed <- b$n_refit_failed <- 0L
   out <- capture.output(print(b))
-  expect_true(any(grepl(sprintf("Note:        0/%d (0.0%%) bootstrap samples failed to converge.",
+  expect_true(any(grepl(sprintf("Note:        0/%d (0.0%%) bootstrap samples failed to refit.",
                                 b$R),
                         out, fixed = TRUE)))
   expect_false(any(grepl("more refitted", out, fixed = TRUE)))
 
   b$n_failed <- b$n_refit_failed <- 2L
   out <- capture.output(print(b))
-  expect_true(any(grepl(sprintf("2/%d (%.1f%%) bootstrap samples failed to converge.",
+  expect_true(any(grepl(sprintf("2/%d (%.1f%%) bootstrap samples failed to refit.",
                                 b$R, 100 * 2 / b$R),
                         out, fixed = TRUE)))
   expect_false(any(grepl("more refitted", out, fixed = TRUE)))
@@ -811,7 +811,7 @@ test_that("print.slope_bootstrap() always reports the convergence failures, zero
   # failures, and are reported on a line of their own.
   b$n_refit_failed <- 0L
   out <- capture.output(print(b))
-  expect_true(any(grepl(sprintf("0/%d (0.0%%) bootstrap samples failed to converge.", b$R),
+  expect_true(any(grepl(sprintf("0/%d (0.0%%) bootstrap samples failed to refit.", b$R),
                         out, fixed = TRUE)))
   expect_true(any(grepl(sprintf("2/%d (%.1f%%) more refitted", b$R, 100 * 2 / b$R),
                         out, fixed = TRUE)))

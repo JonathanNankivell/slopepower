@@ -124,7 +124,7 @@ their own bias corrections and their own jackknife columns, one
 without the other -- even when \code{ci_method = "bca"} was requested. \code{NA}
 for an interval that could not be built at all.}
 \item{\code{n_failed}}{How many of the \code{R} replicates failed to yield the
-solved-for quantity for that cell -- refits that failed to converge,
+solved-for quantity for that cell -- refits that failed (for any reason),
 plus any resample whose stage-two solve itself failed -- out of \code{R}.}
 }
 

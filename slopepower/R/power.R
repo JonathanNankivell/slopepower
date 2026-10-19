@@ -1031,7 +1031,7 @@ slope_power <- function(params, visits, dropout = NULL,
                         alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power()"
   per_arm <- check_per_arm(per_arm, context)
-  require_n(missing(n) || is.null(n), paste0(
+  require_n(n, paste0(
     "it is the sample size whose power is being\n",
     "  evaluated. To solve for the sample size that achieves a given power,\n",
     "  use slope_sample_size(params, visits, power = 0.8)."), context)
@@ -1133,15 +1133,19 @@ print_target_lines <- function(x) {
 #' A bound over every design ([slope_sample_size_floor()],
 #' [slope_power_ceiling()]) has no `design`. It says so in the schedule's
 #' place rather than leaving the line out: the reader should not have to wonder
-#' which schedule produced the number.
+#' which schedule produced the number. `bound` comes from the print method
+#' that was dispatched, not from whether `design` is there, so a
+#' design-specific result that has lost its `design` is never passed off as a
+#' bound; it just prints no schedule.
 #' @noRd
-print_design_block <- function(x) {
+print_design_block <- function(x, bound) {
   design <- x$design
   print_target_lines(x)
-  if (is.null(design)) {
+  if (bound) {
     cat_line("visit schedule", "any (the bound holds for all)")
     return(invisible(x))
   }
+  if (is.null(design)) return(invisible(x))
   cat_line("number of follow-up visits", length(design$visits) - 1L, digits = 0L)
   cat_line("schedule (and dropouts)", schedule_string(design))
   invisible(x)
@@ -1150,14 +1154,14 @@ print_design_block <- function(x) {
 #' The body of the two sample-size print methods, for a design or the floor
 #'
 #' The floor differs only in its heading and in reporting the limiting
-#' \eqn{s^{*2}} it was computed from, both decided by whether `x` has a design.
+#' \eqn{s^{*2}} it was computed from, both decided by `bound`: `TRUE` from the
+#' floor's print method, `FALSE` from the design-specific one.
 #' @noRd
-print_n_result <- function(x, per_arm, context) {
+print_n_result <- function(x, per_arm, context, bound) {
   per_arm <- display_basis(x, per_arm, context)
-  bound <- is.null(x$design)
   print_opening_blocks(x)
   cat_line("power", x$power)
-  print_design_block(x)
+  print_design_block(x, bound)
   cat(if (bound) "\n  Lower bound on sample size:\n" else "\n  Estimated sample size:\n")
   cat_n_line(x, per_arm)
   if (bound) cat_line("limiting s*^2", x$var_tte)
@@ -1167,13 +1171,12 @@ print_n_result <- function(x, per_arm, context) {
 
 #' The body of the two power print methods, for a design or the ceiling
 #' @noRd
-print_power_result <- function(x, per_arm, context) {
+print_power_result <- function(x, per_arm, context, bound) {
   per_arm <- display_basis(x, per_arm, context)
-  bound <- is.null(x$design)
   print_opening_blocks(x)
   cat_specified_n_line(x, per_arm)
   cat_n_line(x, per_arm, total_label = "actual N")
-  print_design_block(x)
+  print_design_block(x, bound)
   cat(if (bound) "\nUpper bound on power:\n" else "\nEstimated power:\n")
   cat_line("power", x$power)
   if (bound) cat_line("limiting s*^2", x$var_tte)
@@ -1197,7 +1200,7 @@ print_power_result <- function(x, per_arm, context) {
 #'
 #' @export
 print.slope_sample_size <- function(x, ..., per_arm = NULL) {
-  print_n_result(x, per_arm, "print.slope_sample_size()")
+  print_n_result(x, per_arm, "print.slope_sample_size()", bound = FALSE)
 }
 
 #' Print a slope power calculation
@@ -1219,7 +1222,7 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 #'
 #' @export
 print.slope_power <- function(x, ..., per_arm = NULL) {
-  print_power_result(x, per_arm, "print.slope_power()")
+  print_power_result(x, per_arm, "print.slope_power()", bound = FALSE)
 }
 
 #' Coerce a stage-two result to a one-row data frame

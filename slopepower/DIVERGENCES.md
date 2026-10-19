@@ -535,10 +535,23 @@ read off `params$common_variance` and pinned — otherwise a replicate that
 could not fit the full structure would quietly fall back to the reduced one
 and land in the same interval as a point estimate fitted the other way. A
 replicate that cannot fit the pinned structure is counted in `n_failed`
-instead. This is visible only under `healthy`, and only through the
-controls' slope: the model factorises per group, so the case estimates are
-invariant, but `slope_comparator` — what `slope_difference` is measured
-against — is not.
+instead. This is visible only under `healthy`, and, without covariates or a
+residual correlation, only through the controls' slope: the model then
+factorises per group, so the case estimates are invariant, but
+`slope_comparator` — what `slope_difference` is measured against — is not.
+Covariate coefficients and correlation parameters are shared by both groups,
+so with either the case estimates can move too.
+
+The one setting a replicate does not share with the observed fit is
+`apVar`: replicates are refitted with `apVar = FALSE`, since nothing reads
+the variance parameters' approximate covariance off a replicate and it costs
+9-23% of every refit. That can change which replicates are counted in
+`n_failed` only when the numerical Hessian has non-finite entries — nlme
+returns a non-positive-definite one as a string rather than failing the fit.
+
+A refit failure is any error from the refitted `slope_params()`, not only
+non-convergence (an unusable random-effects covariance, say), so the
+printed note and the warning say the samples "failed to refit".
 
 Every bootstrap also warns when the fitted slope is less than 2.5× its
 standard error, per the paper's own §2.6 recommendation — a check the Stata
