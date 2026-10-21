@@ -82,7 +82,7 @@ on the result as `$control`, so a bootstrap refits every replicate under them.
 | `dropouts(.05 .05)` | `dropout = c(0.05, 0.05)` |
 | *(no equivalent)* | `dropout_scale = "cumulative"`, `dropout_rate()` |
 | `power(0.8)` | `slope_sample_size(params, visits, power = 0.8)` |
-| `n(450)` | `slope_power(params, visits, n = 450)` |
+| `n(450)` | `slope_power(params, visits, n_total = 450)`, or `n_per_arm = 225` |
 | `effectiveness(0.33)` | `effectiveness = 0.33` |
 | `usetrt` | `target = "observed"` |
 | `nocontvar` | `common_variance = TRUE` |
@@ -105,11 +105,12 @@ use, and so on.
 The R port makes each of those states unwritable instead of checked.
 
 **Sample size and power are separate functions.** `slope_sample_size()` takes
-`power`; `slope_power()` takes `n`. Neither takes the other:
+`power`; `slope_power()` takes the sample size, as `n_total` or `n_per_arm`.
+Neither takes the other:
 
 ```{r two-functions, error = TRUE}
 pars1 <- slope_params(sdmt ~ visit | id, data = slpower1)
-slope_power(pars1, c(0, 1, 2), n = 200, power = 0.8)
+slope_power(pars1, c(0, 1, 2), n_total = 200, power = 0.8)
 ```
 
 That is R's own argument matching, not a check the package wrote. The ambiguity
@@ -168,7 +169,7 @@ axis. This port builds Σ directly at whatever real times you supply, so
 fractional spacing is written down directly and `scale()` has no equivalent:
 
 ```{r spacing}
-slope_sample_size(pars1, seq(0, 2, by = 0.5), effectiveness = 0.33)$n
+slope_sample_size(pars1, seq(0, 2, by = 0.5), effectiveness = 0.33)$n_total
 ```
 
 620, which is exactly what Stata returns for `schedule(1 2 3 4) scale(0.5)` on
@@ -214,11 +215,11 @@ warning above is collected and reported once rather than once per cell:
 
 ```{r rate}
 tbl <- slope_power_grid(
-  pars1, n = 450, effectiveness = 0.33,
+  pars1, n_total = 450, effectiveness = 0.33,
   visits  = list(annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(`5pc` = dropout_rate(0.05))
 )
-tbl[, c("design", "dropout", "n", "power")]
+tbl[, c("design", "dropout", "n_per_arm", "power")]
 ```
 
 This is new surface area, but it computes exactly what a Stata user computes by
@@ -248,7 +249,7 @@ pars_published <- slope_params_manual(
   slope = -1.6, sigma2_intercept = 100, sigma2_slope = 2,
   cov_intercept_slope = 5, sigma2_residual = 10
 )
-slope_sample_size(pars_published, c(0, 1, 2), effectiveness = 0.33)$n
+slope_sample_size(pars_published, c(0, 1, 2), effectiveness = 0.33)$n_total
 ```
 
 `slope_params_manual()` is how you plan from variance components reported in a
@@ -272,11 +273,11 @@ slope_sample_size(flat, c(0, 1, 2), target = "observed")
 
 The same applies to a singular information matrix, a non-positive-definite
 implied covariance, a non-PD random-effects matrix on a hand-built
-`slope_params`, and to a missing `n` -- where Stata does not fail at all but
+`slope_params`, and to a missing sample size -- where Stata does not fail at all but
 silently switches to solving for sample size at 80% power:
 
 ```{r missing-n, error = TRUE}
-slope_power(pars1, c(0, 1, 2), n = NULL)
+slope_power(pars1, c(0, 1, 2), n_total = NULL)
 ```
 
 Supplying `effectiveness` alongside `target = "observed"` is an error too, where
@@ -411,7 +412,7 @@ calls verbatim is its whole job.
 ```{r wrapper}
 res <- slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
                   obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)
-res$n
+res$n_total
 ```
 
 Note `schedule = c(1, 2)` with the implicit baseline, exactly as in Stata. It
@@ -419,7 +420,7 @@ accepts `scale` too, though it will suggest you drop it:
 
 ```{r wrapper-scale}
 slopepower(slpower1, "sdmt", "id", "visit", schedule = 1:4, scale = 0.5,
-           obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)$n
+           obs = TRUE, nocontrols = TRUE, effectiveness = 0.33)$n_total
 ```
 
 The warn-and-reset behaviour is preserved as well -- an option that does not
@@ -463,7 +464,7 @@ reported 0, `qnorm(1)` being `Inf`.) The stable form still reports:
 
 ```{r saturated}
 pw <- slope_power(pars1, c(0, 1, 2), dropout = c(0, 0.1),
-                  n = 10000, effectiveness = 0.33)
+                  n_total = 10000, effectiveness = 0.33)
 c(power = pw$power, var_tte = pw$var_tte)
 ```
 
@@ -482,7 +483,7 @@ previously observed effect scales *N* by *p*<sup>-2</sup>, and quotes 1,272 for
 ss3 <- slope_sample_size(pars3, c(0, 2, 3), dropout = c(0.2, 0.1),
                          target = "observed")
 p <- 0.5
-c(paper   = ss3$n * 4,
+c(paper   = ss3$n_total * 4,
   rounded_last = 2 * ceiling((qnorm(1 - ss3$alpha / 2) + qnorm(ss3$power))^2 /
                              (p * ss3$effect_size)^2))
 ```
