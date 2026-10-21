@@ -162,7 +162,7 @@ test_that("bootstrap and jackknife refits survive a rare factor level going miss
   expect_s3_class(p, "slope_params")
   expect_length(grep("^sp_cov_[0-9]+$", names(nlme::fixef(p$fit))), 1L)
   b <- slope_params_boot(a, R = 40, seed = 2)
-  expect_equal(b$n_failed, 0)
+  expect_equal(b$replicates_failed, 0)
 })
 
 test_that("model.matrix-style covariate formulas are expanded as documented", {

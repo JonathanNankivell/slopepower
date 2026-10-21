@@ -36,8 +36,11 @@ A \code{"n_floor"} or \code{"power_ceiling"} row has \code{n_follow_up = NA}, be
 bound it reports holds
 for every visit schedule and so is attached to none of them.
 
-\code{n_requested} is the \code{n} a power row was asked for, before it was made
-even; \code{NA} for a sample-size row, where \code{n} is the answer.
+\code{n_requested_total} and \code{n_requested_per_arm} are the sample size a power
+row was asked for, before it was made even; \code{NA} for a sample-size row,
+where the sample size is the answer. \code{visits_total} and \code{visits_per_arm}
+are \code{NA} for a bound, which belongs to no schedule. Every column a grid row
+carries is here under the same name.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
@@ -46,7 +49,7 @@ as.data.frame(res)
 
 # Stable column names make results from different designs and different
 # questions safe to bind into one comparison table.
-res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
+res2 <- slope_power(pars, c(0, 1, 2, 3), n_total = 712, effectiveness = 0.33)
 rbind(as.data.frame(res), as.data.frame(res2))
 
 # The floor binds in too, as the row no schedule can beat.

@@ -6,7 +6,8 @@
 \usage{
 slope_power_ceiling(
   params,
-  n,
+  n_total = NULL,
+  n_per_arm = NULL,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
@@ -17,9 +18,8 @@ slope_power_ceiling(
 \item{params}{A \code{slope_params} object, from \code{\link[=slope_params]{slope_params()}} or
 \code{\link[=slope_params_manual]{slope_params_manual()}}.}
 
-\item{n}{Total number of participants across both arms, as in
-\code{\link[=slope_power]{slope_power()}}. Required. Odd values are reduced by one so that the arms
-are equal, with the value as supplied kept in \code{n_requested}.}
+\item{n_total, n_per_arm}{The sample size held fixed, as in \code{\link[=slope_power]{slope_power()}}:
+the trial total, or participants in each arm. Supply exactly one.}
 
 \item{effectiveness}{Proportion of the slope difference the treatment is
 expected to remove, in (0, 1]. Must not be supplied when
@@ -36,8 +36,9 @@ participants per arm, \code{FALSE} for the trial total. Display only, as in
 }
 \value{
 An object of class \code{slope_power_ceiling}, a list with the same elements
-as a \code{\link[=slope_power]{slope_power()}} result \strong{except \code{design}}: \code{n}, \code{n_per_arm},
-\code{n_requested}, \code{power}, \code{alpha}, \code{effectiveness}, \code{target}, \code{tte},
+as a \code{\link[=slope_power]{slope_power()}} result \strong{except \code{design}} and the visit counts it
+implies: \code{n_total}, \code{n_per_arm}, \code{n_requested_total},
+\code{n_requested_per_arm}, \code{power}, \code{alpha}, \code{effectiveness}, \code{target}, \code{tte},
 \code{var_tte}, \code{effect_size}, \code{slope_difference}, \code{reference_slope} and
 \code{params}. \code{power} is the upper bound and \code{var_tte} is \code{\link[=slope_var_floor]{slope_var_floor()}}.
 It inherits from \code{slope_result}, so \link[=as.data.frame.slope_result]{as.data.frame()}
@@ -81,11 +82,11 @@ Stata command's default behaviour for trial data.}
 
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
-slope_power_ceiling(pars, n = 200, effectiveness = 0.33)
+slope_power_ceiling(pars, n_total = 200, effectiveness = 0.33)
 
 # How much of the achievable power a two-year, three-visit design delivers.
-c(design  = slope_power(pars, c(0, 1, 2), n = 200, effectiveness = 0.33)$power,
-  ceiling = slope_power_ceiling(pars, n = 200, effectiveness = 0.33)$power)
+c(design  = slope_power(pars, c(0, 1, 2), n_total = 200, effectiveness = 0.33)$power,
+  ceiling = slope_power_ceiling(pars, n_total = 200, effectiveness = 0.33)$power)
 
 }
 \references{

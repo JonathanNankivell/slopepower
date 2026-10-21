@@ -62,8 +62,10 @@
 #'   original; see the "Dropout" section of [slope_sample_size()].
 #' @param scale Number of `time` units in one `schedule` unit. Defaults to 1.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
-#' @param power,n Supply one, as in Stata. `n` gives the power that sample size
-#'   achieves; `power` gives the sample size that reaches it. `power` defaults to
+#' @param power,n Supply one, as in Stata. `n`, the trial total as Stata's
+#'   `n()` is, gives the power that sample size achieves (it is
+#'   [slope_power()]'s `n_total`); `power` gives the sample size that reaches
+#'   it. `power` defaults to
 #'   0.8 when neither is given.
 #' @param effectiveness Proportion of the slope difference the treatment should
 #'   remove. Defaults to 0.25. Mutually exclusive with `usetrt`.
@@ -242,7 +244,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
 
   # The branch on which of `n` and `power` was given; see the check before the fit.
   if (!is.null(n)) {
-    do.call(power_result, c(args, list(n = n, context = "slope_power()")))
+    do.call(power_result, c(args, list(n_total = n, context = "slope_power()")))
   } else {
     do.call(sample_size_result,
             c(args, list(power = power %||% 0.8, context = "slope_sample_size()")))

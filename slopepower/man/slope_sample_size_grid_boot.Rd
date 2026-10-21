@@ -27,7 +27,8 @@ slope_power_grid_boot(
   visits,
   dropout = NULL,
   dropout_scale = c("incremental", "cumulative"),
-  n,
+  n_total = NULL,
+  n_per_arm = NULL,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
@@ -66,12 +67,9 @@ the value itself is what the table reports, in the column of the same name.}
 grid.}
 
 \item{per_arm}{Which basis the printed table's counts are on: \code{TRUE} (the
-default) for participants per arm, \code{FALSE} for the trial total. Unlike
-the plain grids' \code{per_arm} (which reshapes the returned columns), these
-grids always carry both bases -- see the \verb{@return} block below -- and
-\code{per_arm} only sets which one the print method shows by default; the
-stored value can still be reached through the other columns, and a single
-call can be printed either way with \code{print(x, per_arm = ...)}.}
+default) for participants per arm, \code{FALSE} for the trial total. Display
+only, as for the plain grids: both bases are always columns, and a grid
+can be printed either way with \code{print(x, per_arm = ...)}.}
 
 \item{R}{Number of bootstrap replicates. The default is sized for the
 interval this returns rather than for speed; see above before lowering it.}
@@ -90,59 +88,53 @@ advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
-\item{n}{For \code{slope_power_grid_boot()}: total number of participants, as in
-\code{\link[=slope_power_grid]{slope_power_grid()}}. Required. A single value is held constant across the
-grid; several make it another axis.}
+\item{n_total, n_per_arm}{For \code{slope_power_grid_boot()}: the sample size held
+fixed, as in \code{\link[=slope_power_grid]{slope_power_grid()}}. Supply exactly one. A single value is
+held constant across the grid; several make it another axis.}
 }
 \value{
-A data frame of class \code{c("slope_sample_size_grid_boot", "data.frame")} (or \code{"slope_power_grid_boot"}), one row per cell, with the
-columns \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports -- except that both bases are
-kept, whatever \code{per_arm} says: \code{n} is always the trial total, beside
-\code{n_per_arm}, and \code{visits} is split into \code{visits_total} and
-\code{visits_per_arm}. So \code{n} here is \emph{not} the \code{n} of a plain grid called with
-the default \code{per_arm = TRUE}; compare \code{n_per_arm} with that. The table
-also has:
+A data frame of class \code{c("slope_sample_size_grid_boot", "slope_sample_size_grid", "data.frame")} (or the power equivalents), one
+row per cell, with every column \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} reports, under
+the same names. A bootstrapped quantity \code{q} adds \code{q_mean}, \code{q_sd},
+\code{q_lower} and \code{q_upper} -- the same names a single-design bootstrap
+result uses for its fields (see \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}):
 \describe{
-\item{\code{n_mean}, \code{n_sd}, \code{n_lower}, \code{n_upper}}{For
-\code{slope_sample_size_grid_boot()}: the bootstrap mean, SD and confidence
-interval of that cell's sample size, on the trial-total basis of \code{n}.
-The interval is widened to the nearest even sizes a trial could
-actually be run at, as \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} does.}
-\item{\code{power_mean}, \code{power_sd}, \code{power_lower}, \code{power_upper}}{For
-\code{slope_power_grid_boot()}: the same, for the power that cell's fixed
-\code{n} achieves.}
-\item{\code{tte_mean}, \code{tte_sd}, \code{tte_lower}, \code{tte_upper}}{The same, for the
-target treatment effect behind that cell. Constant down the \code{design}
-and \code{dropout} axes -- it does not depend on the design, only on
-\code{effectiveness} -- so it repeats unless \code{effectiveness} is itself an
-axis of the grid, and cells sharing an \code{effectiveness} share one
-interval exactly rather than merely agreeing to rounding.}
-\item{\code{ci_method}, \code{tte_ci_method}}{\code{"bca"} or \code{"percentile"}: the method
-actually used for that cell's main and \code{tte} interval, which can fall
-back to percentile cell by cell -- and, since the two intervals have
-their own bias corrections and their own jackknife columns, one
-without the other -- even when \code{ci_method = "bca"} was requested. \code{NA}
-for an interval that could not be built at all.}
-\item{\code{n_failed}}{How many of the \code{R} replicates failed to yield the
-solved-for quantity for that cell -- refits that failed (for any reason),
-plus any resample whose stage-two solve itself failed -- out of \code{R}.}
+\item{\verb{n_total_*}, \verb{n_per_arm_*}}{For \code{slope_sample_size_grid_boot()}:
+the bootstrap mean, SD and confidence interval of that cell's sample
+size, on both bases, the per-arm columns exactly half the totals. The
+interval is widened to the nearest even trial sizes, as
+\code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}} does.}
+\item{\verb{power_*}}{For \code{slope_power_grid_boot()}: the same, for the power
+that cell's fixed sample size achieves.}
+\item{\verb{tte_*}}{The same, for the target treatment effect behind that
+cell. Constant down the \code{design} and \code{dropout} axes -- it does not
+depend on the design, only on \code{effectiveness} -- so it repeats unless
+\code{effectiveness} is itself an axis of the grid, and cells sharing an
+\code{effectiveness} share one interval exactly.}
+\item{\code{n_ci_method} (or \code{power_ci_method}), \code{tte_ci_method}}{\code{"bca"} or
+\code{"percentile"}: the method actually used for that cell's interval,
+which can fall back to percentile cell by cell -- and, since the two
+intervals have their own bias corrections and their own jackknife
+columns, one without the other -- even when \code{ci_method = "bca"} was
+requested. \code{NA} for an interval that could not be built at all.}
+\item{\code{replicates_failed}}{How many of the \code{R} replicates failed to
+yield the solved-for quantity for that cell -- refits that failed, plus
+any resample whose stage-two solve itself failed.}
 }
 
 The table also carries, as attributes rather than columns because they
-are shared by every cell: \code{R}, \code{ci_method} (as requested), \code{statistic}
-(\code{"n"} or \code{"power"}), \code{level}, \code{se}, \code{n_refit_failed} (replicates whose
+are shared by every cell: \code{R}, \code{requested_ci_method}, \code{statistic} (\code{"n"}
+or \code{"power"}), \code{level}, \code{slope_se}, \code{refits_failed} (replicates whose
 stage-one refit failed, before any per-cell solve is attempted),
-\code{straddle}, \code{straddle_of} (as for \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}), \code{per_arm}
-(as requested, or overridden at print time), and
-\code{slope_observed}, \code{slope_mean}, \code{slope_sd}, \code{slope_ci},
-\code{slope_ci_method}, \code{slope_replicates} -- the same summary of the refitted
-slopes a single-design bootstrap result carries, since the slope is what
-the resampling actually perturbs and every cell's interval is a function
-of it. The printed table does not show them --- it reports the cells and,
-beneath them, \code{straddle} --- so these six attributes are where a reader
-who wants the slope's own interval finds it. They describe the whole
-table, so a subset such as \code{x[1:3, ]} drops them \emph{and} the class,
-returning a plain data frame of the surviving cells, printed as one.
+\code{straddle}, \code{straddle_of} (as for \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}), \code{named}
+(which axes vary), \code{per_arm}, and the slope block a single-design
+bootstrap carries -- \code{slope}, \code{slope_replicates}, \code{slope_mean},
+\code{slope_sd}, \code{slope_lower}, \code{slope_upper}, \code{slope_ci_method} -- since the
+slope is what the resampling perturbs and every cell's interval is a
+function of it. They describe the whole table, so a subset such as
+\code{x[1:3, ]} drops them \emph{and} the class, returning a plain data frame of
+the surviving cells. \link[=confint.slope_sample_size_grid_boot]{confint()}
+returns one quantity's interval in every cell, as a matrix.
 }
 \description{
 The bootstrap counterparts of \code{\link[=slope_sample_size_grid]{slope_sample_size_grid()}} and
@@ -201,7 +193,7 @@ slope_sample_size_grid_boot(
 
 # The converse table: the power a fixed 450 participants achieves.
 slope_power_grid_boot(
-  pars, n = 450, effectiveness = 0.33,
+  pars, n_total = 450, effectiveness = 0.33,
   visits  = list(annual = c(0, 1, 2, 3), six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05)),
   R = 50, seed = 42)

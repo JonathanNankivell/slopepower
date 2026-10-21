@@ -9,7 +9,7 @@ test_that("slope_var() with dropout is the var_tte slope_power() reports", {
   v <- c(0, 1, 2, 3)
   d <- c(0, 0.1, 0.1)
   expect_equal(slope_var(p, v, dropout = d),
-               slope_power(p, v, dropout = d, n = 300)$var_tte)
+               slope_power(p, v, dropout = d, n_total = 300)$var_tte)
   expect_equal(slope_var(p, v, dropout = cumsum(d), dropout_scale = "cumulative"),
                slope_var(p, v, dropout = d))
   expect_gt(slope_var(p, v, dropout = d), slope_var(p, v))
@@ -28,7 +28,7 @@ test_that("dropout totalling just over 1, within tolerance, gives no negative we
   p <- slope_params_manual(-1.67, 100, 1, 0.5, 10)
   expect_gt(suppressWarnings(slope_var(p, c(0, 1, 2), dropout = c(1, 5e-9))), 0)
   expect_false(is.nan(suppressWarnings(
-    slope_sample_size(p, c(0, 1, 2), dropout = c(1, 5e-9))$n)))
+    slope_sample_size(p, c(0, 1, 2), dropout = c(1, 5e-9))$n_total)))
 })
 
 test_that("slope_var() with dropout validates the design as slope_power() does", {
@@ -154,9 +154,9 @@ test_that("confint() returns the intervals the bootstrap stored", {
   b <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), R = 20, seed = 1,
                                                ci_method = "percentile", per_arm = FALSE))
   ci <- confint(b)
-  expect_identical(dimnames(ci), list(c("n", "slope"), c("2.5 %", "97.5 %")))
-  expect_equal(unname(ci["n", ]), b$ci)
-  expect_equal(unname(ci["slope", ]), b$slope_ci)
+  expect_identical(dimnames(ci), list(c("n_total", "slope"), c("2.5 %", "97.5 %")))
+  expect_equal(unname(ci["n_total", ]), c(b$n_total_lower, b$n_total_upper))
+  expect_equal(unname(ci["slope", ]), c(b$slope_lower, b$slope_upper))
   expect_identical(rownames(confint(b, "slope")), "slope")
   expect_error(confint(b, "power"), "`parm` must be among")
   expect_error(confint(b, level = 0.9), "built at level = 0.95")
@@ -165,9 +165,11 @@ test_that("confint() returns the intervals the bootstrap stored", {
   pa <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), R = 20, seed = 1,
                                                 ci_method = "percentile", per_arm = TRUE))
   expect_identical(rownames(confint(pa)), c("n_per_arm", "slope"))
-  expect_equal(unname(confint(pa, "n")[1, ]), pa$ci / 2)
-  expect_equal(unname(confint(pa, "n", per_arm = FALSE)[1, ]), pa$ci)
-  expect_identical(confint(pa, "n_per_arm"), confint(pa, "n"))
+  expect_equal(unname(confint(pa, "n_per_arm")[1, ]), c(pa$n_per_arm_lower, pa$n_per_arm_upper))
+  expect_equal(unname(confint(pa, per_arm = FALSE)[1, ]), c(pa$n_total_lower, pa$n_total_upper))
+  expect_equal(unname(confint(pa, "n_total")), unname(2 * confint(pa, "n_per_arm")))
+  # There is no bare "n": a sample size is always named with its basis.
+  expect_error(confint(pa, "n"), "`parm` must be among")
   expect_identical(confint(pa, 2), confint(pa, "slope"))
   expect_error(confint(pa, 3), "`parm` must be among")
 

@@ -136,14 +136,14 @@ test_that("the reference slope is resolved identically by both entry points", {
   treated <- ref_params("treated", slope = -1.852, slope_comparator = -1.104)
   for (p in list(ref_params("none"), healthy, treated)) {
     a <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
-    b <- slope_power(p, c(0, 1, 2), n = 400, effectiveness = 0.33)
+    b <- slope_power(p, c(0, 1, 2), n_total = 400, effectiveness = 0.33)
     expect_equal(a$reference_slope, b$reference_slope)
     expect_equal(a$slope_difference, b$slope_difference)
     expect_equal(a$tte, b$tte)
     expect_equal(a$effect_size, b$effect_size)
   }
   a <- slope_sample_size(treated, c(0, 2, 3), target = "observed")
-  b <- slope_power(treated, c(0, 2, 3), n = 400, target = "observed")
+  b <- slope_power(treated, c(0, 2, 3), n_total = 400, target = "observed")
   expect_equal(a$reference_slope, b$reference_slope)
   expect_equal(a$tte, b$tte)
 })
@@ -174,10 +174,10 @@ test_that('target = "observed" requires trial data and rejects effectiveness', {
     "only one of"
   )
   # and the same on the power side
-  expect_error(slope_power(none, c(0, 1, 2), n = 400, target = "observed"),
+  expect_error(slope_power(none, c(0, 1, 2), n_total = 400, target = "observed"),
                'comparator = "treated"')
   expect_error(
-    slope_power(treated, c(0, 2, 3), n = 400, target = "observed", effectiveness = 0.5),
+    slope_power(treated, c(0, 2, 3), n_total = 400, target = "observed", effectiveness = 0.5),
     "only one of"
   )
 })
@@ -188,7 +188,7 @@ test_that("slope_sample_size() and slope_power() invert each other", {
   p <- ref_params()
   for (target_power in c(0.7, 0.8, 0.9, 0.95)) {
     rn <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33, power = target_power)
-    rp <- slope_power(p, c(0, 1, 2), n = rn$n, effectiveness = 0.33)
+    rp <- slope_power(p, c(0, 1, 2), n_total = rn$n_total, effectiveness = 0.33)
     expect_gte(rp$power, target_power)
     expect_lt(rp$power - target_power, 0.005)   # only the ceiling() gap
   }
@@ -200,7 +200,7 @@ test_that("the round trip holds under dropout and a non-default alpha too", {
   d <- c(0, 0, 0.1)
   for (a in c(0.01, 0.05, 0.10)) {
     rn <- slope_sample_size(p, v, d, effectiveness = 0.33, power = 0.9, alpha = a)
-    rp <- slope_power(p, v, d, n = rn$n, effectiveness = 0.33, alpha = a)
+    rp <- slope_power(p, v, d, n_total = rn$n_total, effectiveness = 0.33, alpha = a)
     expect_gte(rp$power, 0.9)
     expect_lt(rp$power - 0.9, 0.005)
 
@@ -220,7 +220,7 @@ test_that("var_tte from slope_power() is exact, and free of n", {
   # same effective variance at every sample size.
   p <- ref_params()
   vals <- vapply(c(100, 328, 1000, 5000),
-                 function(nn) slope_power(p, c(0, 1, 2, 5), c(0, 0, 0.1), n = nn,
+                 function(nn) slope_power(p, c(0, 1, 2, 5), c(0, 0, 0.1), n_total = nn,
                                           effectiveness = 0.33)$var_tte,
                  numeric(1L))
   expect_equal(vals, rep(vals[1L], length(vals)), tolerance = 1e-10)
@@ -233,10 +233,10 @@ test_that("the class records which question was asked", {
   expect_s3_class(rn, "slope_result")
   expect_equal(rn$power, 0.8)
 
-  rp <- slope_power(p, c(0, 1, 2), n = 450, effectiveness = 0.33)
+  rp <- slope_power(p, c(0, 1, 2), n_total = 450, effectiveness = 0.33)
   expect_s3_class(rp, "slope_power")
   expect_s3_class(rp, "slope_result")
-  expect_equal(rp$n_requested, 450)
+  expect_equal(rp$n_requested_total, 450)
 
   # as.data.frame() still records it, so rows from both bind meaningfully
   expect_identical(as.data.frame(rn)$solve_for, "n")
@@ -245,21 +245,21 @@ test_that("the class records which question was asked", {
 
 test_that("an odd n is reduced by one to keep the arms equal", {
   p <- ref_params()
-  r <- slope_power(p, c(0, 1, 2), n = 451, effectiveness = 0.33)
-  expect_equal(r$n, 450)
+  r <- slope_power(p, c(0, 1, 2), n_total = 451, effectiveness = 0.33)
+  expect_equal(r$n_total, 450)
   expect_equal(r$n_per_arm, 225)
-  expect_equal(r$n_requested, 451)
+  expect_equal(r$n_requested_total, 451)
 })
 
 test_that("n is always twice n_per_arm", {
   p <- ref_params()
   for (pw in c(0.8, 0.9)) {
     r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33, power = pw)
-    expect_equal(r$n, 2 * r$n_per_arm)
+    expect_equal(r$n_total, 2 * r$n_per_arm)
   }
   for (nn in c(450, 451)) {
-    r <- slope_power(p, c(0, 1, 2), n = nn, effectiveness = 0.33)
-    expect_equal(r$n, 2 * r$n_per_arm)
+    r <- slope_power(p, c(0, 1, 2), n_total = nn, effectiveness = 0.33)
+    expect_equal(r$n_total, 2 * r$n_per_arm)
   }
 })
 
@@ -267,9 +267,9 @@ test_that("n is always twice n_per_arm", {
 
 test_that("dropout increases the required sample size", {
   p <- ref_params()
-  no_drop <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$n
+  no_drop <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$n_total
   drop    <- slope_sample_size(p, c(0, 1, 2), c(0, 0.2),
-                               effectiveness = 0.33)$n
+                               effectiveness = 0.33)$n_total
   expect_gt(drop, no_drop)
 })
 
@@ -277,7 +277,7 @@ test_that("a zero dropout vector matches no dropout at all", {
   p <- ref_params()
   a <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   b <- slope_sample_size(p, c(0, 1, 2), c(0, 0), effectiveness = 0.33)
-  expect_equal(a$n, b$n)
+  expect_equal(a$n_total, b$n_total)
   expect_equal(a$effect_size, b$effect_size)
 })
 
@@ -294,7 +294,7 @@ test_that("var_tte equals slope_var when there is no dropout", {
   p <- ref_params()
   expect_equal(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)$var_tte,
                slope_var(p, c(0, 1, 2)))
-  expect_equal(slope_power(p, c(0, 1, 2), n = 450, effectiveness = 0.33)$var_tte,
+  expect_equal(slope_power(p, c(0, 1, 2), n_total = 450, effectiveness = 0.33)$var_tte,
                slope_var(p, c(0, 1, 2)))
 })
 
@@ -312,7 +312,7 @@ test_that("total dropout errors rather than returning a missing sample size", {
   expect_error(suppressWarnings(slope_sample_size(p, c(0, 1, 2), c(1, 0),
                                                  effectiveness = 0.33)),
                "nothing to estimate the slope")
-  expect_error(suppressWarnings(slope_power(p, c(0, 1, 2), c(1, 0), n = 400,
+  expect_error(suppressWarnings(slope_power(p, c(0, 1, 2), c(1, 0), n_total = 400,
                                            effectiveness = 0.33)),
                "nothing to estimate the slope")
 })
@@ -331,12 +331,15 @@ test_that("slope_sample_size() enforces the contract guards", {
 
 test_that("slope_power() enforces the contract guards", {
   p <- ref_params()
-  expect_error(slope_power(p, c(0, 1, 2), n = 1), "`n`")
-  expect_error(slope_power(p, c(0, 1, 2), n = 100.5), "whole number")
-  expect_error(slope_power(p, c(0, 1, 2), n = 100, alpha = 0), "alpha")
-  expect_error(slope_power(p, c(0, 1, 2), n = 100, alpha = 1), "alpha")
-  expect_error(slope_power(p, c(0, 1, 2), n = 100, effectiveness = 0), "effectiveness")
-  expect_error(slope_power(p, c(0, 1, 2), n = 100, effectiveness = 1.5), "effectiveness")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 1), "`n_total`")
+  expect_error(slope_power(p, c(0, 1, 2), n_per_arm = 0), "`n_per_arm`")
+  expect_error(slope_power(p, c(0, 1, 2), n_per_arm = 10.5), "whole number of participants per arm")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 20, n_per_arm = 10), "only one of")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 100.5), "whole number")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 100, alpha = 0), "alpha")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 100, alpha = 1), "alpha")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 100, effectiveness = 0), "effectiveness")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 100, effectiveness = 1.5), "effectiveness")
 })
 
 test_that("neither entry point accepts the other's question as an argument", {
@@ -345,10 +348,10 @@ test_that("neither entry point accepts the other's question as an argument", {
   # the sample-size calculation, or `power` to the power calculation, is an
   # error from R's own argument matching rather than a silent mode switch.
   p <- ref_params()
-  expect_error(slope_sample_size(p, c(0, 1, 2), n = 450), "unused argument")
-  expect_error(slope_power(p, c(0, 1, 2), n = 450, power = 0.9), "unused argument")
+  expect_error(slope_sample_size(p, c(0, 1, 2), n_total = 450), "unused argument")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 450, power = 0.9), "unused argument")
   # and `n` is not optional: there is no default sample size to fall back on
-  expect_error(slope_power(p, c(0, 1, 2)), "`n` is required")
+  expect_error(slope_power(p, c(0, 1, 2)), "is required")
   expect_match(tryCatch(slope_power(p, c(0, 1, 2)), error = conditionMessage),
                "slope_sample_size")
 })
@@ -356,49 +359,50 @@ test_that("neither entry point accepts the other's question as an argument", {
 test_that("effectiveness of exactly 1 is allowed", {
   p <- ref_params()
   expect_no_error(slope_sample_size(p, c(0, 1, 2), effectiveness = 1))
-  expect_no_error(slope_power(p, c(0, 1, 2), n = 400, effectiveness = 1))
+  expect_no_error(slope_power(p, c(0, 1, 2), n_total = 400, effectiveness = 1))
 })
 
 test_that("a zero slope difference errors instead of returning NA", {
   # Stata returns N = . silently here (ado:636 divides by zero).
   p <- ref_params("healthy", slope = 1, slope_comparator = 1)
   expect_error(slope_sample_size(p, c(0, 1, 2)), "slope difference is exactly zero")
-  expect_error(slope_power(p, c(0, 1, 2), n = 400), "slope difference is exactly zero")
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 400), "slope difference is exactly zero")
 })
 
 test_that("both entry points reject objects that are not slope_params", {
   expect_error(slope_sample_size(list(slope = 1), c(0, 1, 2)), "slope_params")
-  expect_error(slope_power(list(slope = 1), c(0, 1, 2), n = 400), "slope_params")
+  expect_error(slope_power(list(slope = 1), c(0, 1, 2), n_total = 400), "slope_params")
 })
 
 test_that("a design must begin at baseline", {
   p <- ref_params()
   expect_error(slope_sample_size(p, c(1, 2)), "baseline")
-  expect_error(slope_power(p, c(1, 2), n = 400), "baseline")
+  expect_error(slope_power(p, c(1, 2), n_total = 400), "baseline")
 })
 
 # --- result objects ---------------------------------------------------------
 
 test_that("slope_sample_size() returns exactly the contract fields", {
   r <- slope_sample_size(ref_params(), c(0, 1, 2), effectiveness = 0.33)
-  expect_setequal(names(r), c(
-    "n", "n_per_arm", "power", "alpha", "effectiveness", "target", "tte",
+  expect_identical(names(r), c(
+    "n_total", "n_per_arm", "power", "alpha", "effectiveness", "target", "tte",
     "var_tte", "effect_size", "slope_difference", "reference_slope",
-    "params", "design"))
-  expect_length(names(r), 13L)
-  # n_requested belongs to the power branch: nothing was requested here
-  expect_false("n_requested" %in% names(r))
+    "visits_total", "visits_per_arm", "params", "design"))
+  expect_equal(r$n_total, 2 * r$n_per_arm)
+  expect_equal(r$visits_total, 2 * r$visits_per_arm)
+  # The requested pair belongs to the power branch: nothing was requested here
+  expect_false(any(grepl("^n_requested", names(r))))
   # solve_for is gone from the objects; the class carries it
   expect_false("solve_for" %in% names(r))
 })
 
 test_that("slope_power() returns exactly the contract fields", {
-  r <- slope_power(ref_params(), c(0, 1, 2), n = 450, effectiveness = 0.33)
-  expect_setequal(names(r), c(
-    "n", "n_per_arm", "n_requested", "power", "alpha", "effectiveness",
-    "target", "tte", "var_tte", "effect_size", "slope_difference",
-    "reference_slope", "params", "design"))
-  expect_length(names(r), 14L)
+  r <- slope_power(ref_params(), c(0, 1, 2), n_total = 450, effectiveness = 0.33)
+  expect_identical(names(r), c(
+    "n_total", "n_per_arm", "n_requested_total", "n_requested_per_arm", "power",
+    "alpha", "effectiveness", "target", "tte", "var_tte", "effect_size",
+    "slope_difference", "reference_slope", "visits_total", "visits_per_arm",
+    "params", "design"))
   expect_false("solve_for" %in% names(r))
 })
 
@@ -412,8 +416,8 @@ test_that("as.data.frame() column names are stable across every scenario", {
     slope_sample_size(ref_params("healthy", -1.715, 0.975), c(0, 1, 2), effectiveness = 0.33),
     slope_sample_size(ref_params("treated", -1.852, -1.104), c(0, 1, 2), effectiveness = 0.33),
     slope_sample_size(ref_params("treated", -1.852, -1.104), c(0, 2, 3), target = "observed"),
-    slope_power(ref_params("none"), c(0, 1, 2), n = 450, effectiveness = 0.33),
-    slope_power(ref_params("treated", -1.852, -1.104), c(0, 2, 3), n = 450, target = "observed"),
+    slope_power(ref_params("none"), c(0, 1, 2), n_total = 450, effectiveness = 0.33),
+    slope_power(ref_params("treated", -1.852, -1.104), c(0, 2, 3), n_total = 450, target = "observed"),
     slope_sample_size(ref_params("none"), c(0, 1, 2), c(0, 0.1),
                       effectiveness = 0.33)
   )
@@ -432,7 +436,7 @@ test_that("slope_effect_size() agrees with the value inside both entry points", 
   d <- c(0, 0.1)
   es <- slope_effect_size(p, v, d)
   expect_equal(es, slope_sample_size(p, v, d, effectiveness = 0.33)$effect_size)
-  expect_equal(es, slope_power(p, v, d, n = 400, effectiveness = 0.33)$effect_size)
+  expect_equal(es, slope_power(p, v, d, n_total = 400, effectiveness = 0.33)$effect_size)
 })
 
 test_that("the effect size takes the sign of the slope difference", {
@@ -441,8 +445,8 @@ test_that("the effect size takes the sign of the slope difference", {
   expect_lt(slope_effect_size(falling, c(0, 1, 2)), 0)
   expect_gt(slope_effect_size(rising,  c(0, 1, 2)), 0)
   # only the magnitude drives the sample size
-  expect_equal(slope_sample_size(falling, c(0, 1, 2), effectiveness = 0.33)$n,
-               slope_sample_size(rising,  c(0, 1, 2), effectiveness = 0.33)$n)
+  expect_equal(slope_sample_size(falling, c(0, 1, 2), effectiveness = 0.33)$n_total,
+               slope_sample_size(rising,  c(0, 1, 2), effectiveness = 0.33)$n_total)
 })
 
 # --- printing ---------------------------------------------------------------
@@ -460,20 +464,20 @@ test_that("print.slope_sample_size() runs for every scenario, including NA field
   expect_true(any(grepl("number of observations in model = \\.", out)))
   # the target power is an input here, so it is shown and no N is specified
   expect_true(any(grepl("^ +power = 0\\.800", out)))
-  expect_false(any(grepl("specified N", out)))
+  expect_false(any(grepl("requested N", out)))
   # effectiveness is missing under target = "observed"
   expect_true(any(grepl("effectiveness = \\.", capture.output(print(cases[[3]])))))
 })
 
 test_that("print.slope_power() shows the requested N and the achieved power, on either basis", {
-  r <- slope_power(ref_params("none"), c(0, 1, 2), n = 451, effectiveness = 0.33)
+  r <- slope_power(ref_params("none"), c(0, 1, 2), n_total = 451, effectiveness = 0.33)
   expect_identical(attr(r, "per_arm"), TRUE)
 
   # Total basis: unchanged from before per_arm existed.
   out <- capture.output(print(r, per_arm = FALSE))
   expect_true(any(grepl("Parameters for planned study", out)))
-  expect_true(any(grepl("specified N = 451", out)))
-  expect_true(any(grepl("actual N = 450", out)))
+  expect_true(any(grepl("requested N total = 451", out)))
+  expect_true(any(grepl("N total = 450", out)))
   expect_true(any(grepl("Estimated power", out)))
   expect_false(any(grepl("Estimated sample size", out)))
   expect_false(any(grepl("per arm", out)))
@@ -481,10 +485,10 @@ test_that("print.slope_power() shows the requested N and the achieved power, on 
   # Per-arm basis, the default: both the specified and the actual count move
   # to it -- cat_count() prints the un-evened half without rounding it away.
   out_arm <- capture.output(print(r))
-  expect_true(any(grepl("specified N per arm = 225\\.5", out_arm)))
+  expect_true(any(grepl("requested N per arm = 225\\.5", out_arm)))
   expect_true(any(grepl("N per arm = 225$", out_arm)))
-  expect_false(any(grepl("^ *specified N = ", out_arm)))
-  expect_false(any(grepl("^ *actual N = ", out_arm)))
+  expect_false(any(grepl("^ *requested N total = ", out_arm)))
+  expect_false(any(grepl("^ *N total = ", out_arm)))
 
   expect_error(print(r, per_arm = 1), "per_arm")
 })
@@ -509,7 +513,7 @@ test_that("the printed schedule renders the dropout at each follow-up visit", {
   # dropout[1] covers baseline-only attenders (CONTRACT.md 5.4) -- expected for
   # a flat rate, and not what is under test here.
   expect_identical(schedule_of(suppressWarnings(
-    slope_power(p, c(0, 1, 2), c(0.05, 0.05), n = 200, effectiveness = 0.33))),
+    slope_power(p, c(0, 1, 2), c(0.05, 0.05), n_total = 200, effectiveness = 0.33))),
                    "1 (0.05), 2 (0.05)")
 
   # A zero keeps its "(0)" rather than the visit being dropped from the list --
@@ -525,7 +529,7 @@ test_that("the printed schedule renders the dropout at each follow-up visit", {
   # 5.1), so the six-monthly row of Table 1, p.595 prints half-year times rather
   # than 1..6.
   expect_identical(
-    schedule_of(suppressWarnings(slope_power(p, seq(0, 3, 0.5), rep(0.025, 6), n = 450,
+    schedule_of(suppressWarnings(slope_power(p, seq(0, 3, 0.5), rep(0.025, 6), n_total = 450,
                                              effectiveness = 0.33))),
     "0.5 (0.025), 1 (0.025), 1.5 (0.025), 2 (0.025), 2.5 (0.025), 3 (0.025)")
 
@@ -533,7 +537,7 @@ test_that("the printed schedule renders the dropout at each follow-up visit", {
   # a separate loop for that case -- on both print methods.
   expect_identical(schedule_of(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)),
                    "1, 2")
-  expect_identical(schedule_of(slope_power(p, seq(0, 3, 0.5), n = 450, effectiveness = 0.33)),
+  expect_identical(schedule_of(slope_power(p, seq(0, 3, 0.5), n_total = 450, effectiveness = 0.33)),
                    "0.5, 1, 1.5, 2, 2.5, 3")
 })
 
@@ -543,9 +547,10 @@ test_that("the two print methods share the data-characteristics block verbatim",
   p <- ref_params("healthy", -1.715, 0.975)
   head_of <- function(x) {
     out <- capture.output(print(x))
-    out[seq_len(which(out == "Parameters for planned study:") - 1L)]
+    # From the data block on: the title names the question, so differs.
+    out[seq(which(out == "Data characteristics:"), which(out == "Parameters for planned study:") - 1L)]
   }
   a <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
-  b <- slope_power(p, c(0, 1, 2), n = 450, effectiveness = 0.33)
+  b <- slope_power(p, c(0, 1, 2), n_total = 450, effectiveness = 0.33)
   expect_identical(head_of(a), head_of(b))
 })

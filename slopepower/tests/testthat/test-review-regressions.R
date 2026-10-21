@@ -45,7 +45,7 @@ test_that("dropout given cumulatively prices the same trial as its increments", 
     effectiveness = 0.33))
   from_incr <- suppressWarnings(slope_sample_size(
     p, c(0, 1, 2, 3), dropout = c(0.05, 0.05, 0.05), effectiveness = 0.33))
-  expect_equal(from_cumul$n, from_incr$n)
+  expect_equal(from_cumul$n_total, from_incr$n_total)
   expect_equal(from_cumul$var_tte, from_incr$var_tte, tolerance = 1e-10)
   expect_true(from_cumul$design$has_dropout)
 })
@@ -92,22 +92,22 @@ test_that("a bootstrap cannot be asked to bootstrap its own input", {
   expect_match(err, "use slope_power_boot\\(\\) instead")
   expect_false(grepl("'arg'", err, fixed = TRUE))
 
-  expect_match(tryCatch(slope_power_boot(p, c(0, 1, 2), n = 712, R = 5, statistic = "n"),
+  expect_match(tryCatch(slope_power_boot(p, c(0, 1, 2), n_total = 712, R = 5, statistic = "n"),
                         error = conditionMessage),
                "use\\s+slope_sample_size_boot\\(\\) instead")
 
   # And the solved-for quantity cannot be smuggled in alongside: it is not an
   # argument at all, so R refuses it rather than it being silently ignored.
-  expect_error(slope_sample_size_boot(p, c(0, 1, 2), R = 5, n = 400), "unused argument")
-  expect_error(slope_power_boot(p, c(0, 1, 2), n = 400, R = 5, power = 0.8),
+  expect_error(slope_sample_size_boot(p, c(0, 1, 2), R = 5, n_total = 400), "unused argument")
+  expect_error(slope_power_boot(p, c(0, 1, 2), n_total = 400, R = 5, power = 0.8),
                "unused argument")
 
   # "tte" is reachable from either: it depends on neither n nor power.
   b <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33,
                                                R = 3, statistic = "tte"))
-  expect_equal(b$observed, ss$tte)
-  expect_equal(suppressWarnings(slope_power_boot(p, c(0, 1, 2), n = 712, effectiveness = 0.33,
-                                                 R = 3, statistic = "tte"))$observed,
+  expect_equal(boot_main(b)$observed, ss$tte)
+  expect_equal(suppressWarnings(slope_power_boot(p, c(0, 1, 2), n_total = 712, effectiveness = 0.33,
+                                                 R = 3, statistic = "tte"))$tte,
                ss$tte)
 })
 
@@ -121,20 +121,20 @@ test_that("a bootstrap solves the same calculation its stage-two function does",
                           effectiveness = 0.4, power = 0.9, alpha = 0.01)
   expect_equal(suppressWarnings(slope_sample_size_boot(
     p, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1), effectiveness = 0.4, power = 0.9,
-    alpha = 0.01, R = 3))$observed, ss$n)
+    alpha = 0.01, R = 3))$n_total, ss$n_total)
 
-  pw <- slope_power(p, c(0, 1, 2), n = 401, effectiveness = 0.33, alpha = 0.1)
+  pw <- slope_power(p, c(0, 1, 2), n_total = 401, effectiveness = 0.33, alpha = 0.1)
   # n = 401 is rounded down to 400 for equal arms; the replicates must answer
   # for the number actually used, not the one requested.
   expect_equal(suppressWarnings(slope_power_boot(
-    p, c(0, 1, 2), n = 401, effectiveness = 0.33, alpha = 0.1, R = 3))$observed, pw$power)
+    p, c(0, 1, 2), n_total = 401, effectiveness = 0.33, alpha = 0.1, R = 3))$power, pw$power)
 
   # target = "observed" stores effectiveness as NA and rejects it as an input,
   # so it must not be passed along when the replicates are re-solved.
   p3 <- paper_fit("slpower3")
   ss3 <- slope_sample_size(p3, c(0, 0.5, 2), target = "observed")
   expect_equal(suppressWarnings(slope_sample_size_boot(
-    p3, c(0, 0.5, 2), target = "observed", R = 3))$observed, ss3$n)
+    p3, c(0, 0.5, 2), target = "observed", R = 3))$n_total, ss3$n_total)
   expect_error(slope_sample_size_boot(p3, c(0, 0.5, 2), target = "observed",
                                       effectiveness = 0.5, R = 3),
                "only one of `effectiveness`")
@@ -166,10 +166,10 @@ test_that("a bootstrap says the stage-two calculation's warning once, not per re
   expect_length(extreme, 1L)
   expect_match(extreme, "^slope_sample_size_boot\\(\\)")
   # the observed value is still exactly the one the stage-two call reports
-  expect_equal(b$observed, ss$n)
+  expect_equal(boot_main(b)$observed, ss$n_total)
 })
 
-test_that("an explicit n = NULL is caught by the guard, not by the solver", {
+test_that("an explicit n_total = NULL is caught by the guard, not by the solver", {
   # solve_slope() picks its branch on is.null(n) while the guards were checking
   # missing(n), so `n = NULL` -- what do.call() produces from an argument list
   # with an unset element -- slipped through into the solve-for-n branch and
@@ -178,17 +178,17 @@ test_that("an explicit n = NULL is caught by the guard, not by the solver", {
   p <- ref_params()
 
   for (call_it in list(
-    function() slope_power(p, c(0, 1, 2), n = NULL),
-    function() do.call(slope_power, list(params = p, visits = c(0, 1, 2), n = NULL))
+    function() slope_power(p, c(0, 1, 2), n_total = NULL),
+    function() do.call(slope_power, list(params = p, visits = c(0, 1, 2), n_total = NULL))
   )) {
     err <- tryCatch(call_it(), error = conditionMessage)
-    expect_match(err, "`n` is required")
+    expect_match(err, "is required")
     expect_false(grepl("`power` must be", err))
   }
 
-  err_grid <- tryCatch(slope_power_grid(p, visits = list(a = c(0, 1, 2)), n = NULL),
+  err_grid <- tryCatch(slope_power_grid(p, visits = list(a = c(0, 1, 2)), n_total = NULL),
                        error = conditionMessage)
-  expect_match(err_grid, "`n` is required")
+  expect_match(err_grid, "is required")
   # the old failure surfaced from inside the loop, wrapped per cell
   expect_false(grepl("failed", err_grid))
 })
@@ -204,7 +204,7 @@ test_that("slope_effect_size() takes no effectiveness argument", {
   es <- slope_effect_size(p, c(0, 1, 2))
   for (e in c(0.1, 0.33, 0.9)) {
     n_manual <- 2 * ceiling((stats::qnorm(0.975) + stats::qnorm(0.8))^2 / (es * e)^2)
-    expect_equal(slope_sample_size(p, c(0, 1, 2), effectiveness = e)$n, n_manual)
+    expect_equal(slope_sample_size(p, c(0, 1, 2), effectiveness = e)$n_total, n_manual)
   }
 })
 
@@ -221,7 +221,7 @@ test_that("both grids enforce the effectiveness/observed guard", {
     "only one of"
   )
   expect_error(
-    slope_power(p3, c(0, 2, 3), n = 400, target = "observed",
+    slope_power(p3, c(0, 2, 3), n_total = 400, target = "observed",
                 effectiveness = 0.9),
     "only one of"
   )
@@ -231,7 +231,7 @@ test_that("both grids enforce the effectiveness/observed guard", {
     "only one of"
   )
   expect_error(
-    slope_power_grid(p3, visits = list(a = c(0, 2, 3)), n = 400,
+    slope_power_grid(p3, visits = list(a = c(0, 2, 3)), n_total = 400,
                      target = "observed", effectiveness = 0.9),
     "only one of"
   )
@@ -241,7 +241,7 @@ test_that("both grids enforce the effectiveness/observed guard", {
     slope_sample_size_grid(p3, visits = list(a = c(0, 2, 3)),
                            dropout = list(d = c(0.2, 0.1)), target = "observed",
                            per_arm = FALSE))
-  expect_equal(g$n[1], 318)
+  expect_equal(g$n_total[1], 318)
 })
 
 # --- regressions from the full-package review of 9540a0f --------------------
@@ -416,7 +416,7 @@ test_that("an alpha too small for 1 - alpha/2 errors instead of returning N = In
   # Everything an actual study would use is untouched, and still finite.
   for (a in c(0.05, 0.01, 1e-8, 1e-14)) {
     expect_true(is.finite(slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33,
-                                            alpha = a)$n))
+                                            alpha = a)$n_total))
   }
   # And the default is bit-for-bit what it was: parity with the .ado, not a
   # numerically nicer formula, is what z_alpha() is written to preserve.
@@ -435,11 +435,11 @@ test_that("whole numbers print in full rather than in scientific notation", {
   expect_match(fmt_line("N", 712, digits = 0L), "N = 712$")
 
   p <- ref_params()
-  out <- capture.output(print(slope_power(p, c(0, 1, 2), n = 100000,
+  out <- capture.output(print(slope_power(p, c(0, 1, 2), n_total = 100000,
                                           effectiveness = 0.33),
                               per_arm = FALSE))
-  expect_true(any(grepl("specified N = 100000", out, fixed = TRUE)))
-  expect_true(any(grepl("actual N = 100000", out, fixed = TRUE)))
+  expect_true(any(grepl("requested N total = 100000", out, fixed = TRUE)))
+  expect_true(any(grepl("N total = 100000", out, fixed = TRUE)))
   expect_false(any(grepl("1e+05", out, fixed = TRUE)))
 })
 
@@ -496,8 +496,8 @@ test_that("a small-scale outcome prints its parameters, not a column of zeros", 
   # they agree only to within floating-point rounding, which is far finer than
   # the ceiling() between the ratio and n.
   design <- c(0, 1, 2, 3)
-  expect_identical(slope_sample_size(small, design, effectiveness = 0.3)$n,
-                   slope_sample_size(big, design, effectiveness = 0.3)$n)
+  expect_identical(slope_sample_size(small, design, effectiveness = 0.3)$n_total,
+                   slope_sample_size(big, design, effectiveness = 0.3)$n_total)
 
   out <- capture.output(print(small))
   shown <- grep("slope of|variance|covariance", out, value = TRUE)
@@ -522,7 +522,7 @@ test_that("a target power at or below alpha/2 is refused, not sized", {
   expect_error(slope_sample_size_floor(p, power = 0.01), "alpha/2")
   expect_error(slope_sample_size_grid(p, visits = 0:3, power = c(0.8, 0.01)))
   # Just above it is still a legitimate (tiny) answer.
-  expect_true(is.finite(slope_sample_size(p, 0:3, power = 0.03)$n))
+  expect_true(is.finite(slope_sample_size(p, 0:3, power = 0.03)$n_total))
 })
 
 test_that("`healthy`/`treated` resolve in the caller's frame, not the formula's", {
@@ -538,7 +538,7 @@ test_that("`healthy`/`treated` resolve in the caller's frame, not the formula's"
 test_that("a numeric design's errors name the stage-two function called", {
   p <- ref_params()
   expect_error(slope_sample_size(p, c(1, 2, 3)), "^slope_sample_size\\(\\)")
-  expect_error(slope_power(p, c(1, 2, 3), n = 100), "^slope_power\\(\\)")
+  expect_error(slope_power(p, c(1, 2, 3), n_total = 100), "^slope_power\\(\\)")
 })
 
 test_that("the boot grid's shared effect size gives each cell slope_sample_size_boot()'s answer", {
@@ -558,9 +558,10 @@ test_that("the boot grid's shared effect size gives each cell slope_sample_size_
     one <- suppressWarnings(slope_sample_size_boot(
       pars, designs[[grid$design[k]]], effectiveness = 0.33,
       power = grid$power[k], alpha = grid$alpha[k], R = 12, seed = 2))
-    expect_equal(grid$n_mean[k], one$boot_mean)
-    expect_equal(c(grid$n_lower[k], grid$n_upper[k]), one$ci)
-    expect_equal(grid$n_failed[k], one$n_failed)
+    expect_equal(grid$n_total_mean[k], one$n_total_mean)
+    expect_equal(c(grid$n_total_lower[k], grid$n_total_upper[k]),
+                 c(one$n_total_lower, one$n_total_upper))
+    expect_equal(grid$replicates_failed[k], one$replicates_failed)
   }
 })
 
@@ -588,7 +589,7 @@ test_that("the section 2.6 check follows the slope difference under healthy cont
   expect_true(any(grepl("estimated slope difference", w)))
   expect_identical(b$straddle_of, "slope difference")
   diffs_se <- sqrt(sum(c(1, 1, -2) * vcov(q)[c(1, 4, 2)]))
-  expect_equal(b$se, diffs_se)
+  expect_equal(b$slope_se, diffs_se)
   expect_true(any(grepl("refit a slope difference on",
                         capture.output(print(b)), fixed = TRUE)))
   # slope_params_boot() bootstraps the slope itself, and is checked on it.
@@ -600,7 +601,7 @@ test_that("without a comparator target the check stays on the slope", {
   b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), R = 5,
                                                seed = 1, ci_method = "percentile"))
   expect_identical(b$straddle_of, "slope")
-  expect_equal(b$se, slope_se(paper_fit("slpower1")))
+  expect_equal(b$slope_se, slope_se(paper_fit("slpower1")))
 })
 
 test_that("discarded replicates are reported by cause", {
@@ -630,20 +631,20 @@ test_that("a grid computes each design's dropout strata once, not once per cell"
     real(...)
   })
   g <- slope_power_grid(p, visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)),
-                        n = c(200, 300, 400), effectiveness = c(0.25, 0.5))
+                        n_total = c(200, 300, 400), effectiveness = c(0.25, 0.5))
   expect_equal(nrow(g), 12L)
   expect_equal(calls, 2L)
 })
 
 test_that("a grid checks `params` once, under its own name", {
-  expect_error(slope_power_grid(list(), visits = c(0, 1, 2), n = 200),
+  expect_error(slope_power_grid(list(), visits = c(0, 1, 2), n_total = 200),
                "^slope_power_grid\\(\\): `params` must be")
 })
 
 test_that("a grid names the cell whose dropout is the wrong length", {
   expect_error(
     slope_power_grid(paper_fit("slpower1"), visits = list(a = c(0, 1, 2), b = c(0, 1, 2, 3)),
-                     dropout = list(x = c(0, 0.1)), n = 200),
+                     dropout = list(x = c(0, 0.1)), n_total = 200),
     'design "b".*one element per follow-up visit.*dropout_rate\\(\\)')
 })
 
@@ -657,7 +658,7 @@ test_that("a design-specific result without its design is not printed as a bound
   expect_true(any(grepl("Estimated sample size", out, fixed = TRUE)))
   expect_false(any(grepl("bound", out, fixed = TRUE)))
 
-  pw <- slope_power(p, c(0, 1, 2), n = 300)
+  pw <- slope_power(p, c(0, 1, 2), n_total = 300)
   pw$design <- NULL
   out <- capture.output(print(pw))
   expect_true(any(grepl("Estimated power", out, fixed = TRUE)))

@@ -13,8 +13,8 @@
 
 \item{...}{Ignored.}
 
-\item{per_arm}{Which basis to print a bootstrapped \code{n} on: \code{TRUE} for
-participants per arm, \code{FALSE} for the trial total. Defaults to \code{NULL},
+\item{per_arm}{Which basis to print a bootstrapped sample size on: \code{TRUE}
+for the \code{n_per_arm} row, \code{FALSE} for \code{n_total}. Defaults to \code{NULL},
 meaning "whatever the bootstrap was called with" -- read from \code{x}'s
 \code{per_arm} attribute, or per arm if that is absent. Ignored, silently, for
 any statistic other than a sample size.}
@@ -23,17 +23,13 @@ any statistic other than a sample size.}
 \code{x}, invisibly.
 }
 \description{
-Printed as a data frame, by R itself: one row for the statistic, on the
-chosen basis when it is a sample size, and columns for the calculated
-value, the bootstrap mean and SD, and the interval. The method, replicate
+A title naming what was bootstrapped, then a table with one row per
+quantity -- the statistic, on the chosen basis when it is a sample size,
+and the refitted slope beneath it -- and a column per field: \code{estimate}
+(from the original fit), \code{mean}, \code{sd}, \code{lower}, \code{upper}. A row name and a
+column name together are the field the value was read from: row
+\code{n_per_arm}, column \code{lower} is \code{x$n_per_arm_lower}. The method, replicate
 count, interval level, and the failure and sign-straddling counts are
 reported in the notes beneath, which print on every call whether or not
-anything went wrong; for a sample size, a "Counts:" note ahead of them
-says which basis -- per arm or total -- the row is on.
-}
-\details{
-The resampled slope is not shown. It is still on the object, in
-\code{slope_observed} and the five fields beside it (see \sQuote{Value} in
-\code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}}), and the straddle note still reports the one
-thing about it that bears on whether the interval means anything.
+anything went wrong.
 }

@@ -49,7 +49,7 @@ test_that("slpower3: control and treated arm slopes match the paper (p.594)", {
 test_that("p.588: annual visits over two years gives N = 712", {
   r <- slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
-  expect_equal(r$n, 712)
+  expect_equal(r$n_total, 712)
   expect_equal(r$n_per_arm, 356)
   expect_equal(r$power, 0.8)
   expect_equal(r$alpha, 0.05)
@@ -59,14 +59,14 @@ test_that("p.588: extended follow-up with 10% dropout gives N = 328", {
   r <- slope_sample_size(paper_fit("slpower1"), c(0, 1, 2, 5), dropout = c(0, 0, 0.1),
                          effectiveness = 0.33)
   expect_printed(r$tte, 0.552, "target treatment difference")
-  expect_equal(r$n, 328)
+  expect_equal(r$n_total, 328)
   expect_equal(r$n_per_arm, 164)
 })
 
 test_that("p.589: six-monthly visits over two years gives N = 620", {
   r <- slope_sample_size(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
                          effectiveness = 0.33)
-  expect_equal(r$n, 620)
+  expect_equal(r$n_total, 620)
   expect_equal(r$n_per_arm, 310)
 })
 
@@ -83,13 +83,13 @@ test_that("p.589: the same design on a rescaled time axis also gives N = 620", {
 
   r <- slope_sample_size(p, 0:4, effectiveness = 0.33)
   expect_printed(r$tte, 0.276, "tte on the half-year axis")
-  expect_equal(r$n, 620)
+  expect_equal(r$n_total, 620)
   expect_equal(r$n_per_arm, 310)
 
   # identical to the year-axis result
   r_year <- slope_sample_size(paper_fit("slpower1"), c(0, 0.5, 1, 1.5, 2),
                               effectiveness = 0.33)
-  expect_equal(r$n, r_year$n)
+  expect_equal(r$n_total, r_year$n_total)
   expect_equal(r$effect_size, r_year$effect_size, tolerance = 1e-8)
 })
 
@@ -101,7 +101,7 @@ test_that("p.590: cases versus healthy controls gives N = 296", {
   p <- paper_fit("slpower2")
   r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33)
   expect_printed(r$tte, 0.888, "target treatment difference")
-  expect_equal(r$n, 296)
+  expect_equal(r$n_total, 296)
   expect_equal(r$n_per_arm, 148)
   # the effect is measured toward the healthy-control slope, not toward zero
   expect_equal(r$reference_slope, p$slope_comparator)
@@ -111,11 +111,11 @@ test_that("p.593: N = 200 with 5% dropout per visit gives power 0.597", {
   # dropout[1] = 0.05 attends baseline only and contributes nothing; the
   # warning is expected here and is asserted rather than suppressed.
   r <- expect_warning(slope_power(paper_fit("slpower2"), c(0, 1, 2), dropout = c(0.05, 0.05),
-                                  n = 200, effectiveness = 0.33),
+                                  n_total = 200, effectiveness = 0.33),
                       "contribute nothing")
   expect_printed(r$tte, 0.888, "target treatment difference")
   expect_printed(r$power, 0.597, "estimated power")
-  expect_equal(r$n, 200)
+  expect_equal(r$n_total, 200)
   expect_equal(r$n_per_arm, 100)
 })
 
@@ -130,7 +130,7 @@ test_that("p.594: targeting the previously observed effect gives N = 318", {
                                         dropout = c(0.2, 0.1), target = "observed"),
                       "contribute nothing")
   expect_printed(r$tte, 0.747, "target treatment difference")
-  expect_equal(r$n, 318)
+  expect_equal(r$n_total, 318)
   expect_equal(r$n_per_arm, 159)
   expect_true(is.na(r$effectiveness))
 })
@@ -141,8 +141,8 @@ test_that("p.594: powering for a fraction p of the observed effect scales as p^-
   p3 <- paper_fit("slpower3")
   ss <- suppressWarnings(slope_sample_size(p3, c(0, 2, 3), dropout = c(0.2, 0.1),
                                            target = "observed"))
-  expect_equal(ss$n, 318)
-  expect_equal(ss$n * 4, 1272)
+  expect_equal(ss$n_total, 318)
+  expect_equal(ss$n_total * 4, 1272)
 
   # The published shortcut is slightly conservative, and the two figures it
   # sits between are what this pins. The scaling law is exact on the unrounded
@@ -166,12 +166,12 @@ test_that("p.594: powering for a fraction p of the observed effect scales as p^-
     cov_intercept_slope = p3$cov_intercept_slope, sigma2_residual = p3$sigma2_residual,
     comparator          = "treated")
   expect_equal(suppressWarnings(slope_sample_size(halved, c(0, 2, 3), dropout = c(0.2, 0.1),
-                                                 target = "observed"))$n, 1266)
+                                                 target = "observed"))$n_total, 1266)
 
   # The gap is bounded by p^-2 participants per arm, which is what makes the
   # shortcut safe to use: it over-recruits, never under-recruits.
-  expect_gte(ss$n * 4, exact)
-  expect_lt((ss$n * 4 - exact) / 2, 0.5^-2)
+  expect_gte(ss$n_total * 4, exact)
+  expect_lt((ss$n_total * 4 - exact) / 2, 0.5^-2)
 })
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ test_that("Table 1: all nine published powers reproduce", {
     visits  <- table1_visits[[design_name]]
     dropout <- table1_dropout[[dropout_name]][[design_name]]
 
-    r <- suppressWarnings(slope_power(p, visits, dropout = dropout, n = 450,
+    r <- suppressWarnings(slope_power(p, visits, dropout = dropout, n_total = 450,
                                       effectiveness = 0.33))
 
     expect_printed(r$power, expected,
@@ -240,7 +240,7 @@ test_that("Table 1: extra visits buy more power as dropout worsens", {
     suppressWarnings(slope_power(
       p, table1_visits[[design_name]],
       dropout = table1_dropout[[dropout_name]][[design_name]],
-      n = 450, effectiveness = 0.33))$power
+      n_total = 450, effectiveness = 0.33))$power
   }
 
   gain_none <- power_of("six_month", "none")  - power_of("final_only", "none")
@@ -260,13 +260,13 @@ test_that("Table 1: extra visits buy more power as dropout worsens", {
 
 test_that("every published sample size round-trips to its stated power", {
   cases <- list(
-    list(p = "slpower1", visits = c(0, 1, 2), dropout = NULL, n = 712),
-    list(p = "slpower1", visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1), n = 328),
-    list(p = "slpower1", visits = c(0, 0.5, 1, 1.5, 2), dropout = NULL, n = 620),
-    list(p = "slpower2", visits = c(0, 1, 2), dropout = NULL, n = 296)
+    list(p = "slpower1", visits = c(0, 1, 2), dropout = NULL, n_total = 712),
+    list(p = "slpower1", visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1), n_total = 328),
+    list(p = "slpower1", visits = c(0, 0.5, 1, 1.5, 2), dropout = NULL, n_total = 620),
+    list(p = "slpower2", visits = c(0, 1, 2), dropout = NULL, n_total = 296)
   )
   for (cs in cases) {
-    r <- slope_power(paper_fit(cs$p), cs$visits, dropout = cs$dropout, n = cs$n,
+    r <- slope_power(paper_fit(cs$p), cs$visits, dropout = cs$dropout, n_total = cs$n_total,
                      effectiveness = 0.33)
     expect_gte(r$power, 0.8)
     expect_lt(r$power, 0.806)   # the ceiling() overshoot only
@@ -284,5 +284,5 @@ test_that("the published examples tabulate with identical columns", {
   for (r in rows) expect_identical(names(r), reference)
   combined <- do.call(rbind, rows)
   expect_equal(nrow(combined), 3L)
-  expect_equal(combined$n, c(712, 296, 318))
+  expect_equal(combined$n_total, c(712, 296, 318))
 })

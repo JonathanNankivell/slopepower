@@ -573,19 +573,22 @@ check_n_or_power <- function(alpha, n, power, context) {
   if (is.null(n)) {
     check_target_power(power, alpha, context)
   } else {
-    check_whole_number(n, "n", "participants", context, lower = 2)
+    check_whole_number(n, "n_total", "participants", context, lower = 2)
   }
   is.null(n)
 }
 
-#' Add `n_requested` to a power-direction result
+#' Add the requested sample size to a power-direction result
 #'
-#' Kept separately from `n`, which is the even number actually used. Positioned
-#' by name rather than by index: CONTRACT.md section 4.2 fixes it "after
+#' Kept separately from `n_total`/`n_per_arm`, the even numbers actually used.
+#' The per-arm figure is the requested total halved, so an odd request shows
+#' as a half participant per arm -- which is what was asked for. Positioned by
+#' name rather than by index: CONTRACT.md section 4.2 fixes the pair "after
 #' n_per_arm", and `stage_two_result()` assembles that list elsewhere.
 #' @noRd
-add_n_requested <- function(res, n) {
-  append(res, list(n_requested = as.numeric(n)),
+add_n_requested <- function(res, n_total) {
+  append(res, list(n_requested_total = as.numeric(n_total),
+                   n_requested_per_arm = as.numeric(n_total) / 2),
          after = match("n_per_arm", names(res)))
 }
 
@@ -624,16 +627,17 @@ check_target_power <- function(power, alpha, context) {
 #' rather than erroring, so the failure would surface much later as an `rbind()`
 #' mismatch between a floor row and a sample-size row.
 #'
-#' `design` is the one field the floor has no value for (section 4.3: there is
-#' no design, and one must not be added), so it is appended only when supplied
-#' --- `c()` keeps it last, where section 4.2 requires it. Both branches of
-#' `solve_slope()` satisfy `n == 2 * n_per_arm`, including the power branch,
-#' where `n_per_arm` is derived from the evened-down `n`.
+#' `design`, and the expected visit burden `visits_total`/`visits_per_arm` it
+#' implies, are what the floor has no value for (section 4.3: there is no
+#' design, and one must not be added), so they are appended only when a design
+#' is supplied -- `design` last, where section 4.2 requires it. Every count
+#' comes as a `_total`/`_per_arm` pair with `_total == 2 * _per_arm`, including
+#' the power branch, where `n_per_arm` is derived from the evened-down total.
 #' @noRd
 stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
                              effect_size, params, design = NULL) {
   out <- list(
-    n                = 2 * n_per_arm,
+    n_total          = 2 * n_per_arm,
     n_per_arm        = n_per_arm,
     power            = power,
     alpha            = alpha,
@@ -646,7 +650,12 @@ stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
     reference_slope  = comp$reference_slope,
     params           = params
   )
-  if (is.null(design)) out else c(out, list(design = design))
+  if (is.null(design)) return(out)
+  visits_pp <- expected_visits(design)
+  append(c(out, list(design = design)),
+         list(visits_total = 2 * n_per_arm * visits_pp,
+              visits_per_arm = n_per_arm * visits_pp),
+         after = match("reference_slope", names(out)))
 }
 
 #' Everything `slope_sample_size()` and `slope_power()` have in common
@@ -736,11 +745,11 @@ solve_slope <- function(params, design, effectiveness,
 #'   the equivalent of the Stata command's `usetrt` option and requires
 #'   parameters estimated from a previous trial.
 #' @param alpha Two-sided significance level. Defaults to 0.05.
-#' @param per_arm Which basis `n` is printed on: `TRUE` (the default) for
-#'   participants per arm, `FALSE` for the trial total. Display only --- the
-#'   result carries both `n` and `n_per_arm` regardless; `per_arm` is recorded
-#'   as an attribute (`attr(x, "per_arm")`) and picks which one `print()`
-#'   leads with, and it can still be overridden afterwards with
+#' @param per_arm Which basis the sample size is printed on: `TRUE` (the
+#'   default) for participants per arm, `FALSE` for the trial total. Display
+#'   only --- the result carries both `n_total` and `n_per_arm` regardless;
+#'   `per_arm` is recorded as an attribute (`attr(x, "per_arm")`) and picks
+#'   which one `print()` shows, and it can still be overridden afterwards with
 #'   `print(x, per_arm = FALSE)`.
 #'
 #' @section The reference slope:
@@ -886,13 +895,17 @@ NULL
 #' @inheritParams stage_two
 #' @param power Desired power, between `alpha / 2` and 1. Defaults to 0.8.
 #'
-#' @return An object of class `slope_sample_size`, a list with elements `n`,
-#'   `n_per_arm`, `power`, `alpha`, `effectiveness`, `target`, `tte`, `var_tte`,
-#'   `effect_size`, `slope_difference`, `reference_slope`, `params` and `design`.
-#'   See [as.data.frame.slope_result()] for a tabular form whose column names are
-#'   stable across designs and across both entry points.
-#'   `per_arm` is recorded as an attribute rather than a list element -- it
-#'   picks which of `n`/`n_per_arm` `print()` leads with, and changes neither.
+#' @return An object of class `slope_sample_size`, a list with elements
+#'   `n_total`, `n_per_arm`, `power`, `alpha`, `effectiveness`, `target`,
+#'   `tte`, `var_tte`, `effect_size`, `slope_difference`, `reference_slope`,
+#'   `visits_total`, `visits_per_arm`, `params` and `design`. Every count comes
+#'   as a `_total`/`_per_arm` pair, the total twice the per-arm figure:
+#'   `n_total` is the trial size, and `visits_total` the visits it is expected
+#'   to need, allowing for dropout. See [as.data.frame.slope_result()] for a
+#'   tabular form whose column names are stable across designs and across both
+#'   entry points. `per_arm` is recorded as an attribute rather than a list
+#'   element -- it picks which of each pair `print()` shows, and changes
+#'   neither.
 #'
 #' @inheritSection stage_two The reference slope
 #' @inheritSection stage_two The visit schedule
@@ -980,14 +993,18 @@ sample_size_result <- function(params, design, power, effectiveness = NULL, targ
 #' participant up.
 #'
 #' @inheritParams stage_two
-#' @param n Total number of participants across both arms. Required: it is the
-#'   quantity whose power is being evaluated. Odd values are reduced by one so
-#'   that the arms are equal, with the value as supplied kept in `n_requested`.
+#' @param n_total,n_per_arm The sample size whose power is being evaluated:
+#'   the trial total, or participants in each arm. Supply exactly one. An odd
+#'   `n_total` is reduced by one so that the arms are equal; the value as
+#'   supplied is kept in `n_requested_total` (and, halved, in
+#'   `n_requested_per_arm`).
 #'
-#' @return An object of class `slope_power`, a list with elements `n`,
-#'   `n_per_arm`, `n_requested`, `power`, `alpha`, `effectiveness`, `target`,
-#'   `tte`, `var_tte`, `effect_size`, `slope_difference`, `reference_slope`,
-#'   `params` and `design`. See [as.data.frame.slope_result()] for a tabular form
+#' @return An object of class `slope_power`, a list with elements `n_total`,
+#'   `n_per_arm`, `n_requested_total`, `n_requested_per_arm`, `power`, `alpha`,
+#'   `effectiveness`, `target`, `tte`, `var_tte`, `effect_size`,
+#'   `slope_difference`, `reference_slope`, `visits_total`, `visits_per_arm`,
+#'   `params` and `design`: those of [slope_sample_size()], plus the sample
+#'   size as requested. See [as.data.frame.slope_result()] for a tabular form
 #'   whose column names are stable across designs and across both entry points.
 #'   `per_arm` is recorded as an attribute rather than a list element -- it
 #'   picks which basis `print()` reports every count on, and changes none of
@@ -1002,7 +1019,7 @@ sample_size_result <- function(params, design, power, effectiveness = NULL, targ
 #' # No comparator: measured toward a slope of zero, fitted to all two
 #' # hundred participants of `slpower1`. Reproduces the paper's p.588 result.
 #' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
-#' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+#' slope_power(pars, c(0, 1, 2), n_total = 712, effectiveness = 0.33)
 #'
 #' # Case/healthy-control comparator: measured toward the healthy controls'
 #' # slope. Two cases and two controls, a subset of `slpower2`, whose visits
@@ -1010,14 +1027,14 @@ sample_size_result <- function(params, design, power, effectiveness = NULL, targ
 #' df2 <- slpower2[slpower2$id %in% c(1, 2, 251, 252), ]
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
 #'                       comparator = "healthy", group = case)
-#' slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
+#' slope_power(pars2, c(0, 1, 2), n_total = 40, effectiveness = 0.33)
 #'
 #' # Randomised-trial comparator, target = "observed": what power would a
 #' # repeat trial have to detect the same effect the trial actually found,
 #' # fitted to all one hundred and fifty participants of `slpower3`.
 #' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
 #'                       comparator = "treated", group = treat)
-#' slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
+#' slope_power(pars3, c(0, 0.5, 2), n_total = 396, target = "observed")
 #'
 #' @seealso [dropout_rate()] to state dropout once for any schedule,
 #'   [slope_sample_size()] for the `n` a target power needs,
@@ -1026,19 +1043,19 @@ sample_size_result <- function(params, design, power, effectiveness = NULL, targ
 #' @export
 slope_power <- function(params, visits, dropout = NULL,
                         dropout_scale = c("incremental", "cumulative"),
-                        n, effectiveness = 0.25,
+                        n_total = NULL, n_per_arm = NULL, effectiveness = 0.25,
                         target = c("effectiveness", "observed"),
                         alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power()"
   per_arm <- check_per_arm(per_arm, context)
-  require_n(n, paste0(
+  n_total <- resolve_n(n_total, n_per_arm, paste0(
     "it is the sample size whose power is being\n",
     "  evaluated. To solve for the sample size that achieves a given power,\n",
     "  use slope_sample_size(params, visits, power = 0.8)."), context)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
   design <- stage_two_design(params, visits, dropout, match.arg(dropout_scale), context)
-  power_result(params, design, n, effectiveness, target, alpha, per_arm, context)
+  power_result(params, design, n_total, effectiveness, target, alpha, per_arm, context)
 }
 
 #' The body of [slope_power()], given a design already built
@@ -1047,12 +1064,12 @@ slope_power <- function(params, visits, dropout = NULL,
 #' `NULL` in both because the grids leave it out under `target = "observed"`,
 #' which ignores it.
 #' @noRd
-power_result <- function(params, design, n, effectiveness = NULL, target, alpha,
+power_result <- function(params, design, n_total, effectiveness = NULL, target, alpha,
                          per_arm, context, strata = NULL) {
   res <- solve_slope(params, design, effectiveness,
                      target = target, alpha = alpha,
-                     n = n, power = NULL, context = context, strata = strata)
-  res <- add_n_requested(res, n)
+                     n = n_total, power = NULL, context = context, strata = strata)
+  res <- add_n_requested(res, n_total)
   structure(res, class = c("slope_power", "slope_result"), per_arm = per_arm)
 }
 
@@ -1072,7 +1089,8 @@ schedule_string <- function(design) {
 #' What every stage-two print method opens with: the data block, then the
 #' planned-study heading and its first line, `alpha`
 #' @noRd
-print_opening_blocks <- function(x) {
+print_opening_blocks <- function(x, title) {
+  cat_title(title)
   print_data_block(x)
   cat("\nParameters for planned study:\n")
   cat_line("alpha", x$alpha)
@@ -1087,7 +1105,7 @@ print_data_block <- function(x) {
   params <- x$params
   comparator <- params$comparator
 
-  cat("\nData characteristics:\n")
+  cat("Data characteristics:\n")
   cat_line("number of observations in model", params$n_obs %||% NA, digits = 0L)
   cat_line("number of participants in model", params$n_subjects %||% NA, digits = 0L)
 
@@ -1107,11 +1125,19 @@ print_data_block <- function(x) {
   if (show_comparator) {
     cat_line(labels$comparator, params$slope_comparator)
   }
-  # Carried into every stage-two result: the answer is only right for a trial
-  # analysed with the same adjustment, and the same residual structure, as
-  # stage one.
-  covariate_note(params$covariates)
-  residual_note(params$residual)
+  invisible(x)
+}
+
+#' Close a stage-two printout with the notes on its parameters
+#'
+#' The answer is only right for a trial analysed with the same adjustment, the
+#' same residual structure and on the same time scale as stage one, so a
+#' result repeats what [print.slope_params()] says about them (see
+#' `params_notes()`, params.R), after the answer rather than before it.
+#' @noRd
+print_result_notes <- function(x) {
+  params_notes(x$params)
+  cat("\n")
   invisible(x)
 }
 
@@ -1159,13 +1185,14 @@ print_design_block <- function(x, bound) {
 #' @noRd
 print_n_result <- function(x, per_arm, context, bound) {
   per_arm <- display_basis(x, per_arm, context)
-  print_opening_blocks(x)
+  print_opening_blocks(x, if (bound) "Sample size: lower bound over all visit schedules"
+                          else "Sample size")
   cat_line("power", x$power)
   print_design_block(x, bound)
-  cat(if (bound) "\n  Lower bound on sample size:\n" else "\n  Estimated sample size:\n")
+  cat(if (bound) "\nLower bound on sample size:\n" else "\nEstimated sample size:\n")
   cat_n_line(x, per_arm)
   if (bound) cat_line("limiting s*^2", x$var_tte)
-  cat("\n")
+  print_result_notes(x)
   invisible(x)
 }
 
@@ -1173,14 +1200,15 @@ print_n_result <- function(x, per_arm, context, bound) {
 #' @noRd
 print_power_result <- function(x, per_arm, context, bound) {
   per_arm <- display_basis(x, per_arm, context)
-  print_opening_blocks(x)
-  cat_specified_n_line(x, per_arm)
-  cat_n_line(x, per_arm, total_label = "actual N")
+  print_opening_blocks(x, if (bound) "Power: upper bound over all visit schedules"
+                          else "Power")
+  cat_requested_n_line(x, per_arm)
+  cat_n_line(x, per_arm)
   print_design_block(x, bound)
   cat(if (bound) "\nUpper bound on power:\n" else "\nEstimated power:\n")
   cat_line("power", x$power)
   if (bound) cat_line("limiting s*^2", x$var_tte)
-  cat("\n")
+  print_result_notes(x)
   invisible(x)
 }
 
@@ -1210,15 +1238,13 @@ print.slope_sample_size <- function(x, ..., per_arm = NULL) {
 #' @param per_arm Which basis to print every count on: `TRUE` for participants
 #'   per arm, `FALSE` for the trial total. Defaults to `NULL`, meaning
 #'   "whatever `slope_power()` was called with" -- read from `x`'s `per_arm`
-#'   attribute, or per arm if that is absent. Unlike
-#'   `print.slope_sample_size()`, both the specified and the actual count
-#'   move to the chosen basis, since `specified N` echoes the `n` argument on
-#'   whichever basis is being shown, not the value as typed.
+#'   attribute, or per arm if that is absent. Both the requested and the
+#'   actual sample size are shown on the chosen basis.
 #' @return `x`, invisibly.
 #'
 #' @examples
 #' pars <- slope_params(sdmt ~ visit | id, data = slpower1)
-#' slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+#' slope_power(pars, c(0, 1, 2), n_total = 712, effectiveness = 0.33)
 #'
 #' @export
 print.slope_power <- function(x, ..., per_arm = NULL) {
@@ -1244,8 +1270,11 @@ print.slope_power <- function(x, ..., per_arm = NULL) {
 #' bound it reports holds
 #' for every visit schedule and so is attached to none of them.
 #'
-#' `n_requested` is the `n` a power row was asked for, before it was made
-#' even; `NA` for a sample-size row, where `n` is the answer.
+#' `n_requested_total` and `n_requested_per_arm` are the sample size a power
+#' row was asked for, before it was made even; `NA` for a sample-size row,
+#' where the sample size is the answer. `visits_total` and `visits_per_arm`
+#' are `NA` for a bound, which belongs to no schedule. Every column a grid row
+#' carries is here under the same name.
 #'
 #' @param x A `slope_sample_size`, `slope_power`, `slope_sample_size_floor` or
 #'   `slope_power_ceiling` object.
@@ -1260,7 +1289,7 @@ print.slope_power <- function(x, ..., per_arm = NULL) {
 #'
 #' # Stable column names make results from different designs and different
 #' # questions safe to bind into one comparison table.
-#' res2 <- slope_power(pars, c(0, 1, 2, 3), n = 712, effectiveness = 0.33)
+#' res2 <- slope_power(pars, c(0, 1, 2, 3), n_total = 712, effectiveness = 0.33)
 #' rbind(as.data.frame(res), as.data.frame(res2))
 #'
 #' # The floor binds in too, as the row no schedule can beat.
@@ -1272,10 +1301,12 @@ as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ..
   data.frame(
     alpha            = x$alpha,
     power            = x$power,
-    n                = x$n,
+    n_total          = x$n_total,
     n_per_arm        = x$n_per_arm,
-    # The power branch's `n` as supplied, before evening; NA for a sample size.
-    n_requested      = as.numeric(x$n_requested %||% NA_real_),
+    # The power branch's sample size as supplied, before evening; NA for a
+    # sample size.
+    n_requested_total   = as.numeric(x$n_requested_total %||% NA_real_),
+    n_requested_per_arm = as.numeric(x$n_requested_per_arm %||% NA_real_),
     effectiveness    = x$effectiveness,
     target           = x$target,
     tte              = x$tte,
@@ -1289,6 +1320,8 @@ as.data.frame.slope_result <- function(x, row.names = NULL, optional = FALSE, ..
     # NA, not 0 or -1: a floor result carries no `design` at all, because the
     # bound holds whatever the schedule is (CONTRACT.md section 4.3).
     n_follow_up      = if (is.null(x$design)) NA_integer_ else length(x$design$visits) - 1L,
+    visits_total     = as.numeric(x$visits_total %||% NA_real_),
+    visits_per_arm   = as.numeric(x$visits_per_arm %||% NA_real_),
     n_obs            = as.numeric(x$params$n_obs %||% NA_real_),
     n_subjects       = as.numeric(x$params$n_subjects %||% NA_real_),
     solve_for        = if (inherits(x, "slope_sample_size_floor")) "n_floor"

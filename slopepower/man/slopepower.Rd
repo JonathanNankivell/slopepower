@@ -58,8 +58,10 @@ original; see the "Dropout" section of \code{\link[=slope_sample_size]{slope_sam
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
-\item{power, n}{Supply one, as in Stata. \code{n} gives the power that sample size
-achieves; \code{power} gives the sample size that reaches it. \code{power} defaults to
+\item{power, n}{Supply one, as in Stata. \code{n}, the trial total as Stata's
+\code{n()} is, gives the power that sample size achieves (it is
+\code{\link[=slope_power]{slope_power()}}'s \code{n_total}); \code{power} gives the sample size that reaches
+it. \code{power} defaults to
 0.8 when neither is given.}
 
 \item{effectiveness}{Proportion of the slope difference the treatment should

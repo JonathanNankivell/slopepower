@@ -10,9 +10,11 @@
 \item{object}{A bootstrap result, from \code{\link[=slope_sample_size_boot]{slope_sample_size_boot()}},
 \code{\link[=slope_power_boot]{slope_power_boot()}}, \code{\link[=slope_params_boot]{slope_params_boot()}} or the bound bootstraps.}
 
-\item{parm}{Which rows, by name -- the statistic's and \code{"slope"} -- or by
-position, as in \code{\link[stats:confint]{stats::confint()}}. Defaults to both (one row, for
-\code{\link[=slope_params_boot]{slope_params_boot()}}, whose statistic is the slope).}
+\item{parm}{Which rows, by quantity name -- any the object stores, so
+\code{"n_total"} and \code{"n_per_arm"} are both available for a sample size -- or
+by position among the default rows, as in \code{\link[stats:confint]{stats::confint()}}. Defaults to
+the rows \code{print()} shows: the statistic on the display basis, and
+\code{"slope"}.}
 
 \item{level}{The interval's confidence level. It must be the one the
 bootstrap was run at, which is the default; for another, rerun the
@@ -20,25 +22,22 @@ bootstrap with that \code{level} (and the same \code{seed}).}
 
 \item{...}{Ignored.}
 
-\item{per_arm}{For a bootstrapped \code{n}: \code{TRUE} for participants per arm,
-\code{FALSE} for the trial total. Defaults to \code{NULL}, meaning the basis the
-bootstrap was called with, as in \code{print()}. \code{parm} may name the row
-\code{"n"} either way, or \code{"n_per_arm"} when that is what it prints as.}
+\item{per_arm}{For a bootstrapped sample size, which row the default shows:
+\code{TRUE} for \code{n_per_arm}, \code{FALSE} for \code{n_total}. Defaults to \code{NULL},
+meaning the basis the bootstrap was called with, as in \code{print()}.}
 }
 \value{
 A matrix with one row per \code{parm} and columns for the lower and
 upper limits, labelled by percentage as \code{\link[stats:confint]{stats::confint()}} labels them.
 }
 \description{
-The interval a bootstrap built, in the shape \code{\link[stats:confint]{stats::confint()}} returns
-one: a row for the bootstrapped statistic, named as \code{statistic} names it
-(\code{"n"}, \code{"power"}, \code{"tte"} or \code{"slope"}), and a row for the slope the
-resampling perturbed. Both are read from the object, not recomputed, so
-they are the intervals \code{print()} shows -- BCa or percentile as the object
-records, widened to even sample sizes for \code{n}, and for \code{n} on the same
-basis \code{print()} uses: per arm unless the bootstrap was run with
-\code{per_arm = FALSE}. The row is then named \code{n_per_arm}, so the basis is
-never in doubt.
+The intervals a bootstrap built, in the shape \code{\link[stats:confint]{stats::confint()}} returns
+them: a row for the bootstrapped statistic and a row for the slope the
+resampling perturbed, each named for the quantity it is -- \code{n_per_arm} or
+\code{n_total}, \code{power}, \code{tte}, \code{slope}. They are read from the object's
+\verb{<quantity>_lower} and \verb{<quantity>_upper} fields, not recomputed, so they
+are the intervals \code{print()} shows: BCa or percentile as the object records,
+widened to even trial sizes for a sample size.
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
@@ -46,6 +45,6 @@ pars <- slope_params(sdmt ~ visit | id, data = slpower1)
 b <- slope_sample_size_boot(pars, c(0, 1, 2), effectiveness = 0.33,
                             R = 50, seed = 42)
 confint(b)
-confint(b, "n")
+confint(b, "n_total")
 }
 }

@@ -42,15 +42,17 @@ the value itself is what the table reports, in the column of the same name.}
 \item{target}{Passed to \code{\link[=slope_sample_size]{slope_sample_size()}} and held constant across the
 grid.}
 
-\item{per_arm}{Which basis \code{n} and \code{visits} are reported on: \code{TRUE}
-(the default) for participants per arm, \code{FALSE} for the trial total. Both
-are computed either way; this only picks which one the returned columns
-carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_arm")}) so it can be recovered later.}
+\item{per_arm}{Which basis the printed table shows each count on: \code{TRUE}
+(the default) for participants (or visits) per arm, \code{FALSE} for the trial
+total. Display only: both bases are always returned as columns. Recorded
+as a \code{per_arm} attribute (\code{attr(x, "per_arm")}).}
 }
 \value{
-A data frame with the same columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n} is
-what varies; \code{power} is constant unless it was itself given several
-values. \code{n_requested} is \code{NA}, since no \code{n} was given.
+A data frame of class \code{slope_sample_size_grid}, with the same
+columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n_total} and \code{n_per_arm} are what
+varies; \code{power} is constant unless it was itself given several values.
+\code{n_requested_total} and \code{n_requested_per_arm} are \code{NA}, since no sample
+size was given.
 }
 \description{
 The companion to \code{\link[=slope_power_grid]{slope_power_grid()}}: holds the target power fixed and reports
@@ -95,7 +97,7 @@ sens <- slope_sample_size_grid(
   pars, visits = 0:3, effectiveness = c(0.20, 0.25, 0.33),
   power = c(0.8, 0.9)
 )
-xtabs(n ~ effectiveness + power, sens)
+xtabs(n_per_arm ~ effectiveness + power, sens)
 
 # Varying alpha as well: a sweep over all three assumptions at once, for one
 # design, is twelve rows and one call.

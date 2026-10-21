@@ -52,21 +52,25 @@ parameters estimated from a previous trial.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
-\item{per_arm}{Which basis \code{n} is printed on: \code{TRUE} (the default) for
-participants per arm, \code{FALSE} for the trial total. Display only --- the
-result carries both \code{n} and \code{n_per_arm} regardless; \code{per_arm} is recorded
-as an attribute (\code{attr(x, "per_arm")}) and picks which one \code{print()}
-leads with, and it can still be overridden afterwards with
+\item{per_arm}{Which basis the sample size is printed on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Display
+only --- the result carries both \code{n_total} and \code{n_per_arm} regardless;
+\code{per_arm} is recorded as an attribute (\code{attr(x, "per_arm")}) and picks
+which one \code{print()} shows, and it can still be overridden afterwards with
 \code{print(x, per_arm = FALSE)}.}
 }
 \value{
-An object of class \code{slope_sample_size}, a list with elements \code{n},
-\code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness}, \code{target}, \code{tte}, \code{var_tte},
-\code{effect_size}, \code{slope_difference}, \code{reference_slope}, \code{params} and \code{design}.
-See \code{\link[=as.data.frame.slope_result]{as.data.frame.slope_result()}} for a tabular form whose column names are
-stable across designs and across both entry points.
-\code{per_arm} is recorded as an attribute rather than a list element -- it
-picks which of \code{n}/\code{n_per_arm} \code{print()} leads with, and changes neither.
+An object of class \code{slope_sample_size}, a list with elements
+\code{n_total}, \code{n_per_arm}, \code{power}, \code{alpha}, \code{effectiveness}, \code{target},
+\code{tte}, \code{var_tte}, \code{effect_size}, \code{slope_difference}, \code{reference_slope},
+\code{visits_total}, \code{visits_per_arm}, \code{params} and \code{design}. Every count comes
+as a \verb{_total}/\verb{_per_arm} pair, the total twice the per-arm figure:
+\code{n_total} is the trial size, and \code{visits_total} the visits it is expected
+to need, allowing for dropout. See \code{\link[=as.data.frame.slope_result]{as.data.frame.slope_result()}} for a
+tabular form whose column names are stable across designs and across both
+entry points. \code{per_arm} is recorded as an attribute rather than a list
+element -- it picks which of each pair \code{print()} shows, and changes
+neither.
 }
 \description{
 "How many participants do I need?" --- the second stage of the two-stage

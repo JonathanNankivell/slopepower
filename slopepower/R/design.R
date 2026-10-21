@@ -117,7 +117,7 @@ dropout_rate <- function(rate, per = 1, pattern = c("linear", "geometric")) {
 #' @param ... Ignored.
 #' @export
 print.dropout_rate <- function(x, ...) {
-  cat(sprintf("<dropout_rate> %s per %s unit%s of time (%s)\n",
+  cat(sprintf("Dropout rate: %s per %s unit%s of time (%s)\n",
               fmt_num(x$rate), fmt_num(x$per), if (x$per == 1) "" else "s", x$pattern))
   invisible(x)
 }
@@ -388,7 +388,7 @@ print.trial_design <- function(x, ...) {
   n_visits <- length(x$visits)
   k <- n_visits - 1L
 
-  cat("<trial_design>\n")
+  cat_title("Trial design")
   cat(sprintf("  Visits (%d):  %s\n", n_visits, label_numeric(x$visits)))
   cat(sprintf("  Follow-up:   %d visit%s, last at t = %s\n",
               k, if (k == 1L) "" else "s", fmt_num(x$visits[n_visits])))

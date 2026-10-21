@@ -37,11 +37,11 @@ parameters estimated from a previous trial.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
-\item{per_arm}{Which basis \code{n} is printed on: \code{TRUE} (the default) for
-participants per arm, \code{FALSE} for the trial total. Display only --- the
-result carries both \code{n} and \code{n_per_arm} regardless; \code{per_arm} is recorded
-as an attribute (\code{attr(x, "per_arm")}) and picks which one \code{print()}
-leads with, and it can still be overridden afterwards with
+\item{per_arm}{Which basis the sample size is printed on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Display
+only --- the result carries both \code{n_total} and \code{n_per_arm} regardless;
+\code{per_arm} is recorded as an attribute (\code{attr(x, "per_arm")}) and picks
+which one \code{print()} shows, and it can still be overridden afterwards with
 \code{print(x, per_arm = FALSE)}.}
 }
 \description{

@@ -9,7 +9,8 @@ slope_power(
   visits,
   dropout = NULL,
   dropout_scale = c("incremental", "cumulative"),
-  n,
+  n_total = NULL,
+  n_per_arm = NULL,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
@@ -40,9 +41,11 @@ i.e. who fail to attend it. A \code{\link[=dropout_rate]{dropout_rate()}} produc
 proportions by construction, so it cannot be combined with
 \code{"cumulative"}.}
 
-\item{n}{Total number of participants across both arms. Required: it is the
-quantity whose power is being evaluated. Odd values are reduced by one so
-that the arms are equal, with the value as supplied kept in \code{n_requested}.}
+\item{n_total, n_per_arm}{The sample size whose power is being evaluated:
+the trial total, or participants in each arm. Supply exactly one. An odd
+\code{n_total} is reduced by one so that the arms are equal; the value as
+supplied is kept in \code{n_requested_total} (and, halved, in
+\code{n_requested_per_arm}).}
 
 \item{effectiveness}{Proportion of the slope difference the treatment is
 expected to remove, in (0, 1] (see "The reference slope" below). Must not
@@ -54,18 +57,20 @@ parameters estimated from a previous trial.}
 
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
-\item{per_arm}{Which basis \code{n} is printed on: \code{TRUE} (the default) for
-participants per arm, \code{FALSE} for the trial total. Display only --- the
-result carries both \code{n} and \code{n_per_arm} regardless; \code{per_arm} is recorded
-as an attribute (\code{attr(x, "per_arm")}) and picks which one \code{print()}
-leads with, and it can still be overridden afterwards with
+\item{per_arm}{Which basis the sample size is printed on: \code{TRUE} (the
+default) for participants per arm, \code{FALSE} for the trial total. Display
+only --- the result carries both \code{n_total} and \code{n_per_arm} regardless;
+\code{per_arm} is recorded as an attribute (\code{attr(x, "per_arm")}) and picks
+which one \code{print()} shows, and it can still be overridden afterwards with
 \code{print(x, per_arm = FALSE)}.}
 }
 \value{
-An object of class \code{slope_power}, a list with elements \code{n},
-\code{n_per_arm}, \code{n_requested}, \code{power}, \code{alpha}, \code{effectiveness}, \code{target},
-\code{tte}, \code{var_tte}, \code{effect_size}, \code{slope_difference}, \code{reference_slope},
-\code{params} and \code{design}. See \code{\link[=as.data.frame.slope_result]{as.data.frame.slope_result()}} for a tabular form
+An object of class \code{slope_power}, a list with elements \code{n_total},
+\code{n_per_arm}, \code{n_requested_total}, \code{n_requested_per_arm}, \code{power}, \code{alpha},
+\code{effectiveness}, \code{target}, \code{tte}, \code{var_tte}, \code{effect_size},
+\code{slope_difference}, \code{reference_slope}, \code{visits_total}, \code{visits_per_arm},
+\code{params} and \code{design}: those of \code{\link[=slope_sample_size]{slope_sample_size()}}, plus the sample
+size as requested. See \code{\link[=as.data.frame.slope_result]{as.data.frame.slope_result()}} for a tabular form
 whose column names are stable across designs and across both entry points.
 \code{per_arm} is recorded as an attribute rather than a list element -- it
 picks which basis \code{print()} reports every count on, and changes none of
@@ -174,7 +179,7 @@ schedule.
 # No comparator: measured toward a slope of zero, fitted to all two
 # hundred participants of `slpower1`. Reproduces the paper's p.588 result.
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
-slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+slope_power(pars, c(0, 1, 2), n_total = 712, effectiveness = 0.33)
 
 # Case/healthy-control comparator: measured toward the healthy controls'
 # slope. Two cases and two controls, a subset of `slpower2`, whose visits
@@ -182,14 +187,14 @@ slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
 df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
 pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
                       comparator = "healthy", group = case)
-slope_power(pars2, c(0, 1, 2), n = 40, effectiveness = 0.33)
+slope_power(pars2, c(0, 1, 2), n_total = 40, effectiveness = 0.33)
 
 # Randomised-trial comparator, target = "observed": what power would a
 # repeat trial have to detect the same effect the trial actually found,
 # fitted to all one hundred and fifty participants of `slpower3`.
 pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
                       comparator = "treated", group = treat)
-slope_power(pars3, c(0, 0.5, 2), n = 396, target = "observed")
+slope_power(pars3, c(0, 0.5, 2), n_total = 396, target = "observed")
 
 }
 \references{

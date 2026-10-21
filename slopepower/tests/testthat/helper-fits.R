@@ -26,3 +26,17 @@ paper_fit <- function(which) {
   cache[[which]] <- fit
   fit
 }
+
+# The main bootstrapped quantity of a single-design bootstrap, under short
+# generic names, for tests that check its numbers rather than its field names
+# (test-output-names.R checks those). A sample size is read on its stored
+# total basis.
+boot_main <- function(b) {
+  q <- slopepower:::stat_field(b$statistic)
+  list(observed = b[[q]],
+       replicates = b[[paste0(q, "_replicates")]],
+       ci = c(b[[paste0(q, "_lower")]], b[[paste0(q, "_upper")]]),
+       boot_mean = b[[paste0(q, "_mean")]],
+       boot_sd = b[[paste0(q, "_sd")]],
+       ci_method = b[[paste0(b$statistic, "_ci_method")]])
+}

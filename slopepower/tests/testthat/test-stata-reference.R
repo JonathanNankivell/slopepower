@@ -416,11 +416,11 @@ test_that("with Stata's own variance components the arithmetic is exact", {
       # row-for-row with j$grid, so the mask below can be built from the frame
       # it indexes rather than from a different object of assumed equal length.
       out <- suppressWarnings(
-        if (row$mode == "n") do.call(slope_power, c(args, list(n = row$nin)))
+        if (row$mode == "n") do.call(slope_power, c(args, list(n_total = row$nin)))
         else do.call(slope_sample_size, c(args, list(power = row$pin)))
       )
       data.frame(tag = row$tag, drops = row$drops, mode = row$mode,
-                 o_n = row$o_n, r_n = out$n,
+                 o_n = row$o_n, r_n = out$n_total,
                  o_power = row$o_power, r_power = out$power,
                  o_var_tte = row$o_var_tte, r_var_tte = out$var_tte,
                  stringsAsFactors = FALSE)
@@ -469,7 +469,7 @@ test_that("scale() has an exact analogue in real-valued visit times", {
   a <- slope_sample_size(p_year, c(0, 0.5, 1, 1.5, 2), effectiveness = 0.33)
   b <- slope_sample_size(p_half, 0:4, effectiveness = 0.33)
 
-  expect_equal(a$n, b$n)
+  expect_equal(a$n_total, b$n_total)
   expect_equal(a$effect_size, b$effect_size, tolerance = 1e-8)
   # The half-year axis halves the slope: the paper prints -1.672 on the year
   # axis and -0.836 on the rescaled one (p.588, p.589).
