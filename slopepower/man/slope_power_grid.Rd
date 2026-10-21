@@ -9,7 +9,8 @@ slope_power_grid(
   visits,
   dropout = NULL,
   dropout_scale = c("incremental", "cumulative"),
-  n,
+  n_total = NULL,
+  n_per_arm = NULL,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
@@ -30,7 +31,8 @@ object, or a named list mixing any of these.}
 \code{\link[=slope_sample_size]{slope_sample_size()}}. It applies to every vector in the list, and cannot
 be \code{"cumulative"} if the list holds a \code{\link[=dropout_rate]{dropout_rate()}}.}
 
-\item{n}{Total number of participants. Required. A single value is held
+\item{n_total, n_per_arm}{The sample size held fixed: the trial total, or
+participants in each arm. Supply exactly one. A single value is held
 constant across the grid; several make it another axis.}
 
 \item{effectiveness, alpha}{Passed to \code{\link[=slope_power]{slope_power()}}. A single value is held
@@ -41,28 +43,31 @@ value itself is what the table reports, in the column of the same name.}
 
 \item{target}{Passed to \code{\link[=slope_power]{slope_power()}} and held constant across the grid.}
 
-\item{per_arm}{Which basis \code{n} and \code{visits} are reported on: \code{TRUE}
-(the default) for participants per arm, \code{FALSE} for the trial total. Both
-are computed either way; this only picks which one the returned columns
-carry. Recorded as a \code{per_arm} attribute on the result (\code{attr(x, "per_arm")}) so it can be recovered later.}
+\item{per_arm}{Which basis the printed table shows each count on: \code{TRUE}
+(the default) for participants (or visits) per arm, \code{FALSE} for the trial
+total. Display only: both bases are always returned as columns. Recorded
+as a \code{per_arm} attribute (\code{attr(x, "per_arm")}).}
 }
 \value{
-A data frame with one row per combination of the axes supplied, with
-columns \code{design}, \code{dropout}, \code{scheduled_visits}, \code{last_visit},
-\code{dropout_total}, \code{n}, \code{n_requested}, \code{power}, \code{alpha}, \code{effectiveness},
-\code{tte}, \code{var_tte}, \code{effect_size} and \code{visits}. \code{power} is what varies; \code{n}
-is constant unless it was itself given several values. \code{n} is the sample
-size actually used, made even for 1:1 allocation; \code{n_requested} is the \code{n}
-as given, so an odd request stays distinguishable from the even one below
-it. \code{n}, \code{n_requested} and \code{visits} are on the basis \code{per_arm} selects --
-participants (or visits) per arm by default, or the trial total under
-\code{per_arm = FALSE}. \code{visits} is \code{n} times the
-expected number of visits one participant attends -- \code{scheduled_visits}
-itself when \code{dropout_total} is zero, less otherwise, since a participant
-who withdraws still contributes the visits attended before doing so (see
-the "Dropout" section of \code{\link[=slope_sample_size]{slope_sample_size()}}). Cells are
-listed with \code{design} varying slowest, then \code{dropout}, then any further
-axes in the order the arguments are declared above.
+A data frame of class \code{slope_power_grid}, one row per combination of
+the axes supplied, with columns \code{design}, \code{dropout}, \code{scheduled_visits},
+\code{last_visit}, \code{dropout_cumulative}, \code{n_total}, \code{n_per_arm},
+\code{n_requested_total}, \code{n_requested_per_arm}, \code{power}, \code{alpha},
+\code{effectiveness}, \code{tte}, \code{var_tte}, \code{effect_size}, \code{visits_total} and
+\code{visits_per_arm}. Every count comes as a \verb{_total}/\verb{_per_arm} pair, the
+total twice the per-arm figure. \code{power} is what varies; the sample size
+is constant unless it was itself given several values. \code{n_total} and
+\code{n_per_arm} are the sample size actually used, made even for 1:1
+allocation; \code{n_requested_total} and \code{n_requested_per_arm} are the sample
+size as given, so an odd request stays distinguishable from the even one
+below it. \code{visits_total} is \code{n_total} times the expected number of visits
+one participant attends -- \code{scheduled_visits} itself when
+\code{dropout_cumulative} is zero, less otherwise, since a participant who
+withdraws still contributes the visits attended before doing so (see the
+"Dropout" section of \code{\link[=slope_sample_size]{slope_sample_size()}}). Cells are listed with
+\code{design} varying slowest, then \code{dropout}, then any further axes in the
+order the arguments are declared above. Subsetting with \code{[} returns a
+plain data frame.
 }
 \description{
 Evaluates the cross product of a set of visit schedules and a set of dropout
@@ -96,7 +101,7 @@ pars <- slope_params_manual(
   cov_intercept_slope = 2.810881, sigma2_residual = 9.159780
 )
 slope_power_grid(
-  pars, n = 450, effectiveness = 0.33,
+  pars, n_total = 450, effectiveness = 0.33,
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 )
@@ -107,7 +112,7 @@ slope_power_grid(
 # sizes, for six rows in all.
 slope_power_grid(
   pars, visits = 0:3, dropout = dropout_rate(0.05),
-  n = c(`450` = 450, `600` = 600),
+  n_total = c(`450` = 450, `600` = 600),
   effectiveness = list(`20pc` = 0.2, `25pc` = 0.25, `33pc` = 0.33)
 )
 
@@ -117,7 +122,7 @@ slope_power_grid(
 # here the assumed effectiveness goes down the side and the significance
 # level across the top.
 sens <- slope_power_grid(
-  pars, visits = 0:3, n = 450,
+  pars, visits = 0:3, n_total = 450,
   effectiveness = c(0.20, 0.25, 0.33), alpha = c(0.05, 0.01)
 )
 round(xtabs(power ~ effectiveness + alpha, sens), 3)
@@ -126,7 +131,7 @@ round(xtabs(power ~ effectiveness + alpha, sens), 3)
 # assumed effectivenesses is six rows, and the schedules can still be
 # compared within each level because every one of them was priced at it.
 slope_power_grid(
-  pars, n = 450, effectiveness = c(0.25, 0.33),
+  pars, n_total = 450, effectiveness = c(0.25, 0.33),
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = dropout_rate(0.05)
 )
@@ -137,7 +142,7 @@ df2 <- slpower2[slpower2$id \%in\% c(1, 2, 251, 252), ]
 pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
                       comparator = "healthy", group = case)
 slope_power_grid(
-  pars2, n = 40, effectiveness = 0.33,
+  pars2, n_total = 40, effectiveness = 0.33,
   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
 )
@@ -149,7 +154,7 @@ slope_power_grid(
 pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
                       comparator = "treated", group = treat)
 slope_power_grid(
-  pars3, n = 396, target = "observed",
+  pars3, n_total = 396, target = "observed",
   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
   dropout = NULL
 )

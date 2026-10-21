@@ -158,32 +158,61 @@ take different inputs, answer different questions, and return differently shaped
 ```r
 slope_sample_size(params, visits, dropout = NULL, dropout_scale, power = 0.8,
                   effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)
-slope_power(params, visits, dropout = NULL, dropout_scale, n,
+slope_power(params, visits, dropout = NULL, dropout_scale, n_total = NULL, n_per_arm = NULL,
             effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)
 ```
 
 Every stage-two function -- these two, `slope_effect_size()`, the two grids and the four
 bootstraps -- opens with the same `params, visits, dropout, dropout_scale`, then the input held
-fixed (`power` or `n`), then `effectiveness, target, alpha`, then anything of its own. Keep new
-entry points to that order.
+fixed (`power`, or `n_total, n_per_arm`), then `effectiveness, target, alpha`, then anything of
+its own. Keep new entry points to that order.
 
-`n` is `slope_power()`'s fixed input and is **required** — there is no default sample size to
-fall back on. `power` is an ordinary argument of `slope_sample_size()` with its default in the
-signature. Neither accepts the other's input: `slope_sample_size(..., n = 450)` and
-`slope_power(..., power = 0.8)` are "unused argument" errors from R's own argument matching, so
-the mismatch that used to be silently resolved by which argument was left `NULL` can no longer be
-expressed. **Do not reintroduce a combined entry point**, and do not give `n` a default.
+The sample size is `slope_power()`'s fixed input and is **required** — there is no default sample
+size to fall back on. It is given as the trial total `n_total` or as `n_per_arm`, **exactly one**
+(`resolve_n()`, `R/utils.R`): both default to `NULL` so either can be named alone, and giving
+neither or both is an error. `n_per_arm` must be whole and is doubled, so it never needs evening;
+an odd `n_total` is evened down. The grids accept either as an axis. `slopepower()` keeps Stata's
+`n()`, a total, and passes it as `n_total`. `power` is an ordinary argument of
+`slope_sample_size()` with its default in the signature. Neither function accepts the other's
+input: `slope_sample_size(..., n_total = 450)` and `slope_power(..., power = 0.8)` are "unused
+argument" errors from R's own argument matching. **Do not reintroduce a combined entry point**,
+and do not give the sample size a default.
 
 Both classes inherit from `"slope_result"`, which is what `as.data.frame()` dispatches on. So does
 `slope_sample_size_floor` (section 4.3), which answers neither question but bounds the first.
 
+### 4.0 The naming rule for outputs
+
+One rule names every field, column and attribute an output carries. It is checked across every
+exported output by `tests/testthat/test-output-names.R`.
+
+1. **A count on a planned trial always comes as a pair**, `<q>_total` and `<q>_per_arm`, the
+   total exactly twice the per-arm figure, and both are always stored: `n_total`/`n_per_arm`,
+   `n_requested_total`/`n_requested_per_arm`, `visits_total`/`visits_per_arm`, and the
+   bootstrap summaries of a sample size. There is no bare `n`, `n_requested` or `visits`.
+   `per_arm` only picks which of each pair `print()` shows (section 4.5).
+2. **A bootstrapped quantity `q` has six fields**: `q` (the estimate from the original fit),
+   `q_replicates`, `q_mean`, `q_sd`, `q_lower`, `q_upper`, with `q` one of `n_total`,
+   `n_per_arm`, `power`, `tte`, `slope`. Its interval method is `<statistic>_ci_method`
+   (`n_ci_method`, `power_ci_method`, `tte_ci_method`, `slope_ci_method`). There is no bare
+   `ci`, `observed`, `boot_mean`, `boot_sd` or `se`; the slope's analytic standard error is
+   `slope_se`. A grid carries the four summary columns per cell (`quantity_block()` and
+   `cell_block()` are the one statement of the names).
+3. **A scalar result reads like one row of its grid**: a `slope_result` field and a grid column
+   for the same quantity share a name, and `as.data.frame()` carries every grid result column.
+4. **`_total` means the whole trial and nothing else**, so a cumulative dropout proportion is
+   `dropout_cumulative`, and the `n_` prefix means participants, so replicate counts are
+   `replicates_failed` and `refits_failed`. Counts describing the stage-one data (`n_obs`,
+   `n_subjects`) and the schedule (`n_follow_up`, `scheduled_visits`) have no arms and are
+   unaffected.
+
 ### 4.1 `slope_sample_size`
 
-S3 class `c("slope_sample_size", "slope_result")`, a list with **exactly** these 13 fields:
+S3 class `c("slope_sample_size", "slope_result")`, a list with **exactly** these 15 fields:
 
 ```r
 list(
-  n, n_per_arm,
+  n_total, n_per_arm,
   power, alpha,                  # power is the input here
   effectiveness,                 # NA_real_ when target == "observed"
   target,                        # "effectiveness" or "observed"
@@ -192,29 +221,31 @@ list(
   effect_size,                   # dropout-weighted standardised effect, signed
   slope_difference,              # slope - reference_slope
   reference_slope,
+  visits_total, visits_per_arm,  # expected visits attended, allowing for dropout
   params, design                 # the input objects, retained
 )
 ```
 
 ### 4.2 `slope_power`
 
-S3 class `c("slope_power", "slope_result")`. The same 13 fields, plus `n_requested` after
-`n_per_arm` — the user's `n` before the even-number adjustment — for 14 in total. `n` is the input
+S3 class `c("slope_power", "slope_result")`. The same 15 fields, plus `n_requested_total` and
+`n_requested_per_arm` after `n_per_arm` — the sample size as supplied, before the even-number
+adjustment (so the per-arm figure can be a half) — for 17 in total. The sample size is the input
 here and `power` the output.
 
 There is **no `solve_for` field**: the class carries that information. `as.data.frame()` still
 emits a `solve_for` column, derived from the class, so that rows from both functions bind into one
-interpretable table, and an `n_requested` column, `NA` for a sample-size row; the grids carry the
-same column, so a request for 101 is not mistaken for one of 100. Column names are identical
+interpretable table, and the `n_requested_*` columns, `NA` for a sample-size row; the grids carry
+the same columns, so a request for 101 is not mistaken for one of 100. Column names are identical
 across both classes and every comparator.
 
 ### 4.3 `slope_sample_size_floor`
 
 S3 class `c("slope_sample_size_floor", "slope_result")`, from `R/floor.R`. The same fields as
-`slope_sample_size` **minus `design`**, for 12:
+`slope_sample_size` **minus `design`** and the `visits_*` pair it implies, for 12:
 
 ```r
-list(n, n_per_arm, power, alpha, effectiveness, target, tte, var_tte, effect_size,
+list(n_total, n_per_arm, power, alpha, effectiveness, target, tte, var_tte, effect_size,
      slope_difference, reference_slope, params)
 ```
 
@@ -225,38 +256,47 @@ answer does not depend on can only be ignored.
 
 It is an **ordinary function, not a generic**: `slope_sample_size_floor(params, power = 0.8,
 effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)` — the arguments of
-`slope_sample_size()` in its order, minus the design. It used to be a generic that also accepted a
-stage-two result and reused its settings; that second route was dropped so that every stage-two
-function takes `params` first. With no `...`, a stray `visits =` is an "unused argument" error from
-R's own matching rather than something that could be silently ignored.
+`slope_sample_size()` in its order, minus the design. With no `...`, a stray `visits =` is an
+"unused argument" error from R's own matching rather than something that could be silently
+ignored.
 
-`slope_power_ceiling(params, n, effectiveness = 0.25, target, alpha = 0.05, per_arm = TRUE)` is its
-power counterpart — `slope_power()`'s arguments minus the design — returning S3 class
-`c("slope_power_ceiling", "slope_result")` with `slope_power`'s fields minus `design` (13, with
-`n_requested`). Its `power` is the *upper* bound over all schedules at that `n`, computed from the
-same limiting variance by the same `floor_result()`, so the two are exact inverses up to
-`ceiling()`. It is named for what it bounds — the variance's floor is the power's ceiling — and
-`as.data.frame()` labels its row `solve_for = "power_ceiling"` to match.
+`slope_power_ceiling(params, n_total = NULL, n_per_arm = NULL, effectiveness = 0.25, target,
+alpha = 0.05, per_arm = TRUE)` is its power counterpart — `slope_power()`'s arguments minus the
+design — returning S3 class `c("slope_power_ceiling", "slope_result")` with `slope_power`'s fields
+minus `design` and `visits_*` (14, with the `n_requested_*` pair). Its `power` is the *upper*
+bound over all schedules at that sample size, computed from the same limiting variance by the same
+`floor_result()`, so the two are exact inverses up to `ceiling()`.
 
-`as.data.frame()` gains two consequences: `solve_for` is `"n_floor"`, and `n_follow_up` is
-`NA_integer_` rather than a count, because the row belongs to no schedule. The 4.1/4.2 guarantee
-that column *names* are identical across classes is unaffected.
+`as.data.frame()` gains three consequences: `solve_for` is `"n_floor"` or `"power_ceiling"`, and
+`n_follow_up`, `visits_total` and `visits_per_arm` are `NA`, because the row belongs to no
+schedule. The 4.1/4.2 guarantee that column *names* are identical across classes is unaffected.
 
-### 4.4 `slope_sample_size_grid_boot` and `slope_power_grid_boot` (`R/grid_boot.R`)
+### 4.4 Grids and bootstraps
 
-Not `slope_result` subclasses — a grid was always a data frame rather than a `slope_result`, and
-these are grids. S3 class `c("slope_sample_size_grid_boot", "data.frame")` or
-`c("slope_power_grid_boot", "data.frame")`: the sixteen columns `grid_evaluate()` computes for a
-grid cell — both `n`/`n_per_arm` and both `visits_total`/`visits_per_arm`, unreduced — plus eleven
-more: `<s>_mean`, `<s>_sd`, `<s>_lower`, `<s>_upper`, `tte_mean`, `tte_sd`, `tte_lower`,
-`tte_upper`, `tte_ci_method`, `ci_method`, `n_failed`, where `<s>` is the solved-for statistic,
-`n` or `power`. (The plain grids themselves return fourteen of those sixteen — see "Display
-basis" below — so this object's own data frame carries two more columns than that function's
-return value, not the same sixteen.) `ci_method` and `tte_ci_method` are separate because the two
+**Plain grids.** `slope_sample_size_grid()` and `slope_power_grid()` return S3 classes
+`c("slope_sample_size_grid", "data.frame")` and `c("slope_power_grid", "data.frame")`: one row
+per cell, columns `design, dropout, scheduled_visits, last_visit, dropout_cumulative, n_total,
+n_per_arm, n_requested_total, n_requested_per_arm, power, alpha, effectiveness, tte, var_tte,
+effect_size, visits_total, visits_per_arm`. The result columns are read straight off each cell's
+`slope_result` (`grid_result_cols`, `R/grid.R`), so they cannot drift from `as.data.frame()`.
+
+**Single-design bootstraps** (`slope_sample_size_boot()`, `slope_power_boot()`, the two bound
+bootstraps, `slope_params_boot()`) return `c(<cls>, "slope_bootstrap")`, a list: `statistic`,
+then the statistic's six-field block(s) (two, `n_total_*` and `n_per_arm_*`, for a sample size),
+`<statistic>_ci_method`, the `slope` block and `slope_ci_method` (the main block itself for
+`slope_params_boot()`, not repeated), then `slope_se, R, level, replicates_failed,
+refits_failed, straddle, straddle_of, lattice`. `confint()` reads `<q>_lower`/`<q>_upper`; its
+rows are named by quantity (`n_per_arm` or `n_total`, never `n`).
+
+**Bootstrap grids.** `slope_sample_size_grid_boot()` and `slope_power_grid_boot()` return S3 class
+`c("slope_sample_size_grid_boot", "slope_sample_size_grid", "data.frame")` (or the power
+equivalents): every plain-grid column, then `<q>_mean`, `<q>_sd`, `<q>_lower`, `<q>_upper` for the
+solved-for quantity on both bases where it has them (`n_total_*` and `n_per_arm_*`, or
+`power_*`), `n_ci_method` or `power_ci_method`, the same four `tte_*` columns and
+`tte_ci_method`, and `replicates_failed`. The two method columns are separate because the two
 intervals have separate bias corrections and separate jackknife columns: either can fall back
-from BCa to percentile without the other, and the printed table marks each column with the
-method it actually used. Only `n` is on the even-participant lattice; a power interval is neither
-widened nor halved for display.
+from BCa to percentile without the other. Only the sample size is on the even-participant
+lattice.
 
 `tte` depends on `effectiveness` alone — not the visit schedule, the dropout pattern, `power` or
 `alpha` — so it is resampled once per distinct `effectiveness` level rather than once per cell,
@@ -264,11 +304,13 @@ and cells sharing a level share one interval exactly rather than merely agreeing
 The printed target-effect frame is keyed by `effectiveness` for the same reason: one row per
 level, not one per cell.
 
-What every cell shares — `R`, `ci_method`, `statistic`, `level`, `se`, `n_refit_failed`,
-`straddle`, and the same six `slope_*` fields a single-design bootstrap returns — is carried as
-**attributes**, not columns: a value that never varies across rows does not belong in one. The
-`[` methods strip them (and the class) on every subset, since a value describing the whole table becomes
-false, not merely stale, the moment the table it describes changes shape.
+What every cell shares — `R`, `requested_ci_method`, `statistic`, `level`, `slope_se`,
+`refits_failed`, `straddle`, `straddle_of`, `named`, `per_arm`, and the same `slope` block a
+single-design bootstrap returns — is carried as **attributes**, not columns: a value that never
+varies across rows does not belong in one. The `[` method of every grid class strips them (and the
+class) on every subset (`strip_grid()`), since a value describing the whole table becomes false,
+not merely stale, the moment the table it describes changes shape. `confint()` on a bootstrap
+grid returns one quantity's interval for every cell.
 
 Every cell shares one set of resampled replicates: the resampling scheme (`R/bootstrap.R`'s
 `boot_setup()`, `boot_replicate_matrix()`, `jackknife_values()`) depends only on `params`, never on
@@ -277,26 +319,29 @@ cell*. A cell with fewer than two surviving replicates reports `NA` in its own r
 aborting the whole grid the way a single-design bootstrap aborts (section 6) — a grid
 that took several minutes to resample must not be discarded over one bad cell.
 
-### 4.5 Display basis: `per_arm`
+### 4.5 Display basis and printing
 
 Every function in this section that reports a count accepts `per_arm` (default `TRUE`), which
-picks whether a *printed* `n` — and, on a grid, `n`'s companion `visits` — reads as participants
-per arm or as the trial total. It is **display only** and is carried as an attribute
-(`attr(x, "per_arm")`), never as a field of a `slope_result` list and never as a column of a grid
-`data.frame` — a value that changes how a number is shown, not what was computed, belongs beside
-the object rather than inside it, the same reasoning section 4.4 gives for the bootstrap grid's
-shared attributes. `print()` methods take their own `per_arm` argument, defaulting to `NULL`
-("whatever the object's attribute says, or per arm if it carries none"), so the printed basis can
-be overridden after the fact without recomputing anything: `print(x, per_arm = FALSE)`.
+picks which of each `_total`/`_per_arm` pair a *printed* output shows. It is **display only** and
+is carried as an attribute (`attr(x, "per_arm")`), never as a field or a column — a value that
+changes how a number is shown, not what was computed, belongs beside the object rather than inside
+it. Both bases are always stored, for every class, grids included. `print()` methods take their
+own `per_arm` argument, defaulting to `NULL` ("whatever the object's attribute says, or per arm if
+it carries none"), so the printed basis can be overridden after the fact without recomputing
+anything: `print(x, per_arm = FALSE)`.
 
-The two plain grids, `slope_sample_size_grid()` and `slope_power_grid()`, are the one exception.
-They are undecorated data frames with no print method to consult an attribute at print time, so
-for them `per_arm` instead shapes the *returned* data: the `n`/`n_per_arm` and
-`visits_total`/`visits_per_arm` pairs each collapse to a single `n`/`visits` column on the chosen
-basis (`basis_columns()`, `R/grid.R`), and the object carries fourteen columns, not sixteen. The
-attribute is still recorded, so a table already in hand can be identified, but there is no
-surviving twin column to fall back on — unlike every other function in this section, where both
-bases are always retrievable from the object itself.
+A printed count is always labelled with its basis, so no note is needed to say which it is: the
+single results print "N per arm" or "N total" (and "requested N per arm"/"requested N total"), and
+the tables print columns under their stored names (`basis_columns()`, `R/grid.R`, keeps one twin of
+each pair). A bootstrap result prints a row per quantity and a column per field suffix
+(`estimate`, `mean`, `sd`, `lower`, `upper`), so a row and a column name the field read.
+
+Every print method opens with a one-line title and a blank line (`cat_title()`, `R/utils.R`):
+`Slope parameters: <kind>`, `Sample size`, `Power`, the two bounds, `Bootstrapped <statistic>`,
+`<kind> grid (<k> rows)`, `Dropout rate: ...`, `Trial design`. Every stage-two result closes with
+the notes its parameters carry (`params_notes()`, `R/params.R`) — covariate adjustment, residual
+structure, unidentified variance components, a reduced control structure, shifted times — the same
+notes `print.slope_params()` prints.
 
 ---
 
@@ -485,9 +530,9 @@ Errors (not warnings, not silent `NA`):
   we error with a clear message.
 - `alpha` outside (0, 1); `power` outside (0, 1), or at or below `alpha / 2` when solving for
   sample size (DIVERGENCES.md §27); `effectiveness` outside (0, 1]
-- `n < 2`, or non-integer `n`
-- `n` missing from `slope_power()` (there is no default sample size), and likewise from
-  `slope_power_grid()`
+- `n_total < 2`, non-integer `n_total`, or `n_per_arm` below 1 or non-integer
+- neither or both of `n_total` and `n_per_arm` given to `slope_power()` (there is no default
+  sample size), and likewise to every other function that holds the sample size fixed
 - `slopepower()` only: both `n` and `power` supplied. The Stata command's single bimodal
   interface is mirrored **in the compatibility wrapper alone**; `power` defaults to 0.8 there when
   neither is given.

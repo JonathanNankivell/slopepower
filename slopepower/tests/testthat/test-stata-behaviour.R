@@ -140,7 +140,7 @@ test_that("treat() with observational data warns and continues, as in Stata", {
                       obs = TRUE, nocontrols = TRUE, treat = "id",
                       effectiveness = 0.33),
     "treat")
-  expect_equal(res$n, 712)
+  expect_equal(res$n_total, 712)
 
   # And the well-formed sibling, :132, which Stata answers the same way.
   expect_warning(
@@ -148,7 +148,7 @@ test_that("treat() with observational data warns and continues, as in Stata", {
                        obs = TRUE, nocontrols = TRUE, casecon = "id",
                        effectiveness = 0.33),
     "casecon")
-  expect_equal(res2$n, 712)
+  expect_equal(res2$n_total, 712)
 })
 
 test_that("everyone dropping out at the first visit is an error, not a number", {
@@ -178,11 +178,11 @@ test_that("var_tte stays finite where Stata's back-solve goes missing", {
   # Observed: finite at n = 2000 (9.391673916773652), missing from n = 10000.
   # The port uses the algebraically equivalent closed form, which has no
   # n_per_arm in it and so cannot degenerate.
-  small <- suppressWarnings(slope_power(p, v, des, n = 2000, effectiveness = 0.33))
+  small <- suppressWarnings(slope_power(p, v, des, n_total = 2000, effectiveness = 0.33))
   expect_equal(small$var_tte, 9.391673916773652, tolerance = 1e-3)
 
   for (nn in c(10000, 40000, 200000, 1e6)) {
-    r <- suppressWarnings(slope_power(p, v, des, n = nn, effectiveness = 0.33))
+    r <- suppressWarnings(slope_power(p, v, des, n_total = nn, effectiveness = 0.33))
     expect_equal(r$power, 1)
     expect_true(is.finite(r$var_tte))
     expect_gt(r$var_tte, 0)
@@ -217,7 +217,7 @@ test_that("rct data without usetrt ignores the observed treated slope", {
   # The pair differs only in the reference slope, so the sample sizes differ
   # too -- and by a lot, because the treated arm's slope is most of the way to
   # the control arm's.
-  expect_gt(obs$n, eff$n)
+  expect_gt(obs$n_total, eff$n_total)
 })
 
 test_that("target = observed reports effectiveness as NA, matching Stata", {
@@ -264,8 +264,8 @@ test_that("scale() has an exact analogue in real-valued visit times", {
   # N is scale-invariant only if the visits move with the axis; here they do
   # not, so the tiny-spacing design needs vastly more people. That asymmetry is
   # the point of dropping scale(): the visits carry the units.
-  expect_gt(b$n, a$n)
-  expect_equal(b$n, 453940728, tolerance = 1e-5)
+  expect_gt(b$n_total, a$n_total)
+  expect_equal(b$n_total, 453940728, tolerance = 1e-5)
 })
 
 # ---------------------------------------------------------------------------
@@ -276,19 +276,19 @@ test_that("n is floored to an even number, as Stata does", {
   p <- paper_fit("slpower1")
   # Stata: local actual_n = 2 * floor(`given_n' / 2). n(999) prints
   # "specified N = 999 / actual N = 998" and power 0.913.
-  r <- slope_power(p, c(0, 1, 2), n = 999, effectiveness = 0.33)
-  expect_equal(r$n_requested, 999)
-  expect_equal(r$n, 998)
+  r <- slope_power(p, c(0, 1, 2), n_total = 999, effectiveness = 0.33)
+  expect_equal(r$n_requested_total, 999)
+  expect_equal(r$n_total, 998)
   expect_equal(r$n_per_arm, 499)
   expect_equal(r$power, 0.913, tolerance = 5e-4)
 
   # Stata refuses n below 2, and non-integer n ("n must be a whole number
   # greater than or equal to 2", rc 198).
-  expect_error(slope_power(p, c(0, 1, 2), n = 1))
-  expect_error(slope_power(p, c(0, 1, 2), n = 0))
-  expect_error(slope_power(p, c(0, 1, 2), n = 450.5))
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 1))
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 0))
+  expect_error(slope_power(p, c(0, 1, 2), n_total = 450.5))
   # n = 2 is the smallest Stata accepts: one person per arm, the s* design.
-  expect_silent(slope_power(p, c(0, 1, 2), n = 2, effectiveness = 0.33))
+  expect_silent(slope_power(p, c(0, 1, 2), n_total = 2, effectiveness = 0.33))
 })
 
 test_that("alpha, power and effectiveness boundaries match Stata's", {
@@ -307,11 +307,11 @@ test_that("alpha, power and effectiveness boundaries match Stata's", {
   # effectiveness = 1 is allowed by both: "eliminate the whole slope". Stata
   # gives N = 78 on slpower1 with schedule(1 2).
   r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 1)
-  expect_equal(r$n, 78)
+  expect_equal(r$n_total, 78)
 
   # power just under 1 is allowed and prints as 1.000. Stata: N = 3514.
   r <- slope_sample_size(p, c(0, 1, 2), effectiveness = 0.33, power = 0.99999)
-  expect_equal(r$n, 3514)
+  expect_equal(r$n_total, 3514)
 })
 
 test_that("the documented defaults are the ones Stata uses", {
@@ -324,5 +324,9 @@ test_that("the documented defaults are the ones Stata uses", {
   expect_equal(formals(slope_sample_size)$effectiveness, 0.25)
   expect_equal(formals(slope_sample_size)$power, 0.8)
   expect_equal(formals(slope_power)$effectiveness, 0.25)
-  expect_true(is.symbol(formals(slope_power)$n))   # required, no default
+  # Required, though either of two arguments can supply it, so both default
+  # to NULL and the function insists on exactly one.
+  expect_null(formals(slope_power)$n_total)
+  expect_null(formals(slope_power)$n_per_arm)
+  expect_error(slope_power(paper_fit("slpower1"), c(0, 1, 2)), "is required")
 })

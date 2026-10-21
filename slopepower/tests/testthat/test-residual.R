@@ -80,8 +80,8 @@ test_that("corAR1() and corCAR1() agree on integer times", {
   a <- residual_fit("ar1")
   b <- residual_fit("car1")
   expect_equal(a$residual$coef[["Phi"]], b$residual$coef[["Phi"]], tolerance = 1e-2)
-  expect_equal(slope_sample_size(a, 0:2, effectiveness = 0.33)$n,
-               slope_sample_size(b, 0:2, effectiveness = 0.33)$n)
+  expect_equal(slope_sample_size(a, 0:2, effectiveness = 0.33)$n_total,
+               slope_sample_size(b, 0:2, effectiveness = 0.33)$n_total)
 })
 
 test_that("leaving `correlation` and `weights` unset is the original model exactly", {
@@ -159,9 +159,10 @@ test_that("the reduced-structure note does not claim case estimates are unaffect
   d <- load_paper_data("slpower2")
   p <- suppressMessages(slope_params(sdmt ~ time | id, d, comparator = "healthy", group = case,
                                      correlation = corCAR1(), common_variance = TRUE))
-  out <- capture.output(print(p))
-  expect_false(any(grepl("Case estimates are unaffected", out, fixed = TRUE)))
-  expect_true(any(grepl("residual correlation parameters are shared", out, fixed = TRUE)))
+  # The notes wrap, so they are read as one string.
+  out <- gsub("\\s+", " ", paste(capture.output(print(p)), collapse = " "))
+  expect_false(grepl("Case estimates are unaffected", out, fixed = TRUE))
+  expect_true(grepl("residual correlation parameters are shared", out, fixed = TRUE))
 })
 
 test_that("two measurements at one time within a participant are refused", {
@@ -204,7 +205,7 @@ test_that("dropout strata slice the structured covariance correctly", {
 test_that("every stage-two print carries the residual note", {
   out <- capture.output(slope_sample_size(residual_fit("car1"), 0:2, effectiveness = 0.33))
   expect_true(any(grepl("continuous-time AR(1)", out, fixed = TRUE)))
-  out <- capture.output(slope_power(residual_fit("un"), 0:2, n = 400, effectiveness = 0.33))
+  out <- capture.output(slope_power(residual_fit("un"), 0:2, n_total = 400, effectiveness = 0.33))
   out <- gsub("\\s+", " ", paste(out, collapse = " "))
   expect_match(out, "planned visits must be among those times", fixed = TRUE)
 })

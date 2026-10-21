@@ -59,25 +59,25 @@ paper_slopes <- list(
 paper_examples <- list(
   list(id = "p588_annual",   data = "slpower1", page = 588,
        visits = c(0, 1, 2), dropout = NULL, effectiveness = 0.33,
-       expect = list(tte = 0.552, n = 712, n_per_arm = 356)),
+       expect = list(tte = 0.552, n_total = 712, n_per_arm = 356)),
   list(id = "p588_extended", data = "slpower1", page = 588,
        visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1), effectiveness = 0.33,
-       expect = list(tte = 0.552, n = 328, n_per_arm = 164)),
+       expect = list(tte = 0.552, n_total = 328, n_per_arm = 164)),
   list(id = "p589_sixmonth", data = "slpower1", page = 589,
        visits = c(0, 0.5, 1, 1.5, 2), dropout = NULL, effectiveness = 0.33,
-       expect = list(n = 620, n_per_arm = 310)),
+       expect = list(n_total = 620, n_per_arm = 310)),
   list(id = "p590_casecontrol", data = "slpower2", page = 590,
        visits = c(0, 1, 2), dropout = NULL, effectiveness = 0.33,
        comparator = "healthy",
-       expect = list(tte = 0.888, n = 296, n_per_arm = 148)),
+       expect = list(tte = 0.888, n_total = 296, n_per_arm = 148)),
   list(id = "p593_power", data = "slpower2", page = 593,
        visits = c(0, 1, 2), dropout = c(0.05, 0.05), effectiveness = 0.33,
-       comparator = "healthy", n = 200,
+       comparator = "healthy", n_total = 200,
        expect = list(tte = 0.888, power = 0.597)),
   list(id = "p594_rct", data = "slpower3", page = 594,
        visits = c(0, 2, 3), dropout = c(0.2, 0.1), target = "observed",
        comparator = "treated",
-       expect = list(tte = 0.747, n = 318, n_per_arm = 159))
+       expect = list(tte = 0.747, n_total = 318, n_per_arm = 159))
 )
 
 # Table 1, p.595: slpower1, n = 450, effectiveness = 0.33.

@@ -116,7 +116,7 @@ the way:
 ss1b <- slope_sample_size(pars1, visits = c(0, 1, 2, 5), dropout = c(0, 0, 0.1),
                           effectiveness = 0.33)
 ss1b$design
-ss1b$n
+ss1b$n_total
 ```
 
 A longer follow-up gives each participant's own trajectory more time to
@@ -140,7 +140,7 @@ whatever units the fitted slope is in:
 
 ```{r slpower1-spacing}
 ss1c <- slope_sample_size(pars1, visits = seq(0, 2, by = 0.5), effectiveness = 0.33)
-ss1c$n
+ss1c$n_total
 ```
 
 620 participants: fewer than the annual-visit design, because the interim
@@ -232,7 +232,7 @@ assume 5% of those who start are lost each year:
 
 ```{r slpower2-power}
 pw2 <- slope_power(pars2, visits = c(0, 1, 2), dropout = c(0.05, 0.05),
-                   n = 200, effectiveness = 0.33)
+                   n_total = 200, effectiveness = 0.33)
 pw2
 ```
 
@@ -310,7 +310,7 @@ effect needs the sample size multiplied by `p^-2`. Section 4.1.3 of the paper
 does exactly this for `p = 0.5`, multiplying the 318 above by 4:
 
 ```{r slpower3-fraction}
-ss3$n * 4
+ss3$n_total * 4
 ```
 
 1,272 participants, which is the figure the paper quotes. It is very slightly
@@ -359,11 +359,11 @@ does the whole comparison in one call:
 
 ```{r grid-power}
 tbl <- slope_power_grid(
-  pars1, n = 450, effectiveness = 0.33,
+  pars1, n_total = 450, effectiveness = 0.33,
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 )
-tbl[, c("design", "dropout", "n", "power")]
+tbl[, c("design", "dropout", "n_per_arm", "power")]
 ```
 
 Two more-visits-is-better patterns are visible here. Adding follow-up visits
@@ -381,9 +381,10 @@ year" is a different vector of per-visit proportions for a two-visit
 schedule than for a five-visit one, and `dropout_rate()` expands a single
 stated rate correctly for each.
 
-`slope_sample_size_grid()` is the converse table: instead of fixing `n` and
-letting power vary, it fixes the target power and reports the `n` each
-combination needs.
+`slope_sample_size_grid()` is the converse table: instead of fixing the sample
+size and letting power vary, it fixes the target power and reports the sample
+size each combination needs. Every count comes in both bases, `n_total` and
+`n_per_arm`, and printing shows the one `per_arm` picks.
 
 ```{r grid-n}
 tbl_n <- slope_sample_size_grid(
@@ -391,7 +392,7 @@ tbl_n <- slope_sample_size_grid(
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 )
-tbl_n[, c("design", "dropout", "n", "power")]
+tbl_n[, c("design", "dropout", "n_per_arm", "power")]
 ```
 
 Read together, the two tables are the same design space from opposite ends:
@@ -400,7 +401,7 @@ and ask what recruitment it costs.
 
 Both tables so far vary the trial and hold the assumptions fixed. The
 assumptions can be varied in exactly the same way: `effectiveness`, `alpha`
-and whichever of `n` and `power` the grid is not solving for each take a
+and whichever of the sample size and `power` the grid is not solving for each take a
 list of values, and every one of them is priced against every design. The
 uncomfortable question about the table above is how much of it depends on
 assuming a treatment that slows decline by 33%, and a grid answers that
@@ -412,7 +413,7 @@ tbl_s <- slope_sample_size_grid(
   power         = c(`80pc` = 0.8, `90pc` = 0.9),
   effectiveness = list(`25pc` = 0.25, `33pc` = 0.33, `40pc` = 0.4)
 )
-tbl_s[, c("design", "dropout", "effectiveness", "power", "n")]
+tbl_s[, c("design", "dropout", "effectiveness", "power", "n_per_arm")]
 ```
 
 The sample size scales with the inverse square of the effect being targeted,

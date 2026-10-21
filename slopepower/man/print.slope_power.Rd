@@ -14,10 +14,8 @@
 \item{per_arm}{Which basis to print every count on: \code{TRUE} for participants
 per arm, \code{FALSE} for the trial total. Defaults to \code{NULL}, meaning
 "whatever \code{slope_power()} was called with" -- read from \code{x}'s \code{per_arm}
-attribute, or per arm if that is absent. Unlike
-\code{print.slope_sample_size()}, both the specified and the actual count
-move to the chosen basis, since \verb{specified N} echoes the \code{n} argument on
-whichever basis is being shown, not the value as typed.}
+attribute, or per arm if that is absent. Both the requested and the
+actual sample size are shown on the chosen basis.}
 }
 \value{
 \code{x}, invisibly.
@@ -27,6 +25,6 @@ Print a slope power calculation
 }
 \examples{
 pars <- slope_params(sdmt ~ visit | id, data = slpower1)
-slope_power(pars, c(0, 1, 2), n = 712, effectiveness = 0.33)
+slope_power(pars, c(0, 1, 2), n_total = 712, effectiveness = 0.33)
 
 }

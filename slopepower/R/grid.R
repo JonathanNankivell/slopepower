@@ -165,7 +165,7 @@ grid_cells <- function(axes) {
 #' `trial_design` per visits/dropout pair (collecting the baseline-dropout
 #' warning as it goes, since that is a property of the design, not of what is
 #' later computed from it), the cross product of every axis, and the six
-#' columns -- `design` through `dropout_total` -- that a cell has independently
+#' columns -- `design` through `dropout_cumulative` -- that a cell has independently
 #' of any calculation.
 #'
 #' Split out from the solving loop, now [grid_evaluate()], so that
@@ -282,7 +282,7 @@ grid_axes <- function(visits, dropout, dropout_scale, scalars, context) {
     scheduled_visits = n_visits[di],
     last_visit       = vapply(visit_list, function(v) v[length(v)], numeric(1L),
                               USE.NAMES = FALSE)[di],
-    dropout_total    = vapply(designs, function(d) sum(d$dropout), numeric(1L),
+    dropout_cumulative = vapply(designs, function(d) sum(d$dropout), numeric(1L),
                               USE.NAMES = FALSE)[design_of]
   )
 
@@ -323,12 +323,15 @@ expected_visits <- function(design) {
 
 #' The stage-two result fields every grid cell reports, in column order
 #'
-#' `n_requested` is the `n` a power cell was asked for, before evening, so rows
-#' for 101 and 100 stay distinguishable; `NA` in a sample-size grid, where
-#' nothing was requested.
+#' `n_requested_total`/`n_requested_per_arm` are the sample size a power cell
+#' was asked for, before evening, so rows for 101 and 100 stay
+#' distinguishable; `NA` in a sample-size grid, where nothing was requested.
+#' The names are the result fields' own, so a grid row and an
+#' `as.data.frame()` row share them.
 #' @noRd
-grid_result_cols <- c("n", "n_per_arm", "n_requested", "power", "alpha", "effectiveness",
-                      "tte", "var_tte", "effect_size")
+grid_result_cols <- c("n_total", "n_per_arm", "n_requested_total", "n_requested_per_arm",
+                      "power", "alpha", "effectiveness", "tte", "var_tte", "effect_size",
+                      "visits_total", "visits_per_arm")
 
 #' Walk the cross product of a normalised grid, evaluating one design per cell
 #'
@@ -379,9 +382,9 @@ grid_evaluate <- function(g, evaluate, context) {
       error = grid_cell_error(context, g$labels_at(k))
     )
 
-    # The nine result columns are read straight off `res`. That is the same
+    # The result columns are read straight off `res`. That is the same
     # thing as.data.frame.slope_result() reports -- it copies each of these
-    # nine from `x` unchanged -- and routing through it instead was the single
+    # from `x` unchanged -- and routing through it instead was the single
     # most expensive line in the loop, at 1.3 ms a cell. The guarantee that
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
@@ -394,41 +397,25 @@ grid_evaluate <- function(g, evaluate, context) {
                           "The comparator slope is further from zero than the group being ",
                           "treated; check that `slope_comparator` is the intended target."))
 
-  # The anticipated visit burden: `n`/`n_per_arm` times the design's own
-  # expected_visits(), one vectorised pass off each cell's design rather than
-  # a row at a time in the loop above -- the same reason dropout_total is
-  # computed that way in grid_axes().
-  visits_pp <- vapply(g$designs, expected_visits, numeric(1L))[g$design_of]
-  res_cols$visits_total   <- res_cols$n * visits_pp
-  res_cols$visits_per_arm <- res_cols$n_per_arm * visits_pp
-
   res_cols
 }
 
-#' Reduce a grid's `n`/`n_per_arm` and `visits_total`/`visits_per_arm` pairs
-#' to one display basis
+#' Keep one basis of every `_total`/`_per_arm` column pair, for printing
 #'
-#' The two plain grids have no print method to consult a display attribute at
-#' print time (unlike the bootstrap grid and the single results), so for them
-#' `per_arm` shapes the returned data frame itself: the `n`/`n_per_arm` pair
-#' collapses to one `n` column and `visits_total`/`visits_per_arm` to one
-#' `visits` column, each holding the chosen basis. Assigning over the existing
-#' `n` and `visits_total` columns rather than rebuilding the frame keeps their
-#' original position; deleting `n_per_arm` and `visits_per_arm` then closes
-#' the gap they leave, and the rename is the only reordering. `n_requested`,
-#' stored as a total like `n`, is halved with it, as print.slope_power() shows
-#' "specified N per arm".
+#' Every grid, plain or bootstrapped, carries both bases of every count
+#' (CONTRACT.md section 4.5); `per_arm` only picks which twin a printed table
+#' shows. A pair is any column whose name has a `_total` token -- `n_total`,
+#' `n_requested_total`, `visits_total`, `n_total_lower` -- with a `_per_arm`
+#' twin, so a count column added later is covered without being listed here.
+#' Columns keep their stored names: what is printed is what `$` reads.
 #' @noRd
 basis_columns <- function(df, per_arm) {
-  if (per_arm) {
-    df$n <- df$n_per_arm
-    df$n_requested <- df$n_requested / 2
-    df$visits_total <- df$visits_per_arm
-  }
-  df$n_per_arm <- NULL
-  df$visits_per_arm <- NULL
-  names(df)[names(df) == "visits_total"] <- "visits"
-  df
+  nms <- names(df)
+  totals <- nms[grepl("_total(_|$)", nms)]
+  twins <- sub("_total(_|$)", "_per_arm\\1", totals)
+  paired <- twins %in% nms
+  drop <- if (per_arm) totals[paired] else twins[paired]
+  df[setdiff(nms, drop)]
 }
 
 #' Report one class of collected per-cell warning, once for the whole grid
@@ -472,7 +459,8 @@ report_collected <- function(context, cells, k, tail) {
 #'   `"incremental"` (the default) or `"cumulative"`, as in
 #'   [slope_sample_size()]. It applies to every vector in the list, and cannot
 #'   be `"cumulative"` if the list holds a [dropout_rate()].
-#' @param n Total number of participants. Required. A single value is held
+#' @param n_total,n_per_arm The sample size held fixed: the trial total, or
+#'   participants in each arm. Supply exactly one. A single value is held
 #'   constant across the grid; several make it another axis.
 #' @param effectiveness,alpha Passed to [slope_power()]. A single value is held
 #'   constant across the grid; a numeric vector or named list of values makes
@@ -480,28 +468,30 @@ report_collected <- function(context, cells, k, tail) {
 #'   every level of it. Names are used to identify the cell in any message; the
 #'   value itself is what the table reports, in the column of the same name.
 #' @param target Passed to [slope_power()] and held constant across the grid.
-#' @param per_arm Which basis `n` and `visits` are reported on: `TRUE`
-#'   (the default) for participants per arm, `FALSE` for the trial total. Both
-#'   are computed either way; this only picks which one the returned columns
-#'   carry. Recorded as a `per_arm` attribute on the result (`attr(x,
-#'   "per_arm")`) so it can be recovered later.
+#' @param per_arm Which basis the printed table shows each count on: `TRUE`
+#'   (the default) for participants (or visits) per arm, `FALSE` for the trial
+#'   total. Display only: both bases are always returned as columns. Recorded
+#'   as a `per_arm` attribute (`attr(x, "per_arm")`).
 #'
-#' @return A data frame with one row per combination of the axes supplied, with
-#'   columns `design`, `dropout`, `scheduled_visits`, `last_visit`,
-#'   `dropout_total`, `n`, `n_requested`, `power`, `alpha`, `effectiveness`,
-#'   `tte`, `var_tte`, `effect_size` and `visits`. `power` is what varies; `n`
-#'   is constant unless it was itself given several values. `n` is the sample
-#'   size actually used, made even for 1:1 allocation; `n_requested` is the `n`
-#'   as given, so an odd request stays distinguishable from the even one below
-#'   it. `n`, `n_requested` and `visits` are on the basis `per_arm` selects --
-#'   participants (or visits) per arm by default, or the trial total under
-#'   `per_arm = FALSE`. `visits` is `n` times the
-#'   expected number of visits one participant attends -- `scheduled_visits`
-#'   itself when `dropout_total` is zero, less otherwise, since a participant
-#'   who withdraws still contributes the visits attended before doing so (see
-#'   the "Dropout" section of [slope_sample_size()]). Cells are
-#'   listed with `design` varying slowest, then `dropout`, then any further
-#'   axes in the order the arguments are declared above.
+#' @return A data frame of class `slope_power_grid`, one row per combination of
+#'   the axes supplied, with columns `design`, `dropout`, `scheduled_visits`,
+#'   `last_visit`, `dropout_cumulative`, `n_total`, `n_per_arm`,
+#'   `n_requested_total`, `n_requested_per_arm`, `power`, `alpha`,
+#'   `effectiveness`, `tte`, `var_tte`, `effect_size`, `visits_total` and
+#'   `visits_per_arm`. Every count comes as a `_total`/`_per_arm` pair, the
+#'   total twice the per-arm figure. `power` is what varies; the sample size
+#'   is constant unless it was itself given several values. `n_total` and
+#'   `n_per_arm` are the sample size actually used, made even for 1:1
+#'   allocation; `n_requested_total` and `n_requested_per_arm` are the sample
+#'   size as given, so an odd request stays distinguishable from the even one
+#'   below it. `visits_total` is `n_total` times the expected number of visits
+#'   one participant attends -- `scheduled_visits` itself when
+#'   `dropout_cumulative` is zero, less otherwise, since a participant who
+#'   withdraws still contributes the visits attended before doing so (see the
+#'   "Dropout" section of [slope_sample_size()]). Cells are listed with
+#'   `design` varying slowest, then `dropout`, then any further axes in the
+#'   order the arguments are declared above. Subsetting with `[` returns a
+#'   plain data frame.
 #'
 #' @examples
 #' # Table 1, p.595 of Nash et al. (2021): explores how adding interim visits
@@ -516,7 +506,7 @@ report_collected <- function(context, cells, k, tail) {
 #'   cov_intercept_slope = 2.810881, sigma2_residual = 9.159780
 #' )
 #' slope_power_grid(
-#'   pars, n = 450, effectiveness = 0.33,
+#'   pars, n_total = 450, effectiveness = 0.33,
 #'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
 #'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 #' )
@@ -527,7 +517,7 @@ report_collected <- function(context, cells, k, tail) {
 #' # sizes, for six rows in all.
 #' slope_power_grid(
 #'   pars, visits = 0:3, dropout = dropout_rate(0.05),
-#'   n = c(`450` = 450, `600` = 600),
+#'   n_total = c(`450` = 450, `600` = 600),
 #'   effectiveness = list(`20pc` = 0.2, `25pc` = 0.25, `33pc` = 0.33)
 #' )
 #'
@@ -537,7 +527,7 @@ report_collected <- function(context, cells, k, tail) {
 #' # here the assumed effectiveness goes down the side and the significance
 #' # level across the top.
 #' sens <- slope_power_grid(
-#'   pars, visits = 0:3, n = 450,
+#'   pars, visits = 0:3, n_total = 450,
 #'   effectiveness = c(0.20, 0.25, 0.33), alpha = c(0.05, 0.01)
 #' )
 #' round(xtabs(power ~ effectiveness + alpha, sens), 3)
@@ -546,7 +536,7 @@ report_collected <- function(context, cells, k, tail) {
 #' # assumed effectivenesses is six rows, and the schedules can still be
 #' # compared within each level because every one of them was priced at it.
 #' slope_power_grid(
-#'   pars, n = 450, effectiveness = c(0.25, 0.33),
+#'   pars, n_total = 450, effectiveness = c(0.25, 0.33),
 #'   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
 #'   dropout = dropout_rate(0.05)
 #' )
@@ -557,7 +547,7 @@ report_collected <- function(context, cells, k, tail) {
 #' pars2 <- slope_params(sdmt ~ I(as.numeric(vdate) / 365) | id, data = df2,
 #'                       comparator = "healthy", group = case)
 #' slope_power_grid(
-#'   pars2, n = 40, effectiveness = 0.33,
+#'   pars2, n_total = 40, effectiveness = 0.33,
 #'   visits  = list(annual = c(0, 1, 2), six_month = seq(0, 2, 0.5)),
 #'   dropout = list(none = NULL, `5pc` = dropout_rate(0.05))
 #' )
@@ -569,7 +559,7 @@ report_collected <- function(context, cells, k, tail) {
 #' pars3 <- slope_params(sdmt ~ visit | id, data = slpower3,
 #'                       comparator = "treated", group = treat)
 #' slope_power_grid(
-#'   pars3, n = 396, target = "observed",
+#'   pars3, n_total = 396, target = "observed",
 #'   visits  = list(as_planned = c(0, 0.5, 2), denser = c(0, 0.5, 1, 2)),
 #'   dropout = NULL
 #' )
@@ -580,20 +570,20 @@ report_collected <- function(context, cells, k, tail) {
 #' @export
 slope_power_grid <- function(params, visits, dropout = NULL,
                              dropout_scale = c("incremental", "cumulative"),
-                             n, effectiveness = 0.25,
+                             n_total = NULL, n_per_arm = NULL, effectiveness = 0.25,
                              target = c("effectiveness", "observed"),
                              alpha = 0.05, per_arm = TRUE) {
   context <- "slope_power_grid()"
-  # Here before the loop, or a missing `n` surfaces from inside it, wrapped in
-  # a per-cell message.
-  require_n(n, paste0(
+  # Here before the loop, or a missing sample size surfaces from inside it,
+  # wrapped in a per-cell message.
+  n_total <- resolve_n(n_total, n_per_arm, paste0(
     "this grid holds the sample size fixed and reports\n",
     "  the power each design achieves. For the sample size each design needs,\n",
-    "  use slope_sample_size_grid()."), context)
+    "  use slope_sample_size_grid()."), context, axis = TRUE)
   target <- match.arg(target)
   check_target_effectiveness(target, !missing(effectiveness), context)
 
-  grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "n", n,
+  grid_stage_two(params, visits, dropout, match.arg(dropout_scale), "n_total", n_total,
                  effectiveness, target, alpha, per_arm, context)
 }
 
@@ -620,9 +610,11 @@ slope_power_grid <- function(params, visits, dropout = NULL,
 #' @param target Passed to [slope_sample_size()] and held constant across the
 #'   grid.
 #'
-#' @return A data frame with the same columns as [slope_power_grid()]. `n` is
-#'   what varies; `power` is constant unless it was itself given several
-#'   values. `n_requested` is `NA`, since no `n` was given.
+#' @return A data frame of class `slope_sample_size_grid`, with the same
+#'   columns as [slope_power_grid()]. `n_total` and `n_per_arm` are what
+#'   varies; `power` is constant unless it was itself given several values.
+#'   `n_requested_total` and `n_requested_per_arm` are `NA`, since no sample
+#'   size was given.
 #'
 #' @examples
 #' # No comparator: measured toward a slope of zero, fitted to all two
@@ -655,7 +647,7 @@ slope_power_grid <- function(params, visits, dropout = NULL,
 #'   pars, visits = 0:3, effectiveness = c(0.20, 0.25, 0.33),
 #'   power = c(0.8, 0.9)
 #' )
-#' xtabs(n ~ effectiveness + power, sens)
+#' xtabs(n_per_arm ~ effectiveness + power, sens)
 #'
 #' # Varying alpha as well: a sweep over all three assumptions at once, for one
 #' # design, is twelve rows and one call.
@@ -713,11 +705,9 @@ slope_sample_size_grid <- function(params, visits, dropout = NULL,
 #' building the axes, solving every cell, and reducing the table to one display
 #' basis -- is identical, so both call through here.
 #'
-#' Both bases are built first -- `n`/`n_per_arm`, `visits_total`/
-#' `visits_per_arm` -- and reduced to the one `per_arm` asks for only at the
-#' end, by [basis_columns()]; [slope_sample_size_grid_boot()] calls
-#' [grid_axes()] and [grid_evaluate()] directly because it keeps both. The
-#' `per_arm` attribute records which basis a table already in hand is on.
+#' Both bases of every count are kept -- `n_total`/`n_per_arm`,
+#' `n_requested_total`/`n_requested_per_arm`, `visits_total`/`visits_per_arm`
+#' -- and the `per_arm` attribute only picks which the print method shows.
 #' `per_arm` is checked first, as every other entry point does, so a wrong one
 #' costs nothing rather than a whole grid's solve.
 #'
@@ -734,9 +724,90 @@ grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
   df <- as.data.frame(c(g$out, grid_evaluate(g, spec$evaluate, context)),
                       stringsAsFactors = FALSE)
-  out <- basis_columns(df, per_arm)
-  attr(out, "per_arm") <- per_arm
-  out
+  structure(df, class = c(grid_class(fixed_name), "data.frame"), per_arm = per_arm)
+}
+
+#' The plain grid class for the input a grid holds fixed
+#' @noRd
+grid_class <- function(fixed_name) {
+  if (identical(fixed_name, "n_total")) "slope_power_grid" else "slope_sample_size_grid"
+}
+
+# ---------------------------------------------------------------------------
+# grid objects: subsetting and printing
+# ---------------------------------------------------------------------------
+
+#' A grid as a plain data frame, without its class or grid-wide attributes
+#'
+#' Shared by `[` and the print methods. A value describing the whole table --
+#' the display basis, or a bootstrap grid's replicate count -- becomes false,
+#' not merely stale, once the table changes shape, so subsetting drops them.
+#' @noRd
+strip_grid <- function(x) {
+  class(x) <- "data.frame"
+  extra <- setdiff(names(attributes(x)), c("names", "row.names", "class"))
+  for (a in extra) attr(x, a) <- NULL
+  x
+}
+
+#' Subset a grid
+#'
+#' Any subset of a grid -- rows or columns -- is returned as a plain data
+#' frame: the class and the grid-wide attributes (the display basis, and for
+#' a bootstrapped grid the replicate summary) describe the whole table and are
+#' dropped with it. Both bases of every count stay as columns, so nothing is
+#' lost.
+#'
+#' @param x A grid from [slope_sample_size_grid()], [slope_power_grid()] or
+#'   their bootstrapped versions.
+#' @param ... Passed to the data frame method.
+#' @return A data frame.
+#' @name grid_subset
+#' @keywords internal
+#' @export
+`[.slope_sample_size_grid` <- function(x, ...) {
+  out <- NextMethod()
+  if (inherits(out, "data.frame")) strip_grid(out) else out
+}
+
+#' @rdname grid_subset
+#' @export
+`[.slope_power_grid` <- `[.slope_sample_size_grid`
+
+#' A grid's title line: its kind and how many rows it has
+#' @noRd
+grid_title <- function(x, kind) {
+  sprintf("%s (%d %s)", kind, nrow(x), if (nrow(x) == 1L) "row" else "rows")
+}
+
+#' Print a grid of designs
+#'
+#' A title, then the table on one display basis: every count that comes as a
+#' `_total`/`_per_arm` pair is shown on the basis `per_arm` picks, under its
+#' stored name, so a printed column reads off the object with `$` as named.
+#'
+#' @param x A grid from [slope_sample_size_grid()] or [slope_power_grid()].
+#' @param ... Passed to [print.data.frame()].
+#' @param per_arm `TRUE` to show the per-arm column of each count pair,
+#'   `FALSE` for the trial total. Defaults to `NULL`, meaning whatever the grid
+#'   was built with (its `per_arm` attribute).
+#' @return `x`, invisibly.
+#' @export
+print.slope_sample_size_grid <- function(x, ..., per_arm = NULL) {
+  print_grid(x, per_arm, "Sample size grid", "print.slope_sample_size_grid()", ...)
+}
+
+#' @rdname print.slope_sample_size_grid
+#' @export
+print.slope_power_grid <- function(x, ..., per_arm = NULL) {
+  print_grid(x, per_arm, "Power grid", "print.slope_power_grid()", ...)
+}
+
+print_grid <- function(x, per_arm, kind, context, ...) {
+  per_arm <- display_basis(x, per_arm, context)
+  cat_title(grid_title(x, kind))
+  print.data.frame(basis_columns(strip_grid(x), per_arm), ...)
+  invisible(x)
 }
 
 #' Which stage-two arguments are grid axes, and how a cell is priced
@@ -774,7 +845,7 @@ grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
 grid_stage_two_spec <- function(params, fixed_name, fixed_value,
                                 effectiveness, target, alpha, context) {
   check_params(params, context)
-  solver <- if (identical(fixed_name, "n")) {
+  solver <- if (identical(fixed_name, "n_total")) {
     list(fn = power_result, context = "slope_power()")
   } else {
     list(fn = sample_size_result, context = "slope_sample_size()")

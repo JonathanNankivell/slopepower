@@ -14,7 +14,7 @@ test_that("slopepower() reproduces the p.588 single-group example", {
   # no n given, so the Stata wrapper asks the sample-size question
   expect_s3_class(r, "slope_sample_size")
   expect_s3_class(r, "slope_result")
-  expect_equal(r$n, 712)
+  expect_equal(r$n_total, 712)
   expect_equal(r$n_per_arm, 356)
 })
 
@@ -25,7 +25,7 @@ test_that("schedule() lists follow-up visits only, baseline implied", {
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = c(1, 2, 5), dropouts = c(0, 0, 0.1),
     obs = TRUE, nocontrols = TRUE, effectiveness = 0.33))
-  expect_equal(r$n, 328)
+  expect_equal(r$n_total, 328)
   # the design carries the implicit baseline
   expect_equal(r$design$visits, c(0, 1, 2, 5))
 })
@@ -37,7 +37,7 @@ test_that("slopepower() supports the scale() option", {
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = 1:4, scale = 0.5, obs = TRUE, nocontrols = TRUE,
     effectiveness = 0.33))
-  expect_equal(r$n, 620)
+  expect_equal(r$n_total, 620)
   expect_lt(abs(r$tte - 0.276), 5e-4)
 })
 
@@ -48,7 +48,7 @@ test_that("slopepower() reproduces the p.590 case-control example", {
   r <- suppressMessages(slopepower(
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = c(1, 2), obs = TRUE, casecon = "case", effectiveness = 0.33))
-  expect_equal(r$n, 296)
+  expect_equal(r$n_total, 296)
   expect_equal(r$n_per_arm, 148)
 })
 
@@ -62,7 +62,7 @@ test_that("slopepower() computes power when n is given (p.593)", {
   # n given, so it asks the power question
   expect_s3_class(r, "slope_power")
   expect_lt(abs(r$power - 0.597), 5e-4)
-  expect_equal(r$n, 200)
+  expect_equal(r$n_total, 200)
 })
 
 test_that("slopepower() keeps Stata's single bimodal interface, and guards it", {
@@ -80,11 +80,11 @@ test_that("slopepower() keeps Stata's single bimodal interface, and guards it", 
   r <- suppressMessages(do.call(slopepower, base))
   expect_s3_class(r, "slope_sample_size")
   expect_equal(r$power, 0.8)
-  expect_equal(r$n, 712)
+  expect_equal(r$n_total, 712)
   # and an explicit power reaches the same place
   r9 <- suppressMessages(do.call(slopepower, c(base, list(power = 0.9))))
   expect_s3_class(r9, "slope_sample_size")
-  expect_gt(r9$n, r$n)
+  expect_gt(r9$n_total, r$n_total)
 })
 
 test_that("slopepower() reproduces the p.594 usetrt example", {
@@ -95,7 +95,7 @@ test_that("slopepower() reproduces the p.594 usetrt example", {
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = c(2, 3), dropouts = c(0.2, 0.1), rct = TRUE,
     treat = "treat", usetrt = TRUE)))
-  expect_equal(r$n, 318)
+  expect_equal(r$n_total, 318)
   expect_equal(r$n_per_arm, 159)
   expect_true(is.na(r$effectiveness))
 })
@@ -147,7 +147,7 @@ test_that("slopepower() warns and then really ignores casecon off model 1", {
     d3, depvar = "sdmt", subject = "id", time = "time", schedule = c(1, 2),
     rct = TRUE, treat = "treat", effectiveness = 0.33))
   expect_equal(ign, plain)
-  expect_equal(ign$n, 624)
+  expect_equal(ign$n_total, 624)
   # The fit is still the RCT one: casecon did not quietly become the grouping.
   expect_equal(ign$params$comparator, "treated")
 
@@ -289,7 +289,7 @@ test_that("slopepower() announces fractional visits, and gets them right", {
   # arithmetic is checked too: p.589 gives N = 620 for six-monthly visits over
   # two years, and p.588 the year-scale tte of 0.552.
   expect_equal(r$design$visits, c(0, 0.5, 1, 1.5, 2))
-  expect_equal(r$n, 620)
+  expect_equal(r$n_total, 620)
   expect_equal(r$n_per_arm, 310)
   expect_lt(abs(r$tte - 0.552), 5e-4)
 
@@ -301,7 +301,7 @@ test_that("slopepower() announces fractional visits, and gets them right", {
     d, depvar = "sdmt", subject = "id", time = "time",
     schedule = 1:4, scale = 0.5, obs = TRUE, nocontrols = TRUE,
     effectiveness = 0.33))
-  expect_equal(r$n, s$n)
+  expect_equal(r$n_total, s$n_total)
   expect_equal(r$tte, 2 * s$tte)
   expect_equal(r$params$slope, 2 * s$params$slope)
 
@@ -348,7 +348,7 @@ test_that("slopepower() works when the package is loaded but not attached", {
     'r <- slopepower::slopepower(slopepower::slpower1, "sdmt", "id", "visit",',
     '                            schedule = c(1, 2), obs = TRUE,',
     '                            nocontrols = TRUE, effectiveness = 0.33)',
-    'cat("N=", r$n, "\\n", sep = "")'
+    'cat("N=", r$n_total, "\\n", sep = "")'
   ), script)
 
   # --vanilla for a clean session; R_LIBS so the child looks where this one

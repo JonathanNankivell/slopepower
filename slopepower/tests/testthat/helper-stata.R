@@ -185,13 +185,13 @@ stata_replay <- function(row) {
     }
 
     res <- suppressWarnings(
-      if (row$mode == "n") do.call(slope_power, c(args, list(n = row$nin)))
+      if (row$mode == "n") do.call(slope_power, c(args, list(n_total = row$nin)))
       else                 do.call(slope_sample_size, c(args, list(power = row$pin)))
     )
 
     # Put the R answers on Stata's axis so the two are directly comparable.
     f <- stata_axis_factor(row)
-    blank$r_n <- res$n
+    blank$r_n <- res$n_total
     blank$r_power <- res$power
     blank$r_effectiveness <- res$effectiveness
     blank$r_tte <- res$tte * f

@@ -1551,10 +1551,10 @@ slope_labels <- function(comparator) {
 #' @export
 print.slope_params <- function(x, ...) {
   lab <- switch(x$comparator,
-                none    = "single group (target: no change over time)",
+                none    = "single group, target no change over time",
                 healthy = "cases and healthy controls",
                 treated = "previous randomised trial")
-  cat("Slope parameters (", lab, ")\n\n", sep = "")
+  cat_title(paste0("Slope parameters: ", lab))
 
   if (!is.na(x$n_obs)) {
     cat_line("number of observations in model", x$n_obs, digits = 0L)
@@ -1576,24 +1576,38 @@ print.slope_params <- function(x, ...) {
   cat_line("covariance of intercept and slope", x$cov_intercept_slope)
   print_residual(x)
 
+  params_notes(x)
+  invisible(x)
+}
+
+#' Print the notes a set of slope parameters carries
+#'
+#' What a reader planning a trial from these parameters must know about the
+#' fit behind them: a covariate adjustment and a residual structure to carry
+#' into the analysis, an unidentified decomposition, a reduced control
+#' structure, and shifted times. Printed by [print.slope_params()] and by every
+#' stage-two result built from the parameters, so the two cannot disagree
+#' about what is worth saying.
+#' @noRd
+params_notes <- function(x) {
   covariate_note(x$covariates)
   residual_note(x$residual)
   # A statement about the fit, so not shown for components supplied directly.
   if (identical(x$residual$correlation, "corSymm") && !is.null(x$fit)) {
-    cat(paste0("\nNote: with an unstructured residual correlation the variance components\n",
-               "      above are not separately identified -- only the covariance they imply\n",
-               "      at the visit times is, and that is all stage two uses.\n"))
+    cat_note(paste("with an unstructured residual correlation the variance components",
+                   "are not separately identified -- only the covariance they imply at",
+                   "the visit times is, and that is all stage two uses."))
   }
   if (isTRUE(x$common_variance)) {
-    cat("\nNote: reduced random-effects structure used for healthy controls\n")
     shared <- shared_by_groups(!is.null(x$covariates), x$residual$correlation)
-    cat(if (!length(shared)) "      (Stata `nocontvar`). Case estimates are unaffected.\n"
-        else sprintf(paste0("      (Stata `nocontvar`). Because the %s are shared\n",
-                            "      by both groups, this can shift the case estimates slightly.\n"),
-                     shared))
+    cat_note(paste0("reduced random-effects structure used for healthy controls ",
+                    "(Stata `nocontvar`). ",
+                    if (!length(shared)) "Case estimates are unaffected."
+                    else sprintf(paste0("Because the %s are shared by both groups, this can ",
+                                        "shift the case estimates slightly."), shared)))
   }
   if (isTRUE(x$time_shifted)) {
-    cat("\nNote: subject times were shifted so each first visit is time zero.\n")
+    cat_note("subject times were shifted so each first visit is time zero.")
   }
-  invisible(x)
+  invisible()
 }

@@ -3,3 +3,4 @@
 ^data-raw$
 ^\.claude$
 ^slopepower_.*\.tar\.gz$
+^OUTPUTS\.md$

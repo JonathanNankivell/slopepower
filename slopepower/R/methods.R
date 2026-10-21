@@ -85,29 +85,28 @@ vcov.slope_params <- function(object, ...) {
 
 #' Confidence intervals from a bootstrap
 #'
-#' The interval a bootstrap built, in the shape [stats::confint()] returns
-#' one: a row for the bootstrapped statistic, named as `statistic` names it
-#' (`"n"`, `"power"`, `"tte"` or `"slope"`), and a row for the slope the
-#' resampling perturbed. Both are read from the object, not recomputed, so
-#' they are the intervals `print()` shows -- BCa or percentile as the object
-#' records, widened to even sample sizes for `n`, and for `n` on the same
-#' basis `print()` uses: per arm unless the bootstrap was run with
-#' `per_arm = FALSE`. The row is then named `n_per_arm`, so the basis is
-#' never in doubt.
+#' The intervals a bootstrap built, in the shape [stats::confint()] returns
+#' them: a row for the bootstrapped statistic and a row for the slope the
+#' resampling perturbed, each named for the quantity it is -- `n_per_arm` or
+#' `n_total`, `power`, `tte`, `slope`. They are read from the object's
+#' `<quantity>_lower` and `<quantity>_upper` fields, not recomputed, so they
+#' are the intervals `print()` shows: BCa or percentile as the object records,
+#' widened to even trial sizes for a sample size.
 #'
 #' @param object A bootstrap result, from [slope_sample_size_boot()],
 #'   [slope_power_boot()], [slope_params_boot()] or the bound bootstraps.
-#' @param parm Which rows, by name -- the statistic's and `"slope"` -- or by
-#'   position, as in [stats::confint()]. Defaults to both (one row, for
-#'   [slope_params_boot()], whose statistic is the slope).
+#' @param parm Which rows, by quantity name -- any the object stores, so
+#'   `"n_total"` and `"n_per_arm"` are both available for a sample size -- or
+#'   by position among the default rows, as in [stats::confint()]. Defaults to
+#'   the rows `print()` shows: the statistic on the display basis, and
+#'   `"slope"`.
 #' @param level The interval's confidence level. It must be the one the
 #'   bootstrap was run at, which is the default; for another, rerun the
 #'   bootstrap with that `level` (and the same `seed`).
 #' @param ... Ignored.
-#' @param per_arm For a bootstrapped `n`: `TRUE` for participants per arm,
-#'   `FALSE` for the trial total. Defaults to `NULL`, meaning the basis the
-#'   bootstrap was called with, as in `print()`. `parm` may name the row
-#'   `"n"` either way, or `"n_per_arm"` when that is what it prints as.
+#' @param per_arm For a bootstrapped sample size, which row the default shows:
+#'   `TRUE` for `n_per_arm`, `FALSE` for `n_total`. Defaults to `NULL`,
+#'   meaning the basis the bootstrap was called with, as in `print()`.
 #'
 #' @return A matrix with one row per `parm` and columns for the lower and
 #'   upper limits, labelled by percentage as [stats::confint()] labels them.
@@ -118,40 +117,57 @@ vcov.slope_params <- function(object, ...) {
 #' b <- slope_sample_size_boot(pars, c(0, 1, 2), effectiveness = 0.33,
 #'                             R = 50, seed = 42)
 #' confint(b)
-#' confint(b, "n")
+#' confint(b, "n_total")
 #' }
 #' @export
 confint.slope_bootstrap <- function(object, parm, level = object$level, ..., per_arm = NULL) {
   context <- "confint()"
-  # The basis print.slope_bootstrap() shows, by the same rule.
-  halves <- boot_halves(object$lattice, display_basis(object, per_arm, context))
-  divisor <- if (halves) 2 else 1
-  rows <- unique(c(object$statistic, "slope"))
-  shown <- ifelse(halves & rows == "n", "n_per_arm", rows)
-  if (missing(parm)) parm <- seq_along(rows)
-  idx <- if (is.numeric(parm)) {
-    if (all(parm %in% seq_along(rows))) parm
-  } else if (is.character(parm)) {
-    # The stored name or the printed one, so a row can be asked for as shown.
-    ifelse(parm %in% rows, match(parm, rows), match(parm, shown))
+  shown <- boot_rows(object, display_basis(object, per_arm, context))
+  rows <- boot_parm(parm, shown, boot_quantities(object), context)
+  check_confint_level(level, object$level, context)
+  out <- cbind(vapply(rows, function(q) object[[paste0(q, "_lower")]], numeric(1L)),
+               vapply(rows, function(q) object[[paste0(q, "_upper")]], numeric(1L)))
+  dimnames(out) <- list(rows, confint_labels(object$level))
+  out
+}
+
+#' Resolve `confint()`'s `parm` to quantity names
+#'
+#' By name among every quantity stored, or by position among those shown by
+#' default; missing means all of those shown.
+#' @noRd
+boot_parm <- function(parm, shown, available, context) {
+  if (missing(parm)) return(shown)
+  rows <- if (is.numeric(parm)) {
+    if (all(parm %in% seq_along(shown))) shown[parm]
+  } else if (is.character(parm) && all(parm %in% available)) {
+    parm
   }
-  if (is.null(idx) || anyNA(idx)) {
-    stop(sprintf("%s: `parm` must be among %s, or their positions.", context,
-                 paste(sQuote(unique(c(rows, shown))), collapse = ", ")), call. = FALSE)
+  if (is.null(rows)) {
+    stop(sprintf("%s: `parm` must be among %s, or positions among %s.", context,
+                 paste(sQuote(available), collapse = ", "),
+                 paste(sQuote(shown), collapse = ", ")), call. = FALSE)
   }
-  if (!is.numeric(level) || length(level) != 1L || !isTRUE(all.equal(level, object$level))) {
+  rows
+}
+
+#' Refuse a `level` other than the one a bootstrap's intervals were built at
+#' @noRd
+check_confint_level <- function(level, built, context) {
+  if (!is.numeric(level) || length(level) != 1L || !isTRUE(all.equal(level, built))) {
     stop(sprintf(paste0(
       "%s: this bootstrap's intervals were built at level = %s, and are not\n",
       "  recomputed here. Rerun the bootstrap with the level wanted (and the same\n",
-      "  `seed`, for the same replicates)."), context, format(object$level)),
+      "  `seed`, for the same replicates)."), context, format(built)),
       call. = FALSE)
   }
-  ci <- list(object$ci / divisor, object$slope_ci)[seq_along(rows)]
-  pct <- paste(format(100 * boot_probs(object$level), trim = TRUE, scientific = FALSE,
-                      digits = 3), "%")
-  out <- do.call(rbind, ci[idx])
-  dimnames(out) <- list(shown[idx], pct)
-  out
+  invisible(level)
+}
+
+#' `confint()`'s column labels, "2.5 %" and "97.5 %"
+#' @noRd
+confint_labels <- function(level) {
+  paste(format(100 * boot_probs(level), trim = TRUE, scientific = FALSE, digits = 3), "%")
 }
 
 # Re-exported so `fixef(pars)` works without attaching nlme, as lme4 does for

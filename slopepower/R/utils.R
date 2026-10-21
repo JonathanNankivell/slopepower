@@ -188,8 +188,8 @@ display_basis <- function(x, per_arm, context) {
 #'
 #' `cat_line(..., digits = 0L)` only takes its whole-number branch when the
 #' value already equals its own rounding (see `fmt_line()`'s comment on why
-#' that branch exists), so halving an odd total -- `print.slope_power()`'s
-#' `specified N` under `per_arm = TRUE` -- falls through to `formatC(...,
+#' that branch exists), so half an odd total -- `print.slope_power()`'s
+#' `requested N per arm` -- falls through to `formatC(...,
 #' digits = 0)`, which rounds `100.5` to `"100"` and silently drops the half a
 #' participant that is the whole reason to show the total un-evened. This
 #' calls `cat_line()` with `digits = 0L` when the value is whole and `1L`
@@ -204,19 +204,15 @@ cat_count <- function(label, value) {
 #' Print the sample-size line on the chosen display basis
 #'
 #' The counterpart to [display_basis()], which resolves *which* basis to show
-#' but leaves each print method to expand what that means. Three of them spelled
-#' the same two-branch block, two character-for-character, so the rule in
-#' CONTRACT.md section 4.5 -- a per-arm basis names the count "N per arm" and
-#' reads `n_per_arm`, a total reads `n` -- had as many homes as there were
-#' result classes. Only the total's label varies between callers
-#' ([print.slope_power()] calls it "actual N", to tell it from the `specified
-#' N` line above), so that is the one thing passed in.
+#' but leaves each print method to expand what that means: a per-arm basis
+#' reads `n_per_arm` as "N per arm", a total reads `n_total` as "N total" --
+#' the label names the basis as the field does (CONTRACT.md section 4.5).
 #' @noRd
-cat_n_line <- function(x, per_arm, total_label = "N") {
+cat_n_line <- function(x, per_arm) {
   if (per_arm) {
     cat_line("N per arm", x$n_per_arm, digits = 0L)
   } else {
-    cat_line(total_label, x$n, digits = 0L)
+    cat_line("N total", x$n_total, digits = 0L)
   }
   invisible(x)
 }
@@ -224,18 +220,25 @@ cat_n_line <- function(x, per_arm, total_label = "N") {
 #' Print the requested (un-evened) sample size of a power-direction result
 #'
 #' The sibling of [cat_n_line()], shared by [print.slope_power()] and
-#' [print.slope_power_ceiling()]. `n_requested` has not been evened, so its
+#' [print.slope_power_ceiling()]. The request has not been evened, so its
 #' per-arm figure can be a half participant -- [cat_count()] prints that
 #' decimal rather than `cat_line()`'s `digits = 0L` path rounding it away.
 #' @noRd
-cat_specified_n_line <- function(x, per_arm) {
+cat_requested_n_line <- function(x, per_arm) {
   if (per_arm) {
-    cat_count("specified N per arm", x$n_requested / 2)
+    cat_count("requested N per arm", x$n_requested_per_arm)
   } else {
-    cat_line("specified N", x$n_requested, digits = 0L)
+    cat_line("requested N total", x$n_requested_total, digits = 0L)
   }
   invisible(x)
 }
+
+#' Print an object's title line, and the blank line after it
+#'
+#' Every print method in the package opens with one: a plain-English name for
+#' what was computed ("Sample size", "Bootstrapped power grid (4 rows)").
+#' @noRd
+cat_title <- function(title) cat(title, "\n\n", sep = "")
 
 #' Print a wrapped "Note:" paragraph after a blank line
 #'
@@ -431,23 +434,51 @@ maybe_add_effectiveness <- function(args, effectiveness, target) {
   args
 }
 
-#' Refuse a missing `n` where it is the input, not the answer
+#' Resolve the sample size held fixed, from `n_total` or `n_per_arm`
 #'
 #' Shared by every function that holds the sample size fixed: [slope_power()],
-#' the ceiling, the power grid, and their bootstraps. Called as
-#' `require_n(n, ...)`: `missing()` follows the promise back to the caller, so
-#' it is `TRUE` here exactly when the caller's `n` was not supplied.
-#' `is.null(n)` as well:
-#' the solver picks its branch on `is.null()`, so an explicit `n = NULL` -- the
-#' shape a programmatic caller gets from `do.call()` with an unset element --
-#' would otherwise slip past into the solve-for-n branch and fail complaining
-#' about `power`, an argument these functions do not have. `why` finishes the
-#' sentence: what `n` is for here, and where to go instead.
+#' the ceiling, the power grid, and their bootstraps. Exactly one of the two
+#' must be given, and the answer is always the trial total, which is what the
+#' solver works in: a per-arm count is doubled, so it is always even and needs
+#' no evening. `n_per_arm` is checked as a whole number *before* doubling,
+#' since 100.5 per arm would otherwise double to a valid-looking 201.
+#'
+#' Both `NULL` defaults are tested with `is.null()`, so an explicit
+#' `n_total = NULL` from `do.call()` is treated as not supplied rather than
+#' slipping into the solve-for-n branch. `why` finishes the "is required"
+#' sentence: what the sample size is for here, and where to go instead.
+#'
+#' `axis = TRUE` is for the grids, where either argument may be a vector or
+#' list of levels. There a per-arm level is relabelled "<v> per arm" unless the
+#' caller named it, so a cell message names the level as the caller wrote it
+#' rather than as its doubled total.
 #' @noRd
-require_n <- function(n, why, context) {
-  if (missing(n) || is.null(n)) {
-    stop(sprintf("%s: `n` is required -- %s", context, why), call. = FALSE)
+resolve_n <- function(n_total, n_per_arm, why, context, axis = FALSE) {
+  if (is.null(n_total) && is.null(n_per_arm)) {
+    stop(sprintf("%s: one of `n_total` and `n_per_arm` is required --\n  %s", context, why),
+         call. = FALSE)
   }
+  if (!is.null(n_total) && !is.null(n_per_arm)) {
+    stop(sprintf(paste0("%s: supply only one of `n_total` and `n_per_arm`; each fixes ",
+                        "the sample size, `n_per_arm` as participants in each arm."),
+                 context), call. = FALSE)
+  }
+  if (!is.null(n_total)) return(n_total)
+
+  check_one <- function(v) {
+    check_whole_number(v, "n_per_arm", "participants per arm", context, lower = 1)
+    2 * v
+  }
+  if (!axis) return(check_one(n_per_arm))
+  levels <- if (is.numeric(n_per_arm)) as.list(n_per_arm) else n_per_arm
+  if (!is.list(levels) || length(levels) == 0L) return(n_per_arm)  # as_scalar_list() reports it
+  nms <- names(levels) %||% rep("", length(levels))
+  blank <- !nzchar(nms)
+  nms[blank] <- vapply(levels[blank], function(v) {
+    if (is.numeric(v) && length(v) == 1L) paste(fmt_num(v), "per arm") else ""
+  }, character(1L))
+  names(levels) <- nms
+  lapply(levels, function(v) if (is.numeric(v) && length(v) == 1L) check_one(v) else v)
 }
 
 #' Reject `effectiveness` alongside target = "observed"

@@ -106,7 +106,7 @@ data.frame(
   slope_ctrl  = c(pars$slope, pars_flipped$slope),
   slope_treat = c(pars$slope_comparator, pars_flipped$slope_comparator),
   tte         = c(harm$tte, benefit$tte),
-  n           = c(harm$n, benefit$n)
+  n           = c(harm$n_total, benefit$n_total)
 )
 ```
 
@@ -181,7 +181,7 @@ dataset and use the options for a single group of untreated subjects."*
 ```{r compare-ab}
 rbind(cbind(option = "A: both arms",   as.data.frame(opt_a)),
       cbind(option = "B: control only", as.data.frame(opt_b)))[
-        , c("option", "n", "tte", "var_tte", "slope", "n_subjects")]
+        , c("option", "n_total", "tte", "var_tte", "slope", "n_subjects")]
 ```
 
 Do not read anything into which of the two gives the smaller `n`. On this draw
@@ -244,7 +244,7 @@ true_pars <- slope_params_manual(
   sigma2_residual = truth$s2e
 )
 true_res <- slope_sample_size(true_pars, visits, effectiveness = 0.25)
-c(n = true_res$n, var_tte = true_res$var_tte)
+c(n = true_res$n_total, var_tte = true_res$var_tte)
 ```
 
 Now repeat the whole pipeline — option A, no dropout — on fresh datasets:
@@ -258,12 +258,12 @@ out <- t(vapply(seq_len(R_sim), function(i) {
   p <- slope_params(sdmt ~ visit | id, d, comparator = "treated", group = treat)
   z <- suppressWarnings(slope_sample_size(p, visits, effectiveness = 0.25))
   c(slope = p$slope, s2a = p$sigma2_intercept, s2b = p$sigma2_slope,
-    sab = p$cov_intercept_slope, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n)
+    sab = p$cov_intercept_slope, s2e = p$sigma2_residual, var_tte = z$var_tte, n = z$n_total)
 }, numeric(7)))
 
 truths <- c(slope = truth$slope_control, s2a = truth$s2a, s2b = truth$s2b,
             sab = truth$sab, s2e = truth$s2e,
-            var_tte = true_res$var_tte, n = true_res$n)
+            var_tte = true_res$var_tte, n = true_res$n_total)
 
 summary_tab <- data.frame(
   truth    = truths,
@@ -320,8 +320,8 @@ orthogonal in a Gaussian linear mixed model.
 ### The bias is in the safe direction, and the estimator is median-unbiased
 
 ```{r median-unbiased}
-c(median_n = median(out[, "n"]), true_n = true_res$n,
-  P_below_truth = mean(out[, "n"] < true_res$n))
+c(median_n = median(out[, "n"]), true_n = true_res$n_total,
+  P_below_truth = mean(out[, "n"] < true_res$n_total))
 ```
 
 The mean is pulled up by a long right tail; the median — which is what you
@@ -340,7 +340,7 @@ round(q)
 ```
 
 The 95% range spans a factor of about `r sprintf("%.1f", q[["97.5%"]] / q[["2.5%"]])`
-against a truth of `r true_res$n`, and that is with a well-determined slope
+against a truth of `r true_res$n_total`, and that is with a well-determined slope
 (\(r \approx `r sprintf("%.1f", r_hat)`\)). A ten-per-cent bias in the mean is
 noise against that.
 
@@ -366,7 +366,7 @@ bias: at \(r = 2.5\) it is about 48%, at \(r = 6\) about 8%, at \(r = 10\) about
 es <- c(0.15, 0.20, 0.25, 0.33, 0.50)
 data.frame(
   effectiveness = es,
-  n = vapply(es, function(e) slope_sample_size(pars, visits, effectiveness = e)$n, 1)
+  n = vapply(es, function(e) slope_sample_size(pars, visits, effectiveness = e)$n_total, 1)
 )
 ```
 

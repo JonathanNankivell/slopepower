@@ -28,7 +28,8 @@ slope_power_boot(
   visits,
   dropout = NULL,
   dropout_scale = c("incremental", "cumulative"),
-  n,
+  n_total = NULL,
+  n_per_arm = NULL,
   effectiveness = 0.25,
   target = c("effectiveness", "observed"),
   alpha = 0.05,
@@ -78,13 +79,12 @@ parameters estimated from a previous trial.}
 \item{alpha}{Two-sided significance level. Defaults to 0.05.}
 
 \item{per_arm}{For \code{statistic = "n"}, which basis the printed result is on:
-\code{TRUE} (the default) for participants per arm, \code{FALSE} for the trial
-total. Display only -- \code{replicates}, \code{ci}, \code{boot_mean} and \code{boot_sd} are
-always the totals \code{slope_sample_size()} itself returns; \code{per_arm} is
-recorded as an attribute (\code{attr(x, "per_arm")}) and consulted by
-\code{print()}, which halves them for display and can be overridden
-afterwards with \code{print(x, per_arm = FALSE)}. Ignored, but still accepted,
-for any other \code{statistic}, none of which have arms.}
+\code{TRUE} (the default) for the \code{n_per_arm} row, \code{FALSE} for \code{n_total}.
+Display only -- both are always stored; \code{per_arm} is recorded as an
+attribute (\code{attr(x, "per_arm")}) and consulted by \code{print()} and
+\code{confint()}, and can be overridden afterwards with
+\code{print(x, per_arm = FALSE)}. Ignored, but still accepted, for any other
+\code{statistic}, none of which have arms.}
 
 \item{statistic}{Which quantity to bootstrap: the one the calculation solves
 for (the default) or the target treatment effect \code{tte} behind it.}
@@ -106,56 +106,59 @@ advances, the stream as usual.}
 
 \item{progress}{Report progress while resampling.}
 
-\item{n}{Total number of participants across both arms, as in
-\code{\link[=slope_power]{slope_power()}}. Required.}
+\item{n_total, n_per_arm}{The sample size held fixed, as in
+\code{\link[=slope_power]{slope_power()}}: the trial total, or participants in each arm. Supply
+exactly one.}
 }
 \value{
 An object of class \code{c("slope_sample_size_boot", "slope_bootstrap")}
-(or \code{"slope_power_boot"}, or \code{"slope_params_boot"}), with elements
-\code{observed}, \code{replicates}, \code{ci}, \code{ci_method} (the method actually used,
-which falls back to \code{"percentile"} where BCa could not be built),
-\code{statistic}, \code{R}, \code{n_failed} (replicates that yielded no statistic, for
-any reason), \code{n_refit_failed} (those among them whose model refit failed
-to converge; the rest refitted, but the calculation could not be solved
-on them), \code{level}, \code{se}, \code{boot_mean} and \code{boot_sd}
-(the mean and SD of \code{replicates}), \code{straddle} (the proportion of retained
-replicates whose \emph{refitted slope} has a different sign from the fitted
-slope, whatever \code{statistic} was asked for --- the section 2.6 hazard
-itself, rather than the analytic proxy for it in \code{se}), \code{straddle_of}
-(\code{"slope"}, or \code{"slope difference"} when the target treatment effect is
-measured toward a comparator's slope --- under \code{comparator = "healthy"},
-or \code{target = "observed"} --- since that difference, not the slope, is then
-what the sample size depends on; \code{straddle} and \code{se} are measured on it),
-and \code{lattice}
-(whether \code{statistic} is \code{"n"}, decided once here and read by the print
-method rather than re-tested there). The \code{per_arm} argument is recorded
-as an attribute, not an element, since it changes nothing about these
-values.
-
-The refitted slopes are summarised alongside, whatever \code{statistic} was
-asked for, in \code{slope_observed} (the fitted slope), \code{slope_replicates},
-\code{slope_mean}, \code{slope_sd}, \code{slope_ci} and \code{slope_ci_method}. They are what
-the resampling actually perturbs --- every replicate of every other
-statistic is a function of them --- so an interval on the statistic is
-only as meaningful as the one on the slope beneath it. \code{slope_ci} is built
-the same way as \code{ci} and from the same jackknife, so it costs no extra
-model fits, but the two can fall back independently: compare
-\code{slope_ci_method} with \code{ci_method}. The print method does not show them
---- it reports the statistic asked for, and \code{straddle} beneath it --- so
-these six fields are where a reader who wants the slope's own interval
-finds it.
+(or \code{"slope_power_boot"}, or \code{"slope_params_boot"}). Every bootstrapped
+quantity \code{q} has the same six fields: \code{q} itself (the estimate from the
+original fit), \code{q_replicates} (the retained replicates), \code{q_mean} and
+\code{q_sd} (their mean and SD), and \code{q_lower} and \code{q_upper} (the interval).
+The quantities are:
+\describe{
+\item{the statistic}{\code{n_total} and \code{n_per_arm} for \code{statistic = "n"}
+-- the same sample size on both bases, every per-arm field exactly half
+its total -- or \code{power}, or \code{tte}. Its interval method is
+\verb{<statistic>_ci_method} (\code{n_ci_method}, \code{power_ci_method},
+\code{tte_ci_method}): the method actually used, which falls back to
+\code{"percentile"} where BCa could not be built.}
+\item{\code{slope}}{The refitted slope, whatever \code{statistic} was asked for,
+with its own \code{slope_ci_method}. It is what the resampling actually
+perturbs --- every replicate of every other statistic is a function of
+it --- so an interval on the statistic is only as meaningful as the one
+on the slope beneath it. Its interval comes from the same jackknife, so
+costs no extra model fits, but the two can fall back independently.
+Under \code{slope_params_boot()} it is the statistic, and the only block.}
+}
+The rest describe the resampling: \code{statistic} (\code{"n"}, \code{"power"}, \code{"tte"}
+or \code{"slope"}), \code{slope_se} (the slope's analytic standard error, behind the
+section 2.6 check), \code{R}, \code{level}, \code{replicates_failed} (replicates that
+yielded no statistic, for any reason), \code{refits_failed} (those among them
+whose model refit failed to converge; the rest refitted, but the
+calculation could not be solved on them), \code{straddle} (the proportion of
+retained replicates whose \emph{refitted slope} has a different sign from the
+fitted slope --- the section 2.6 hazard itself, rather than the analytic
+proxy for it in \code{slope_se}), \code{straddle_of} (\code{"slope"}, or \code{"slope difference"} when the target treatment effect is measured toward a
+comparator's slope --- under \code{comparator = "healthy"}, or
+\code{target = "observed"} --- since that difference, not the slope, is then
+what the sample size depends on; \code{straddle} and \code{slope_se} are measured on
+it), and \code{lattice} (whether \code{statistic} is \code{"n"}). The \code{per_arm} argument
+is recorded as an attribute, not an element, since it changes nothing
+about these values.
 
 Every summary is over the retained replicates --- the ones whose refit and
-whose statistic both succeeded; \code{n_failed} counts the rest, which are
-discarded rather than imputed.
+whose statistic both succeeded; \code{replicates_failed} counts the rest, which
+are discarded rather than imputed.
 
 For \code{statistic = "n"} each replicate is a whole trial: \code{\link[=slope_sample_size]{slope_sample_size()}}
 is re-solved on that replicate's refitted parameters, and it rounds \emph{up} to
 a whole participant per arm before doubling for the total, so every value in
-\code{replicates} is an even integer. \code{boot_mean} and \code{boot_sd} therefore
-summarise sizes that were each rounded up individually; they do not round an
-average, and \code{boot_mean} is not itself a size a trial could be run at. The
-slope carries no such rounding.
+\code{n_total_replicates} is an even integer. \code{n_total_mean} and \code{n_total_sd}
+therefore summarise sizes that were each rounded up individually; they do
+not round an average, and the mean is not itself a size a trial could be
+run at. The slope carries no such rounding.
 }
 \description{
 Resamples subjects with replacement, refits the stage-one mixed model on each
@@ -191,11 +194,11 @@ with, so a \code{healthy} study whose controls were fitted with a random interce
 only --- because \code{common_variance = TRUE} asked for it, or because the full
 structure failed to converge --- is bootstrapped under that same structure
 throughout. A replicate that cannot fit it is discarded and counted in
-\code{n_failed} rather than quietly refitted under the other one, so an interval
+\code{replicates_failed} rather than quietly refitted under the other one, so an interval
 never mixes the two.
 
 A bootstrapped sample size is reported as sample sizes. Every replicate of
-\code{n} is an even integer, so the interval's endpoints are widened out to the
+\code{n_total} is an even integer, so the interval's endpoints are widened out to the
 nearest sizes a trial could actually be fielded at rather than left between
 them, and the bias correction behind a BCa interval counts replicates tied
 with the observed size as half below rather than wholly below. The other
@@ -251,7 +254,7 @@ pars2 <- slope_params(sdmt ~ visit | id, data = sim2,
 
 \donttest{
 # Bootstrapping the power of a fixed sample size, rather than the size itself.
-slope_power_boot(pars2, c(0, 1, 2), n = 400, effectiveness = 0.33,
+slope_power_boot(pars2, c(0, 1, 2), n_total = 400, effectiveness = 0.33,
                  R = 100, seed = 42)
 }
 

@@ -534,8 +534,8 @@ ended up with is not always the one that was asked for, and it has to be
 read off `params$common_variance` and pinned — otherwise a replicate that
 could not fit the full structure would quietly fall back to the reduced one
 and land in the same interval as a point estimate fitted the other way. A
-replicate that cannot fit the pinned structure is counted in `n_failed`
-instead. This is visible only under `healthy`, and, without covariates or a
+replicate that cannot fit the pinned structure is counted in
+`replicates_failed` (and `refits_failed`) instead. This is visible only under `healthy`, and, without covariates or a
 residual correlation, only through the controls' slope: the model then
 factorises per group, so the case estimates are invariant, but
 `slope_comparator` — what `slope_difference` is measured against — is not.
@@ -546,7 +546,7 @@ The one setting a replicate does not share with the observed fit is
 `apVar`: replicates are refitted with `apVar = FALSE`, since nothing reads
 the variance parameters' approximate covariance off a replicate and it costs
 9-23% of every refit. That can change which replicates are counted in
-`n_failed` only when the numerical Hessian has non-finite entries — nlme
+`replicates_failed` only when the numerical Hessian has non-finite entries — nlme
 returns a non-positive-definite one as a string rather than failing the fit.
 
 A refit failure is any error from the refitted `slope_params()`, not only
@@ -790,42 +790,40 @@ this matters: Table 1 exists to compare rows, not to read one at a time.
 
 ---
 
-## 25. Printed counts default to per arm, on one basis at a time
+## 25. Every count is named for its basis; print shows one basis at a time
 
 **Stata's** `slopepower` prints both `N` and `N per arm` on every result, and
-the two grid-style displays it has (Table 1's hand-assembled rows) do the
-same. Nothing chooses between them; both are always on the page.
+returns `r(N)`, the trial total. Its `n()` option is a total too.
 
-**R** used to do the same — every printed result and table carried `n` and
-`n_per_arm` side by side, and `slope_sample_size_grid_boot()`'s table carried
-`visits_total`/`visits_per_arm` alongside them, plus a bootstrap summary
-(`n_mean`, `n_sd`, `n_ci`) that was silently totals-only. A reader had to know,
-from outside the table, which of several count columns were per arm.
+**R** stores both bases of every count on a planned trial, always, and names
+each for its basis: `n_total` and `n_per_arm`, `n_requested_total` and
+`n_requested_per_arm`, `visits_total` and `visits_per_arm`, and for a
+bootstrapped sample size `n_total_lower`, `n_per_arm_lower` and the rest. No
+output has a bare `n`. Earlier versions did: a single result's `n` was the
+total, a plain grid's `n` was per arm by default, and a bootstrap grid's `n`
+was the total again, so the same call could give `n == 216` from one function
+and `n == 432` from its bootstrap. A bootstrap's `ci` was likewise a total
+while its print and `confint()` were per arm. Naming the basis removes the
+question rather than documenting the answer.
 
-A `per_arm` argument now picks one basis and every printed count follows it:
-`n` and `visits` mean whichever was chosen, stated in a note beneath a data
-frame or in the line label for the Stata-style single-result printouts. It
-defaults to `TRUE` — per arm is the *N* of equation (6) and what each
-recruiting site actually needs — where Stata's default is "print both". This
-is display only: every affected object still carries both `n` and `n_per_arm`
-(and, for the bootstrap grid, both `n_mean`/`n_sd`/`n_lower`/`n_upper` scales
-via halving at print time), so nothing computed is lost, and `per_arm` is
-recorded as an attribute rather than a field or a hand-chosen pair of column
-names.
+A `per_arm` argument picks which of each pair is *printed*, defaulting to
+`TRUE` — per arm is the *N* of equation (6) and what each recruiting site
+actually needs — where Stata's default is "print both". It is display only
+and recorded as an attribute; every printed count carries its basis in its
+label ("N per arm", "N total") or column name (`n_per_arm`), so no note is
+needed to say which is on the page.
 
-The two plain grids, `slope_sample_size_grid()` and `slope_power_grid()`, have
-no print method to consult a display attribute at print time, so for them
-`per_arm` instead selects which columns the *returned* data frame carries —
-still recorded as an attribute (`attr(x, "per_arm")`) so a table already in
-hand can be read back, but there is no twin column left to fall back on.
+The sample size held fixed is given the same way: `slope_power()` and the
+other power-direction functions take `n_total` *or* `n_per_arm`, exactly one,
+where Stata takes only `n()`, a total.
 
-`slopepower()`, the Stata-compatibility wrapper, takes no `per_arm` argument —
-it mirrors Stata's own option set, and this is not a Stata option — but it
-returns a `slope_sample_size` or `slope_power` object like any other caller,
-so its printed `N` is per arm by default too, where Stata's is both. Both
-figures are still on the object either way; anyone wanting Stata's
-side-by-side display back can print it twice, once per basis
-(`print(x); print(x, per_arm = FALSE)`), or read `n`/`n_per_arm` off the
+`slopepower()`, the Stata-compatibility wrapper, keeps Stata's `n()` (passed
+on as `n_total`) and takes no `per_arm` argument — it mirrors Stata's own
+option set — but it returns a `slope_sample_size` or `slope_power` object like
+any other caller, so its printed `N` is per arm by default too, where Stata's
+is both. Both figures are on the object either way; anyone wanting Stata's
+side-by-side display back can print it twice
+(`print(x); print(x, per_arm = FALSE)`), or read `n_total`/`n_per_arm` off the
 object directly.
 
 ## 26. Printed parameters fall back to scientific notation when three decimal places cannot carry them

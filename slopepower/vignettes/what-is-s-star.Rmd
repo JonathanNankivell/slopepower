@@ -243,18 +243,17 @@ Finally, a notational trap, since it costs people a factor of two. In equation
 (6) of the paper, \(N\) is the number **per arm** — it is the \(N\) of
 \(s_*/\sqrt N\). `print()` shows one figure at a time, per arm by default
 (`per_arm = TRUE`), which is exactly this \(N\); `print(x, per_arm = FALSE)`
-shows the trial total instead. The trap survives underneath, on the object
-itself: `ss$n` is always the *total*, and `ss$n_per_arm` the per-arm figure the
-paper's equation means, whichever basis was printed --- code that reads `$n`
-off a result still wants `$n_per_arm` for equation (6):
+shows the trial total instead. On the object both are always there, each
+named for its basis: `ss$n_total` is the trial total, and `ss$n_per_arm` the
+per-arm figure the paper's equation means, whichever basis was printed:
 
 ```{r n-convention}
 p1 <- slope_params(sdmt ~ visit | id, data = slpower1)
 ss <- slope_sample_size(p1, c(0, 1, 2), effectiveness = 0.33)
 z  <- qnorm(0.975) + qnorm(0.8)
 c(eq6            = ceiling((z * sqrt(slope_var(p1, c(0, 1, 2))) / (0.33 * abs(p1$slope)))^2),
-  reported_n_arm = ss$n / 2,
-  reported_n     = ss$n)
+  n_per_arm      = ss$n_per_arm,
+  n_total        = ss$n_total)
 ```
 
 ## 4. A closed form the paper does not give
@@ -462,8 +461,8 @@ floor_var <- 2 * (p1$sigma2_slope - p1$cov_intercept_slope^2 / p1$sigma2_interce
 
 c(floor_n_total  = 2 * ceiling(z^2 * floor_var / b2^2),
   achieved_50yr  = slope_sample_size(p1, seq(0, 50, length.out = 501),
-                                     effectiveness = 0.33)$n,
-  paper_2yr      = ss$n)
+                                     effectiveness = 0.33)$n_total,
+  paper_2yr      = ss$n_total)
 ```
 
 A fifty-year trial with a visit every five weeks would still need about
@@ -482,7 +481,7 @@ are what it does. `slope_var_floor()` is the limiting \(s_*^2\) and
 c(hand = floor_var, slope_var_floor = slope_var_floor(p1))
 
 flr <- slope_sample_size_floor(p1, effectiveness = 0.33)
-c(floor = flr$n, paper_2yr = ss$n, ratio = ss$n / flr$n)
+c(floor = flr$n_total, paper_2yr = ss$n_total, ratio = ss$n_total / flr$n_total)
 ```
 
 The floor for a result's own settings — same effectiveness, same power, same
@@ -490,7 +489,7 @@ alpha — is the same call with the visit schedule left out:
 
 ```{r floor-from-result}
 slope_sample_size_floor(ss$params, power = ss$power, effectiveness = ss$effectiveness,
-                        alpha = ss$alpha)$n
+                        alpha = ss$alpha)$n_total
 ```
 
 Neither takes a visit schedule, because neither depends on one. That is the
@@ -590,7 +589,7 @@ strata
 # effective s*^2: reciprocal of the weighted mean of the reciprocals
 c(effective = 1 / (0.75 / strata[["completers"]] + 0.25 / strata[["withdrawers"]]),
   reported  = slope_power(pars, c(0, 1, 2), dropout = c(0, 0.25),
-                          effectiveness = 0.33, n = 400)$var_tte)
+                          effectiveness = 0.33, n_total = 400)$var_tte)
 ```
 
 Note that the effective value is not between the strata in the way a naive

@@ -278,7 +278,7 @@ test_that("dropout before the first follow-up visit warns", {
 })
 
 test_that("a design prints with and without dropout", {
-  expect_output(print(design_of(c(0, 1, 2))), "trial_design")
+  expect_output(print(design_of(c(0, 1, 2))), "Trial design")
   expect_output(print(design_of(c(0, 1, 2))), "none")
   d <- suppressWarnings(design_of(c(0, 2, 3), dropout = c(0.2, 0.1)))
   out <- capture.output(print(d))
@@ -298,11 +298,11 @@ test_that("every stage-two function reads `dropout` through `dropout_scale`", {
   cum <- c(0, 0.05, 0.15)
   inc <- c(0, 0.05, 0.10)
   expect_identical(
-    slope_sample_size(p, v, cum, dropout_scale = "cumulative")$n,
-    slope_sample_size(p, v, inc)$n)
+    slope_sample_size(p, v, cum, dropout_scale = "cumulative")$n_total,
+    slope_sample_size(p, v, inc)$n_total)
   expect_equal(
-    slope_power(p, v, cum, dropout_scale = "cumulative", n = 400)$power,
-    slope_power(p, v, inc, n = 400)$power)
+    slope_power(p, v, cum, dropout_scale = "cumulative", n_total = 400)$power,
+    slope_power(p, v, inc, n_total = 400)$power)
   expect_equal(
     slope_effect_size(p, v, cum, dropout_scale = "cumulative"),
     slope_effect_size(p, v, inc))
@@ -313,7 +313,7 @@ test_that("every stage-two function reads `dropout` through `dropout_scale`", {
 
 test_that("a stage-two function names itself in a design error", {
   p <- ref_params()
-  expect_error(slope_power(p, c(1, 2), n = 100), "^slope_power\\(\\): `visits` must begin")
+  expect_error(slope_power(p, c(1, 2), n_total = 100), "^slope_power\\(\\): `visits` must begin")
   expect_error(slope_effect_size(p, c(0, 1, 2), dropout = 0.1),
                "^slope_effect_size\\(\\): `dropout` must have one element")
   expect_error(slope_sample_size(p, c(0, 1, 2), dropout = dropout_rate(0.05),

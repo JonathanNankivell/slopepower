@@ -591,11 +591,12 @@ test_that("print.slope_params() flags a reduced random-effects structure", {
   d <- noiseless_controls(varying_control_slopes)
   p <- suppressMessages(
     slope_params(sdmt ~ visit | id, d, comparator = "healthy", group = case, common_variance = TRUE))
-  out <- capture.output(print(p))
-  expect_true(any(grepl("reduced random-effects structure used for healthy controls",
-                        out, fixed = TRUE)))
-  expect_true(any(grepl("Stata `nocontvar`", out, fixed = TRUE)))
-  expect_true(any(grepl("Case estimates are unaffected", out, fixed = TRUE)))
+  # The notes wrap, so they are read as one string.
+  out <- gsub("\\s+", " ", paste(capture.output(print(p)), collapse = " "))
+  expect_true(grepl("reduced random-effects structure used for healthy controls",
+                    out, fixed = TRUE))
+  expect_true(grepl("Stata `nocontvar`", out, fixed = TRUE))
+  expect_true(grepl("Case estimates are unaffected", out, fixed = TRUE))
 
   # And absent when the full structure was used, so its presence means something.
   expect_false(any(grepl("nocontvar", capture.output(print(paper_fit("slpower2"))),

@@ -116,7 +116,7 @@ pars <- slope_params(sdmt ~ visit | id, data = mydata)
 # Stage 2 — describe the proposed trial and ask one of the two questions.
 visits <- c(0, 1, 2)                                              # baseline + two follow-ups
 slope_sample_size(pars, visits, effectiveness = 0.33)             # how many people?
-slope_power(pars, visits, n = 200, effectiveness = 0.33)          # what power at N = 200?
+slope_power(pars, visits, n_total = 200, effectiveness = 0.33)    # what power at N = 200?
 ```
 
 The two are separate functions on purpose. They take different inputs, answer
@@ -125,17 +125,21 @@ argument you can leave out to switch between them:
 
 | | input | output | class |
 |---|---|---|---|
-| `slope_sample_size()` | `power` (default 0.8) | `n`, `n_per_arm` | `slope_sample_size` |
-| `slope_power()` | `n` (required) | `power` | `slope_power` |
+| `slope_sample_size()` | `power` (default 0.8) | `n_total`, `n_per_arm` | `slope_sample_size` |
+| `slope_power()` | `n_total` or `n_per_arm` (one required) | `power` | `slope_power` |
 
 Both print a formatted summary, and both have an `as.data.frame()` method giving
 one tidy row with the same columns, so results from either can be bound into one
 table — a `solve_for` column records which question produced each row. `alpha`
 defaults to 0.05, two-sided.
 
-Both objects carry `n` and `n_per_arm` regardless; the printed summary shows one
-of them at a time, per arm by default (`per_arm = TRUE`), and `print(x, per_arm =
-FALSE)` shows the trial total instead without recomputing anything.
+Every count on a planned trial comes as a pair named for its basis —
+`n_total` and `n_per_arm`, `visits_total` and `visits_per_arm` — and every
+object carries both. The printed summary shows one of each pair at a time, per
+arm by default (`per_arm = TRUE`), and `print(x, per_arm = FALSE)` shows the
+trial totals instead without recomputing anything. A bootstrapped quantity `q`
+is reported the same way everywhere: `q`, `q_mean`, `q_sd`, `q_lower`,
+`q_upper`, and `confint()` returns the interval.
 
 Every stage-two function — the two above, their grid and bootstrap versions,
 and `slope_effect_size()` — takes the proposed trial the same way, as its second
@@ -229,7 +233,7 @@ The grid functions split the same way:
 ```r
 # power of each design at a fixed N — this is table 1 of the paper
 slope_power_grid(
-  pars, n = 450, effectiveness = 0.33,
+  pars, n_total = 450, effectiveness = 0.33,
   visits  = list(final_only = c(0, 3), annual = 0:3, six_month = seq(0, 3, 0.5)),
   dropout = list(none = NULL, `5pc` = dropout_rate(0.05), `10pc` = dropout_rate(0.10))
 )
@@ -243,14 +247,15 @@ slope_sample_size_grid(
 ```
 
 Both return one row per visits × dropout combination, with identical columns,
-including `n` and the anticipated visit burden `visits` — per arm by default
-(`per_arm = TRUE`), or `per_arm = FALSE` for the trial total. Use `dropout_rate()`
+including `n_total`/`n_per_arm` and the anticipated visit burden
+`visits_total`/`visits_per_arm`; the printed table shows the per-arm columns by
+default (`per_arm = TRUE`), or the totals under `per_arm = FALSE`. Use `dropout_rate()`
 rather than a fixed vector when the schedules being compared have different
 numbers of visits: each cell expands it against its own schedule, so the same
 withdrawal rate means the same thing in every row.
 
-The assumptions are axes too. `effectiveness`, `alpha` and whichever of `n` and
-`power` the grid is not solving for each take several values as readily as one, and
+The assumptions are axes too. `effectiveness`, `alpha` and whichever of the
+sample size and `power` the grid is not solving for each take several values as readily as one, and
 every value supplied is priced against every design — a sensitivity analysis in the
 same table:
 
@@ -264,7 +269,8 @@ slope_sample_size_grid(
 ```
 
 Each of these axes reports its value in the column of the same name (`power`,
-`alpha`, `effectiveness`, `n`); the names are what identify a cell in any message.
+`alpha`, `effectiveness`, or `n_requested_total`/`n_requested_per_arm` for a
+sample size); the names are what identify a cell in any message.
 
 ### The floor no design can beat
 
@@ -282,12 +288,13 @@ slope_var_floor(pars)                                 # the limiting s*^2 behind
 design — `params, power, effectiveness, target, alpha, per_arm` — so the floor for
 a result's settings is the same call without `visits` and `dropout`.
 
-`slope_power_ceiling()` is the same bound read the other way: at a fixed `n`, the
-highest power any schedule could achieve. It takes `slope_power()`'s arguments
-minus the design (`params, n, effectiveness, target, alpha, per_arm`):
+`slope_power_ceiling()` is the same bound read the other way: at a fixed sample
+size, the highest power any schedule could achieve. It takes `slope_power()`'s
+arguments minus the design (`params, n_total, n_per_arm, effectiveness, target,
+alpha, per_arm`):
 
 ```r
-slope_power_ceiling(pars, n = 200, effectiveness = 0.33)   # no design can beat this power
+slope_power_ceiling(pars, n_total = 200, effectiveness = 0.33)   # no design can beat this power
 ```
 
 Neither takes a visit schedule, because neither depends on one — and dropout can
@@ -323,7 +330,7 @@ arguments, followed by the bootstrap's own (`statistic`, `R`, `ci_method`,
 |---|---|---|
 | `slope_sample_size()` | `slope_sample_size_boot()` | `"n"` |
 | `slope_power()` | `slope_power_boot()` | `"power"` |
-| `slope_sample_size_grid()` | `slope_sample_size_grid_boot()` | `n`, every cell |
+| `slope_sample_size_grid()` | `slope_sample_size_grid_boot()` | the sample size, every cell |
 | `slope_power_grid()` | `slope_power_grid_boot()` | `power`, every cell |
 | `slope_sample_size_floor()` | `slope_sample_size_floor_boot()` | `"n"` |
 | `slope_power_ceiling()` | `slope_power_ceiling_boot()` | `"power"` |
@@ -386,7 +393,8 @@ the `s*/sqrt(N)` scaling empirically, and takes around 20 seconds.
 `slopepower()` mirrors the Stata command's interface argument for argument —
 `schedule` lists follow-up visits only, `dropouts` aligns with it, `scale` divides
 time, the data type is declared with `obs`/`rct`, and a single call computes
-either a sample size or a power depending on whether you pass `power` or `n`:
+either a sample size or a power depending on whether you pass `power` or `n`
+(Stata's trial total):
 
 ```r
 slopepower(slpower1, "sdmt", "id", "visit", schedule = c(1, 2),
