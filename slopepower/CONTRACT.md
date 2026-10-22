@@ -235,8 +235,8 @@ here and `power` the output.
 
 There is **no `solve_for` field**: the class carries that information. `as.data.frame()` still
 emits a `solve_for` column, derived from the class, so that rows from both functions bind into one
-interpretable table, and the `n_requested_*` columns, `NA` for a sample-size row; the grids carry
-the same columns, so a request for 101 is not mistaken for one of 100. Column names are identical
+interpretable table, and the `n_requested_*` columns, `NA` for a sample-size row; the power grid
+carries the same columns, so a request for 101 is not mistaken for one of 100. Column names are identical
 across both classes and every comparator.
 
 ### 4.3 `slope_sample_size_floor`
@@ -277,7 +277,8 @@ schedule. The 4.1/4.2 guarantee that column *names* are identical across classes
 `c("slope_sample_size_grid", "data.frame")` and `c("slope_power_grid", "data.frame")`: one row
 per cell, columns `design, dropout, scheduled_visits, last_visit, dropout_cumulative, n_total,
 n_per_arm, n_requested_total, n_requested_per_arm, power, alpha, effectiveness, tte, var_tte,
-effect_size, visits_total, visits_per_arm`. The result columns are read straight off each cell's
+effect_size, visits_total, visits_per_arm`, the `n_requested_*` pair in the power grid only (a
+sample-size grid was asked for no sample size). The result columns are read straight off each cell's
 `slope_result` (`grid_result_cols`, `R/grid.R`), so they cannot drift from `as.data.frame()`.
 
 **Single-design bootstraps** (`slope_sample_size_boot()`, `slope_power_boot()`, the two bound

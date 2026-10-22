@@ -36,7 +36,7 @@ checks it across every output.
 | `slope_sample_size_floor()` | list, 12 fields | `slope_sample_size_floor`, `slope_result` | `Sample size: lower bound over all visit schedules` |
 | `slope_power_ceiling()` | list, 14 fields | `slope_power_ceiling`, `slope_result` | `Power: upper bound over all visit schedules` |
 | `as.data.frame(<slope_result>)` | 1-row data.frame, 22 cols | `data.frame` | default |
-| `slope_sample_size_grid()` | data.frame, 17 cols | `slope_sample_size_grid` | `Sample size grid (k rows)` |
+| `slope_sample_size_grid()` | data.frame, 15 cols | `slope_sample_size_grid` | `Sample size grid (k rows)` |
 | `slope_power_grid()` | data.frame, 17 cols | `slope_power_grid` | `Power grid (k rows)` |
 | `slope_*_boot()` (5 functions) | list | `<fn>`, `slope_bootstrap` | `Bootstrapped <statistic>` |
 | `confint(<slope_bootstrap>)` | matrix, rows by quantity | – | default |
@@ -73,6 +73,7 @@ n_total, n_per_arm, n_requested_total, n_requested_per_arm, power, alpha,
 effectiveness, tte, var_tte, effect_size, visits_total, visits_per_arm
 attr per_arm
 ```
+`n_requested_*` are in power grids only.
 Bootstrap grids add `n_total_{mean,sd,lower,upper}`,
 `n_per_arm_{mean,sd,lower,upper}` (or `power_*`), `n_ci_method` (or
 `power_ci_method`), `tte_{mean,sd,lower,upper}`, `tte_ci_method`,
@@ -137,7 +138,7 @@ slope      -1.6725 -1.69914 0.160655 -1.98959 -1.3985
 ```
 
 **Grids**: title, then the table on the chosen basis under the stored names
-(`n_per_arm`, `n_requested_per_arm`, `visits_per_arm`, and for a bootstrap
+(`n_per_arm`, `n_requested_per_arm` in a power grid, `visits_per_arm`, and for a bootstrap
 grid `n_per_arm_mean` … `n_per_arm_upper`). A bootstrap grid hides the `tte_*`
 columns (shown in a frame of their own when `effectiveness` varies), hides
 `replicates_failed`, and shows `<statistic>_ci_method` only where a cell fell
