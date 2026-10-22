@@ -325,13 +325,16 @@ expected_visits <- function(design) {
 #'
 #' `n_requested_total`/`n_requested_per_arm` are the sample size a power cell
 #' was asked for, before evening, so rows for 101 and 100 stay
-#' distinguishable; `NA` in a sample-size grid, where nothing was requested.
-#' The names are the result fields' own, so a grid row and an
-#' `as.data.frame()` row share them.
+#' distinguishable. They belong to the power grid only: a sample-size grid
+#' was asked for no sample size, so it has no such columns. The names are the
+#' result fields' own, so a grid row and an `as.data.frame()` row share them.
 #' @noRd
-grid_result_cols <- c("n_total", "n_per_arm", "n_requested_total", "n_requested_per_arm",
-                      "power", "alpha", "effectiveness", "tte", "var_tte", "effect_size",
-                      "visits_total", "visits_per_arm")
+grid_result_cols <- function(fixed_name) {
+  c("n_total", "n_per_arm",
+    if (identical(fixed_name, "n_total")) c("n_requested_total", "n_requested_per_arm"),
+    "power", "alpha", "effectiveness", "tte", "var_tte", "effect_size",
+    "visits_total", "visits_per_arm")
+}
 
 #' Walk the cross product of a normalised grid, evaluating one design per cell
 #'
@@ -346,7 +349,7 @@ grid_result_cols <- c("n_total", "n_per_arm", "n_requested_total", "n_requested_
 #' parameters, rather than once -- can build `g` and read `g$designs` directly
 #' instead of paying for this plain solve first and discarding it.
 #' @noRd
-grid_evaluate <- function(g, evaluate, context) {
+grid_evaluate <- function(g, evaluate, cols, context) {
   scalar_lists <- g$scalar_lists
   n_cells <- g$n_cells
   tte_direction <- character(0L)
@@ -357,7 +360,7 @@ grid_evaluate <- function(g, evaluate, context) {
   # perform -- about 2 ms a cell against 0.6 ms for the sample size itself, so
   # roughly 60% of a grid's total runtime went on building the table rather
   # than filling it.
-  res_cols <- sapply(grid_result_cols, function(nm) numeric(n_cells), simplify = FALSE)
+  res_cols <- sapply(cols, function(nm) numeric(n_cells), simplify = FALSE)
 
   # The scalar axes' values for one cell, spliced into the stage-two call. The
   # names are the same in every cell, so the list is built once and refilled by
@@ -389,7 +392,7 @@ grid_evaluate <- function(g, evaluate, context) {
     # the two cannot drift is kept by test-grid.R, which pins a grid row
     # against as.data.frame() of the same object, rather than by paying for
     # the other ten columns and discarding them.
-    for (nm in grid_result_cols) res_cols[[nm]][k] <- res[[nm]] %||% NA_real_
+    for (nm in cols) res_cols[[nm]][k] <- res[[nm]] %||% NA_real_
   }
 
   report_collected(context, tte_direction, n_cells,
@@ -610,11 +613,11 @@ slope_power_grid <- function(params, visits, dropout = NULL,
 #' @param target Passed to [slope_sample_size()] and held constant across the
 #'   grid.
 #'
-#' @return A data frame of class `slope_sample_size_grid`, with the same
-#'   columns as [slope_power_grid()]. `n_total` and `n_per_arm` are what
-#'   varies; `power` is constant unless it was itself given several values.
-#'   `n_requested_total` and `n_requested_per_arm` are `NA`, since no sample
-#'   size was given.
+#' @return A data frame of class `slope_sample_size_grid`, with the
+#'   columns of [slope_power_grid()] less `n_requested_total` and
+#'   `n_requested_per_arm`, since no sample size was given. `n_total` and
+#'   `n_per_arm` are what varies; `power` is constant unless it was itself
+#'   given several values.
 #'
 #' @examples
 #' # No comparator: measured toward a slope of zero, fitted to all two
@@ -722,7 +725,8 @@ grid_stage_two <- function(params, visits, dropout, dropout_scale, fixed_name,
   spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
                               context)
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
-  df <- as.data.frame(c(g$out, grid_evaluate(g, spec$evaluate, context)),
+  df <- as.data.frame(c(g$out, grid_evaluate(g, spec$evaluate, grid_result_cols(fixed_name),
+                                           context)),
                       stringsAsFactors = FALSE)
   structure(df, class = c(grid_class(fixed_name), "data.frame"), per_arm = per_arm)
 }

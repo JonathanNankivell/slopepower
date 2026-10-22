@@ -48,11 +48,11 @@ total. Display only: both bases are always returned as columns. Recorded
 as a \code{per_arm} attribute (\code{attr(x, "per_arm")}).}
 }
 \value{
-A data frame of class \code{slope_sample_size_grid}, with the same
-columns as \code{\link[=slope_power_grid]{slope_power_grid()}}. \code{n_total} and \code{n_per_arm} are what
-varies; \code{power} is constant unless it was itself given several values.
-\code{n_requested_total} and \code{n_requested_per_arm} are \code{NA}, since no sample
-size was given.
+A data frame of class \code{slope_sample_size_grid}, with the
+columns of \code{\link[=slope_power_grid]{slope_power_grid()}} less \code{n_requested_total} and
+\code{n_requested_per_arm}, since no sample size was given. \code{n_total} and
+\code{n_per_arm} are what varies; \code{power} is constant unless it was itself
+given several values.
 }
 \description{
 The companion to \code{\link[=slope_power_grid]{slope_power_grid()}}: holds the target power fixed and reports

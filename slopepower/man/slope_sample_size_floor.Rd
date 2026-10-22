@@ -69,7 +69,7 @@ not depend on --- the same reason \code{\link[=slope_effect_size]{slope_effect_s
 }
 
 \section{How tight it is}{
-\code{slope_sample_size(params, visits, dropout, ...)$n} is greater than or equal
+\code{slope_sample_size(params, visits, dropout, ...)$n_total} is greater than or equal
 to this for every \code{visits} and \code{dropout}, strictly so before rounding. The bound is approached as
 the schedule becomes long and dense, and after \code{ceiling()} a long enough
 schedule reaches it exactly: on \code{slpower1} at the paper's 33\% effectiveness
@@ -110,7 +110,7 @@ slope_sample_size_floor(pars, effectiveness = 0.33)
 # disease's: the same settings, with and without a schedule.
 ss <- slope_sample_size(pars, c(0, 1, 2), effectiveness = 0.33)
 flr <- slope_sample_size_floor(pars, effectiveness = 0.33)
-c(design = ss$n, floor = flr$n, ratio = ss$n / flr$n)
+c(design = ss$n_total, floor = flr$n_total, ratio = ss$n_total / flr$n_total)
 
 }
 \references{

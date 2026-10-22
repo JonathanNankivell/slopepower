@@ -408,7 +408,7 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   spec <- grid_stage_two_spec(params, fixed_name, fixed_value, effectiveness, target, alpha,
                               context)
   g <- grid_axes(visits, dropout, dropout_scale, spec$scalars, context)
-  pts <- grid_evaluate(g, spec$evaluate, context)
+  pts <- grid_evaluate(g, spec$evaluate, grid_result_cols(fixed_name), context)
 
   cc <- grid_boot_computes(g, target, statistic, context)
   computes <- grid_boot_flatten(cc)
