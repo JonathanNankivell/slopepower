@@ -96,6 +96,8 @@ test_that("a grid row carries exactly what as.data.frame() reports for that cell
                                 per_arm = FALSE)
   direct <- as.data.frame(slope_sample_size(p, c(0, 1, 2),
                                             effectiveness = 0.33))
+  # It has no `n_requested_*` columns: nothing was requested.
+  shared <- setdiff(shared, c("n_requested_total", "n_requested_per_arm"))
   expect_equal(unlist(out[1L, shared]), unlist(direct[shared]), tolerance = 0)
 })
 
@@ -220,7 +222,9 @@ test_that("the two grids are inverses, design by design", {
   sizes <- suppressWarnings(slope_sample_size_grid(
     p, visits = table1_visits, dropout = list(`5pc` = dropout_rate(0.05)),
     power = 0.8, effectiveness = 0.33, per_arm = FALSE))
-  expect_identical(names(sizes),
+  # The same columns, less the power grid's record of the size it was asked for.
+  expect_identical(c(names(sizes)[1:7], "n_requested_total", "n_requested_per_arm",
+                     names(sizes)[-(1:7)]),
                    names(suppressWarnings(slope_power_grid(
                      p, visits = table1_visits,
                      dropout = list(`5pc` = dropout_rate(0.05)),
@@ -592,8 +596,9 @@ test_that("a power grid keeps the requested n, so odd and even requests stay apa
   arm <- slope_power_grid(p, c(0, 1, 2), n_per_arm = c(50, 100))
   expect_equal(arm$n_requested_per_arm, c(50, 100))
   expect_equal(arm$n_total, c(100, 200))
-  # Nothing is requested in a sample-size grid.
-  expect_true(all(is.na(slope_sample_size_grid(p, c(0, 1, 2))$n_requested_total)))
+  # Nothing is requested in a sample-size grid, so it has no such columns.
+  expect_false(any(c("n_requested_total", "n_requested_per_arm") %in%
+                     names(slope_sample_size_grid(p, c(0, 1, 2)))))
   # And a single result's row carries it too.
   expect_equal(as.data.frame(slope_power(p, c(0, 1, 2), n_total = 101))$n_requested_total, 101)
   expect_true(is.na(as.data.frame(slope_sample_size(p, c(0, 1, 2)))$n_requested_total))
