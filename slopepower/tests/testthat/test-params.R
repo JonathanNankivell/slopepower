@@ -291,11 +291,14 @@ test_that("a logical group column is taken as coded, not guessed at", {
 
   # And the direction is real: negating the column swaps which arm is which, so
   # the control-arm slope becomes the experimental one and back again. If TRUE
-  # were mapped to 0 this would be the identity instead.
+  # were mapped to 0 this would be the identity instead. The flipped coding is a
+  # different parameterisation, so the optimiser lands within ~1e-11 of the
+  # same answer rather than on it; 1e-8 still rules out the identity by orders
+  # of magnitude (the two arms' slopes differ by about 0.75).
   d$trt_flipped <- d$treat == 0
   flipped <- slope_params(sdmt ~ time | id, d, comparator = "treated", group = trt_flipped)
-  expect_equal(flipped$slope, numeric_fit$slope_comparator, tolerance = 1e-12)
-  expect_equal(flipped$slope_comparator, numeric_fit$slope, tolerance = 1e-12)
+  expect_equal(flipped$slope, numeric_fit$slope_comparator, tolerance = 1e-8)
+  expect_equal(flipped$slope_comparator, numeric_fit$slope, tolerance = 1e-8)
 })
 
 test_that("a haven_labelled group column is unwrapped to its numeric codes", {

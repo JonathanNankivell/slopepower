@@ -71,9 +71,9 @@ check_probability <- function(x, name, context) {
                lower_open = TRUE, upper_open = TRUE)
 }
 
-#' Validate a variance component (strictly positive)
+#' Validate a strictly positive scalar, such as a variance component
 #' @noRd
-check_variance <- function(x, name, context) {
+check_positive <- function(x, name, context) {
   check_scalar(x, name, context, lower = 0, upper = Inf, lower_open = TRUE)
 }
 
@@ -400,6 +400,13 @@ fmt_num <- function(x) {
 #' call.
 #' @noRd
 label_numeric <- function(x) paste(fmt_num(x), collapse = ", ")
+
+#' Is `x` a usable set of visit times: numeric, at least two, finite, strictly
+#' increasing? Each caller words its own error.
+#' @noRd
+is_time_grid <- function(x) {
+  is.numeric(x) && length(x) >= 2L && all(is.finite(x)) && !is.unsorted(x, strictly = TRUE)
+}
 
 #' Find a fixed-effect name accounting for `lme`'s two possible interaction
 #' spellings

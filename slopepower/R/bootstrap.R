@@ -360,6 +360,24 @@ widen_to_lattice <- function(ci, statistic) {
 #' @noRd
 on_lattice <- function(statistic) identical(statistic, "n")
 
+#' The stems a bootstrapped statistic's fields are named with
+#'
+#' The one statement of the naming rule: a sample size on both bases, total
+#' first; the slope none of its own, since its block is the slope block
+#' itself; any other statistic under its own name. `lattice` defaults to
+#' [on_lattice()], and print methods pass the result's own `lattice` field.
+#' @noRd
+stat_quantities <- function(statistic, lattice = on_lattice(statistic)) {
+  if (lattice) c("n_total", "n_per_arm") else if (!identical(statistic, "slope")) statistic
+}
+
+#' The one stem a statistic is shown under: a sample size on the display basis
+#' @noRd
+main_quantity <- function(statistic, per_arm, lattice = on_lattice(statistic)) {
+  q <- stat_quantities(statistic, lattice)
+  if (lattice) q[[if (per_arm) 2L else 1L]] else q
+}
+
 #' The three arguments every bootstrap driver takes, checked once
 #'
 #' [run_bootstrap()] and [slope_sample_size_grid_boot()] are two drivers of one
@@ -758,11 +776,12 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
   # are linear. The slope's own block comes from slope_replicate_summary(),
   # shared with the bootstrap grid, and is the main block itself when the
   # slope is the statistic.
+  q <- stat_quantities(statistic, lattice)
   main_block <- if (lattice) {
-    c(quantity_block("n_total", observed, good, ci),
-      quantity_block("n_per_arm", observed / 2, good / 2, ci / 2))
-  } else if (!identical(statistic, "slope")) {
-    quantity_block(statistic, observed, good, ci)
+    c(quantity_block(q[[1L]], observed, good, ci),
+      quantity_block(q[[2L]], observed / 2, good / 2, ci / 2))
+  } else if (length(q)) {
+    quantity_block(q, observed, good, ci)
   }
   slope_fields <- slope_block[setdiff(names(slope_block), c("straddle", "straddle_of"))]
   method <- if (is.null(main_block)) list() else
@@ -773,8 +792,6 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
                 replicates_failed = n_failed, refits_failed = n_refit_failed,
                 straddle = slope_block$straddle, straddle_of = slope_block$straddle_of,
                 lattice = lattice))
-  # A slope has no arms, so its bootstrap records no display basis.
-  if (identical(statistic, "slope")) per_arm <- NULL
   structure(out, class = c(cls, "slope_bootstrap"), per_arm = per_arm)
 }
 
@@ -786,9 +803,8 @@ run_bootstrap <- function(params, compute, observed, statistic, R, ci_method, le
 #' bootstrap's fields and a bootstrap grid's columns cannot drift apart.
 #' @noRd
 quantity_block <- function(q, estimate, replicates, ci) {
-  stats::setNames(
-    list(estimate, replicates, mean(replicates), stats::sd(replicates), ci[1L], ci[2L]),
-    paste0(q, c("", "_replicates", "_mean", "_sd", "_lower", "_upper")))
+  c(stats::setNames(list(estimate, replicates), paste0(q, c("", "_replicates"))),
+    cell_block(q, mean(replicates), stats::sd(replicates), ci[1L], ci[2L]))
 }
 
 #' The field of a stage-two result a bootstrapped statistic is read from
@@ -1183,9 +1199,9 @@ slope_params_boot <- function(params, R = 999, ci_method = c("bca", "percentile"
   context <- "slope_params_boot()"
   check_params(params, context)
   ci_method <- check_boot_args(R, ci_method, level, context)
-  # A slope has no arms; run_bootstrap() records no `per_arm` for it.
+  # A slope has no arms, so its bootstrap records no display basis.
   run_bootstrap(params, function(p) p$slope, params$slope, "slope", R, ci_method,
-                level, seed, progress, per_arm = TRUE, context, "slope_params_boot")
+                level, seed, progress, per_arm = NULL, context, "slope_params_boot")
 }
 
 #' Build one replicate-statistic closure in an environment of its own
@@ -1390,21 +1406,12 @@ boot_straddle_note <- function(straddle, n_used, of) {
 #' the same rows.
 #' @noRd
 boot_rows <- function(x, per_arm) {
-  main <- if (isTRUE(x$lattice)) {
-    if (per_arm) "n_per_arm" else "n_total"
-  } else if (!identical(x$statistic, "slope")) {
-    x$statistic
-  }
-  c(main, "slope")
+  c(main_quantity(x$statistic, per_arm, isTRUE(x$lattice)), "slope")
 }
 
 #' Every quantity a bootstrap result stores a block of fields for
 #' @noRd
-boot_quantities <- function(x) {
-  main <- if (isTRUE(x$lattice)) c("n_total", "n_per_arm")
-          else if (!identical(x$statistic, "slope")) x$statistic
-  c(main, "slope")
-}
+boot_quantities <- function(x) c(stat_quantities(x$statistic, isTRUE(x$lattice)), "slope")
 
 #' The printed frame: a row per quantity, a column per field suffix
 #'

@@ -11,19 +11,7 @@
 # R is kept small throughout, as in test-bootstrap.R: these test the
 # machinery, not the coverage.
 
-# Ten subjects, a small model that fits quickly and (at ci_method = "bca") needs
-# only ten leave-one-subject-out refits rather than slpower1's two hundred.
-# Built on demand, not at load time, so it is not paid for by every other
-# test file.
-small_fit <- function() {
-  subj <- local({
-    set.seed(4)
-    data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
-  })
-  d <- merge(subj, data.frame(visit = 0:3))
-  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
-  slope_params(y ~ visit | id, d)
-}
+# small_fit() is in helper-fits.R, shared with test-bootstrap.R.
 
 # The same, with a treated arm: the only shape `target = "observed"` accepts,
 # since it reuses a previous trial's own observed treatment effect.

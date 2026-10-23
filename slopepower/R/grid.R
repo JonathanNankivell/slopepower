@@ -7,15 +7,6 @@
 # each row of that table.
 
 # ---------------------------------------------------------------------------
-# dropout specifications
-#
-# `dropout_rate()` itself lives in design.R, beside the dropout validators it
-# is an alternative spelling for. Only the grid's own handling of a
-# specification -- naming the failing cell, and the length rule that a grid
-# makes newly relevant -- is here.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # argument normalisation
 # ---------------------------------------------------------------------------
 

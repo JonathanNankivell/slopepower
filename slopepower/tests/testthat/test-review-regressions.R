@@ -104,10 +104,12 @@ test_that("a bootstrap cannot be asked to bootstrap its own input", {
 
   # "tte" is reachable from either: it depends on neither n nor power.
   b <- suppressWarnings(slope_sample_size_boot(p, c(0, 1, 2), effectiveness = 0.33,
-                                               R = 3, statistic = "tte"))
+                                               R = 2, statistic = "tte",
+                                               ci_method = "percentile", seed = 1))
   expect_equal(boot_main(b)$observed, ss$tte)
   expect_equal(suppressWarnings(slope_power_boot(p, c(0, 1, 2), n_total = 712, effectiveness = 0.33,
-                                                 R = 3, statistic = "tte"))$tte,
+                                                 R = 2, statistic = "tte",
+                                                 ci_method = "percentile", seed = 1))$tte,
                ss$tte)
 })
 
@@ -115,26 +117,29 @@ test_that("a bootstrap solves the same calculation its stage-two function does",
   # The bootstrap must hold every input fixed and vary only the parameters. The
   # observed value therefore has to reproduce the stage-two answer, for each of
   # the settings -- design, effectiveness, alpha and the target power or sample
-  # size.
+  # size. Only the observed value is checked, which is solved before any
+  # resampling, so the cheap percentile interval and two replicates suffice.
   p <- paper_fit("slpower1")
   ss <- slope_sample_size(p, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1),
                           effectiveness = 0.4, power = 0.9, alpha = 0.01)
   expect_equal(suppressWarnings(slope_sample_size_boot(
     p, c(0, 1, 2, 3), dropout = c(0, 0.1, 0.1), effectiveness = 0.4, power = 0.9,
-    alpha = 0.01, R = 3))$n_total, ss$n_total)
+    alpha = 0.01, R = 2, ci_method = "percentile", seed = 1))$n_total, ss$n_total)
 
   pw <- slope_power(p, c(0, 1, 2), n_total = 401, effectiveness = 0.33, alpha = 0.1)
   # n = 401 is rounded down to 400 for equal arms; the replicates must answer
   # for the number actually used, not the one requested.
   expect_equal(suppressWarnings(slope_power_boot(
-    p, c(0, 1, 2), n_total = 401, effectiveness = 0.33, alpha = 0.1, R = 3))$power, pw$power)
+    p, c(0, 1, 2), n_total = 401, effectiveness = 0.33, alpha = 0.1, R = 2,
+    ci_method = "percentile", seed = 1))$power, pw$power)
 
   # target = "observed" stores effectiveness as NA and rejects it as an input,
   # so it must not be passed along when the replicates are re-solved.
   p3 <- paper_fit("slpower3")
   ss3 <- slope_sample_size(p3, c(0, 0.5, 2), target = "observed")
   expect_equal(suppressWarnings(slope_sample_size_boot(
-    p3, c(0, 0.5, 2), target = "observed", R = 3))$n_total, ss3$n_total)
+    p3, c(0, 0.5, 2), target = "observed", R = 2, ci_method = "percentile", seed = 1))$n_total,
+    ss3$n_total)
   expect_error(slope_sample_size_boot(p3, c(0, 0.5, 2), target = "observed",
                                       effectiveness = 0.5, R = 3),
                "only one of `effectiveness`")
@@ -542,22 +547,18 @@ test_that("a numeric design's errors name the stage-two function called", {
 })
 
 test_that("the boot grid's shared effect size gives each cell slope_sample_size_boot()'s answer", {
-  subj <- local({
-    set.seed(4)
-    data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
-  })
-  d <- merge(subj, data.frame(visit = 0:3))
-  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
-  pars <- slope_params(y ~ visit | id, d)
+  pars <- small_fit()
 
+  # Four cells, two per design: enough for cells to share a design's effect
+  # size, each checked against its own scalar BCa bootstrap.
   designs <- list(annual = 0:3, half = seq(0, 3, 0.5))
   grid <- suppressWarnings(slope_sample_size_grid_boot(
-    pars, visits = designs, power = c(0.8, 0.9), alpha = c(0.05, 0.01),
+    pars, visits = designs, power = c(0.8, 0.9),
     effectiveness = 0.33, R = 12, seed = 2))
   for (k in seq_len(nrow(grid))) {
     one <- suppressWarnings(slope_sample_size_boot(
       pars, designs[[grid$design[k]]], effectiveness = 0.33,
-      power = grid$power[k], alpha = grid$alpha[k], R = 12, seed = 2))
+      power = grid$power[k], R = 12, seed = 2))
     expect_equal(grid$n_total_mean[k], one$n_total_mean)
     expect_equal(c(grid$n_total_lower[k], grid$n_total_upper[k]),
                  c(one$n_total_lower, one$n_total_upper))
