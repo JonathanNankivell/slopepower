@@ -161,7 +161,8 @@ test_that("bootstrap and jackknife refits survive a rare factor level going miss
   p <- refit(fr[fr$subject != fr$subject[d$id == ids[1]][1], , drop = FALSE])
   expect_s3_class(p, "slope_params")
   expect_length(grep("^sp_cov_[0-9]+$", names(nlme::fixef(p$fit))), 1L)
-  b <- slope_params_boot(a, R = 40, seed = 2)
+  # Percentile: the jackknife case is the explicit refit above.
+  b <- slope_params_boot(a, R = 40, seed = 2, ci_method = "percentile")
   expect_equal(b$replicates_failed, 0)
 })
 

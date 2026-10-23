@@ -9,19 +9,9 @@
 #     `boot_mean`, `boot_sd` or `se`;
 #   * a scalar result's fields carry the same names as its grid's columns.
 
-# Ten subjects: quick to fit and to refit, so the bootstraps below are cheap.
-names_fit <- function() {
-  subj <- local({
-    set.seed(4)
-    data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
-  })
-  d <- merge(subj, data.frame(visit = 0:3))
-  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
-  slope_params(y ~ visit | id, d)
-}
 
 every_output <- function() {
-  p <- names_fit()
+  p <- small_fit()
   v <- c(0, 1, 2, 3)
   boot <- function(expr) suppressWarnings(expr)
   list(

@@ -22,7 +22,7 @@ flat_fit <- function() {
 }
 
 test_that("a bootstrap returns replicates with a spread, for the slope", {
-  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 15, seed = 1))
+  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 15, seed = 1, ci_method = "percentile"))
   expect_true(is.list(b))
   expect_equal(b$statistic, "slope")
   reps <- boot_main(b)$replicates
@@ -33,7 +33,7 @@ test_that("a bootstrap returns replicates with a spread, for the slope", {
 })
 
 test_that("a bootstrap reports the mean, SD and straddle of its replicates", {
-  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 15, seed = 1))
+  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 15, seed = 1, ci_method = "percentile"))
   expect_equal(boot_main(b)$boot_mean, mean(boot_main(b)$replicates))
   expect_equal(boot_main(b)$boot_sd, stats::sd(boot_main(b)$replicates))
   # A well-estimated decline slope: no replicate should cross zero.
@@ -44,7 +44,7 @@ test_that("a bootstrap straddle counts replicates of the opposite sign", {
   # Flattened as in the section 2.6 warning test above, so some replicate
   # slopes land on the other side of zero from the (small negative) observed
   # slope.
-  b <- suppressWarnings(slope_params_boot(flat_fit(), R = 30, seed = 1))
+  b <- suppressWarnings(slope_params_boot(flat_fit(), R = 30, seed = 1, ci_method = "percentile"))
   expect_gt(b$straddle, 0)
   # For `statistic = "slope"` the replicates *are* the refitted slopes, so the
   # definition below coincides with the general one.
@@ -58,7 +58,7 @@ test_that("a bootstrap straddle is measured on the slope, not the statistic", {
   # refits, and the same resampling (same seed, same subjects drawn) must
   # therefore report the same proportion whichever statistic is asked for.
   flat <- flat_fit()
-  ref <- suppressWarnings(slope_params_boot(flat, R = 30, seed = 1))
+  ref <- suppressWarnings(slope_params_boot(flat, R = 30, seed = 1, ci_method = "percentile"))
   ss <- suppressWarnings(
     slope_sample_size(flat, c(0, 1, 2), effectiveness = 0.33))
   b <- suppressWarnings(
@@ -72,8 +72,8 @@ test_that("a bootstrap straddle is measured on the slope, not the statistic", {
 })
 
 test_that("a bootstrap is reproducible under a fixed seed", {
-  a <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 10, seed = 42))
-  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 10, seed = 42))
+  a <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 10, seed = 42, ci_method = "percentile"))
+  b <- suppressWarnings(slope_params_boot(paper_fit("slpower1"), R = 10, seed = 42, ci_method = "percentile"))
   expect_equal(boot_main(a)$replicates, boot_main(b)$replicates)
 })
 
@@ -201,7 +201,7 @@ test_that("slope_sample_size_boot() can bootstrap the sample size itself", {
   ss <- slope_sample_size(paper_fit("slpower1"), c(0, 1, 2),
                           effectiveness = 0.33)
   b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2),
-                                               effectiveness = 0.33, R = 15, seed = 7))
+                                               effectiveness = 0.33, R = 15, seed = 7, ci_method = "percentile"))
   reps <- boot_main(b)$replicates
   expect_true(all(reps > 0, na.rm = TRUE))
   expect_gt(stats::sd(reps, na.rm = TRUE), 0)
@@ -588,7 +588,7 @@ test_that("print.slope_bootstrap() names the method, replicate count and level o
 test_that("print.slope_bootstrap() shows a sample size on one basis at a time, per arm by default", {
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
-  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5))
+  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5, ci_method = "percentile"))
   expect_identical(attr(b, "per_arm"), TRUE)
 
   out_arm <- capture.output(print(b))
@@ -618,7 +618,7 @@ test_that("print.slope_bootstrap() shows a sample size on one basis at a time, p
 })
 
 test_that("print.slope_bootstrap() gives a statistic with no arms one row, above the slope", {
-  tb <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, statistic = "tte", seed = 5))
+  tb <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, statistic = "tte", seed = 5, ci_method = "percentile"))
   out <- capture.output(print(tb))
   expect_identical(out[1L], "Bootstrapped target treatment effect")
   expect_false(any(grepl("n_per_arm|n_total", out)))
@@ -635,7 +635,7 @@ test_that("print.slope_bootstrap() reports the resampled slope beneath the stati
   # statistic's, as confint() reports it.
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
-  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5))
+  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5, ci_method = "percentile"))
   frame <- frame_block(capture.output(print(b)))
   expect_match(frame[3L], "^slope ")
   expect_equal(b$slope, ss$params$slope)
@@ -645,7 +645,7 @@ test_that("print.slope_bootstrap() reports the resampled slope beneath the stati
 test_that("the slope's summary is the replicates the straddle is measured on", {
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
-  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 8, seed = 5))
+  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 8, seed = 5, ci_method = "percentile"))
 
   expect_length(b$slope_replicates, length(boot_main(b)$replicates))
   expect_equal(b$slope, ss$params$slope)
@@ -656,7 +656,7 @@ test_that("the slope's summary is the replicates the straddle is measured on", {
 
   # For statistic = "slope" the two summaries are one computation, reused rather
   # than repeated -- a second pass would warn twice about a single failure.
-  sb <- suppressWarnings(slope_params_boot(ss$params, R = 8, seed = 5))
+  sb <- suppressWarnings(slope_params_boot(ss$params, R = 8, seed = 5, ci_method = "percentile"))
   expect_equal(c(sb$slope_lower, sb$slope_upper), boot_main(sb)$ci)
   expect_equal(sb$slope_replicates, boot_main(sb)$replicates)
   expect_equal(sb$slope_ci_method, boot_main(sb)$ci_method)
@@ -669,7 +669,7 @@ test_that("the printed note describes what boot_mean is actually a mean of", {
   # from solve_slope() without a test failing.
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
-  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 20, seed = 5))
+  b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 20, seed = 5, ci_method = "percentile"))
 
   # "rounds up to a whole participant per arm, the total being twice that":
   # every replicate is an even integer, which only 2 * ceiling(...) can be.
@@ -720,7 +720,7 @@ test_that("print.slope_bootstrap() wraps its notes to a readable width", {
   # characters and wrapped raggedly.
   ss <- suppressWarnings(
     slope_sample_size(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33))
-  out <- capture.output(print(suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5))))
+  out <- capture.output(print(suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2), effectiveness = 0.33, R = 6, seed = 5, ci_method = "percentile"))))
   # Two notes now share the label; the wrapping check wants all of them, from
   # the first "Note:" line to the end.
   notes <- out[seq(min(grep("Note:", out, fixed = TRUE)), length(out))]
@@ -740,7 +740,7 @@ test_that("print.slope_bootstrap() always reports the straddle, zero included", 
                                 length(boot_main(boot_bca)$replicates)),
                         capture.output(print(boot_bca)), fixed = TRUE)))
 
-  b <- suppressWarnings(slope_params_boot(flat_fit(), R = 30, seed = 1))
+  b <- suppressWarnings(slope_params_boot(flat_fit(), R = 30, seed = 1, ci_method = "percentile"))
   expect_gt(b$straddle, 0)
   out <- capture.output(print(b))
   # The count is printed beside the percentage because the percentage alone
@@ -759,7 +759,7 @@ test_that("print.slope_bootstrap() always reports the convergence failures, zero
   # enough to its limits (boot_bca_fit loses 3 of its 12) that a run promising
   # zero failures would be testing nlme, not this note.
   b <- suppressWarnings(slope_sample_size_boot(paper_fit("slpower1"), c(0, 1, 2),
-                                               effectiveness = 0.33, R = 6, seed = 5))
+                                               effectiveness = 0.33, R = 6, seed = 5, ci_method = "percentile"))
   b$replicates_failed <- b$refits_failed <- 0L
   out <- capture.output(print(b))
   expect_true(any(grepl(sprintf("Note:        0/%d (0.0%%) bootstrap samples failed to refit.",
