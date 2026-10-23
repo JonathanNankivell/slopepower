@@ -234,26 +234,21 @@ test_that("the floor is refused for a per-visit structure", {
 
 # --- slope_params_manual() -----------------------------------------------------
 
-manual <- function(...) {
-  slope_params_manual(slope = -1.672, sigma2_intercept = 100, sigma2_slope = 2,
-                      cov_intercept_slope = 5, sigma2_residual = 10, ...)
-}
-
 test_that("a stated serial correlation is used as written", {
-  p <- manual(correlation = corCAR1(0.5))
+  p <- ref_params(correlation = corCAR1(0.5))
   expect_equal(p$residual$coef, c(Phi = 0.5))
   t <- c(0, 1, 2.5)
   expect_equal(unname(slope_sigma(p, t) - slope_sigma(ref_params(), t)),
                10 * (0.5^abs(outer(t, t, "-")) - diag(3)))
 
-  p <- manual(correlation = corExp(c(2, 0.1), nugget = TRUE))
+  p <- ref_params(correlation = corExp(c(2, 0.1), nugget = TRUE))
   expect_equal(p$residual$coef, c(range = 2, nugget = 0.1))
   expect_equal(unname(slope_sigma(p, c(0, 1))[1, 2] - slope_sigma(ref_params(), c(0, 1))[1, 2]),
                10 * 0.9 * exp(-1 / 2))
 })
 
 test_that("a stated unstructured covariance is keyed by time", {
-  p <- manual(correlation = corSymm(c(0.3, 0.2, 0.4)),
+  p <- ref_params(correlation = corSymm(c(0.3, 0.2, 0.4)),
               weights = varIdent(c("1" = 1.2, "2.0" = 1.5), form = ~ 1 | visit),
               times = c(0, 1, 2))
   expect_equal(p$residual$sd_ratio, c(1, 1.2, 1.5))
@@ -262,44 +257,44 @@ test_that("a stated unstructured covariance is keyed by time", {
 })
 
 test_that("independent residuals stated as a structure change nothing", {
-  zero <- manual(correlation = corSymm(c(0, 0, 0)), times = 0:2)
+  zero <- ref_params(correlation = corSymm(c(0, 0, 0)), times = 0:2)
   expect_equal(slope_var(zero, 0:2), slope_var(ref_params(), 0:2))
-  expect_equal(slope_var(manual(correlation = corCAR1(1e-12)), c(0, 1, 3)),
+  expect_equal(slope_var(ref_params(correlation = corCAR1(1e-12)), c(0, 1, 3)),
                slope_var(ref_params(), c(0, 1, 3)))
 })
 
 test_that("slope_params_manual() refuses incomplete or invalid structures", {
-  expect_error(manual(correlation = corExp()), "state the value")
-  expect_error(manual(correlation = corSymm(c(0.3, 0.2, 0.4))), "`times` is required")
-  expect_error(manual(correlation = corCAR1(0.5), times = 0:2), "function of time")
-  expect_error(manual(times = 0:2), "applies only with")
-  expect_error(manual(correlation = corSymm(c(0.99, 0.99, -0.99)), times = 0:2),
+  expect_error(ref_params(correlation = corExp()), "state the value")
+  expect_error(ref_params(correlation = corSymm(c(0.3, 0.2, 0.4))), "`times` is required")
+  expect_error(ref_params(correlation = corCAR1(0.5), times = 0:2), "function of time")
+  expect_error(ref_params(times = 0:2), "applies only with")
+  expect_error(ref_params(correlation = corSymm(c(0.99, 0.99, -0.99)), times = 0:2),
                "positive-definite")
-  expect_error(manual(weights = varIdent(c("5" = 1.2), form = ~ 1 | v), times = 0:2),
+  expect_error(ref_params(weights = varIdent(c("5" = 1.2), form = ~ 1 | v), times = 0:2),
                "not among `times`")
-  expect_error(manual(weights = varIdent(c("0" = 1.2), form = ~ 1 | v), times = 0:2),
+  expect_error(ref_params(weights = varIdent(c("0" = 1.2), form = ~ 1 | v), times = 0:2),
                "reference level")
   # nlme itself warns that it ignores values without a stratum.
-  expect_error(manual(weights = suppressWarnings(varIdent(c("1" = 1.2))), times = 0:2),
+  expect_error(ref_params(weights = suppressWarnings(varIdent(c("1" = 1.2))), times = 0:2),
                "by time")
-  expect_error(manual(correlation = corCompSymm(0.3)), "random intercept")
+  expect_error(ref_params(correlation = corCompSymm(0.3)), "random intercept")
 })
 
 # --- the field itself -----------------------------------------------------------
 
 test_that("a hand-edited residual field is re-checked before use", {
-  p <- manual(correlation = corCAR1(0.5))
+  p <- ref_params(correlation = corCAR1(0.5))
   p$residual$coef[["Phi"]] <- 1.5
   expect_error(slope_var(p, 0:2), "Phi must lie in \\(0, 1\\)")
-  p <- manual(correlation = corSymm(c(0.3, 0.2, 0.4)), times = 0:2)
+  p <- ref_params(correlation = corSymm(c(0.3, 0.2, 0.4)), times = 0:2)
   p$residual$times <- NULL
   expect_error(slope_var(p, 0:2), "`times` must be given exactly when")
   # residual_cor() reads the coefficients by name, so unnamed ones are refused
   # here rather than failing there, or dropping a nugget.
-  p <- manual(correlation = corCAR1(0.5))
+  p <- ref_params(correlation = corCAR1(0.5))
   p$residual$coef <- unname(p$residual$coef)
   expect_error(slope_var(p, 0:2), "`coef` must be named `Phi`")
-  p <- manual(correlation = corExp(c(2, 0.3), nugget = TRUE))
+  p <- ref_params(correlation = corExp(c(2, 0.3), nugget = TRUE))
   p$residual$coef <- unname(p$residual$coef)
   expect_error(slope_var(p, 0:2), "`coef` must be named `range`, or `range` and `nugget`")
 })
@@ -317,7 +312,7 @@ test_that("print.slope_params() shows the structure and its parameters", {
   expect_true(any(grepl("correlation, times 0 and 3", out, fixed = TRUE)))
   expect_true(any(grepl("residual SD ratio, time 3", out, fixed = TRUE)))
   expect_true(any(grepl("not separately identified", out, fixed = TRUE)))
-  out <- capture.output(print(manual(correlation = corSymm(c(0, 0, 0)), times = 0:2)))
+  out <- capture.output(print(ref_params(correlation = corSymm(c(0, 0, 0)), times = 0:2)))
   expect_false(any(grepl("not separately identified", out, fixed = TRUE)))
 })
 

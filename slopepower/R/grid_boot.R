@@ -86,7 +86,10 @@ grid_cell_args <- function(g) {
 #'
 #' @return `list(main = <one closure per cell>, tte = <one closure per distinct
 #'   `effectiveness` level>, tte_of = <for each cell, the index of its `tte`
-#'   closure>)`.
+#'   closure>)`. Flattened as `c(main, tte)` for [boot_replicate_matrix()] and
+#'   [jackknife_values()]: column `k` is cell `k`'s sample size or power, and
+#'   column `n_cells + tte_of[k]` its target treatment effect -- the one
+#'   indexing rule the rest of [grid_boot_impl()] relies on.
 #' @noRd
 grid_boot_computes <- function(g, target, statistic, context) {
   cell_args <- grid_cell_args(g)
@@ -98,6 +101,9 @@ grid_boot_computes <- function(g, target, statistic, context) {
   eff <- vapply(cell_args, function(a) a$effectiveness %||% NA_real_, numeric(1L))
   eff_levels <- unique(eff)
   eff_of <- match(eff, eff_levels)
+  # Each level as effect_components() and target_components() take it: NULL
+  # for the `target = "observed"` grid's absent level.
+  eff_arg <- lapply(eff_levels, function(e) if (is.na(e)) NULL else e)
 
   # The unscaled effect size depends on the design alone -- `effectiveness`
   # scales it afterwards, and enters effect_components() only through `tte` --
@@ -106,8 +112,8 @@ grid_boot_computes <- function(g, target, statistic, context) {
   # `effectiveness` of its first cell only because effect_components() needs
   # one to validate.
   effect <- lapply(seq_along(g$designs), function(d) {
-    e <- eff[match(d, g$design_of)]
-    memo_effect_size(g$designs[[d]], if (is.na(e)) NULL else e, target, context)
+    memo_effect_size(g$designs[[d]], eff_arg[[eff_of[match(d, g$design_of)]]], target,
+                     context)
   })
 
   # The effectiveness each level scales by. NA is the `target = "observed"`
@@ -120,7 +126,7 @@ grid_boot_computes <- function(g, target, statistic, context) {
     effect_k <- effect[[g$design_of[k]]]
     scale_k <- eff_scale[eff_of[k]]
     z_a <- z_alpha(cell_args[[k]]$alpha, context)
-    if (identical(statistic, "n")) {
+    if (on_lattice(statistic)) {
       power_k <- cell_args[[k]]$power
       function(p) 2 * size_per_arm(scale_effect(effect_k(p), scale_k), z_a, power_k)$n_per_arm
     } else {
@@ -129,8 +135,8 @@ grid_boot_computes <- function(g, target, statistic, context) {
     }
   })
 
-  tte <- lapply(eff_levels, function(e) {
-    eff_e <- if (is.na(e)) NULL else e
+  tte <- lapply(eff_arg, function(eff_e) {
+    force(eff_e)
     function(p) target_components(p, target, eff_e, context)$tte
   })
 
@@ -172,16 +178,6 @@ memo_effect_size <- function(design, effectiveness, target, context) {
     last
   }
 }
-
-#' Flatten the compute list into the shape [boot_replicate_matrix()] and
-#' [jackknife_values()] both take
-#'
-#' Every cell's solved-for quantity first, then one `tte` per distinct
-#' `effectiveness` level: column `k` is cell `k`'s sample size or power, and
-#' column `n_cells + cc$tte_of[k]` its target treatment effect -- the one
-#' indexing rule the rest of [grid_boot_impl()] relies on.
-#' @noRd
-grid_boot_flatten <- function(cc) c(cc$main, cc$tte)
 
 # ---------------------------------------------------------------------------
 # one cell's interval
@@ -411,7 +407,7 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   pts <- grid_evaluate(g, spec$evaluate, grid_result_cols(fixed_name), context)
 
   cc <- grid_boot_computes(g, target, statistic, context)
-  computes <- grid_boot_flatten(cc)
+  computes <- c(cc$main, cc$tte)
 
   setup <- boot_setup(params, context, target)
   mat <- boot_replicate_matrix(setup, computes, R, progress, context)
@@ -488,7 +484,7 @@ grid_boot_impl <- function(params, visits, dropout, dropout_scale, fixed_name,
   # bootstrap.R), as columns: a sample size on both bases, the per-arm block
   # exactly half the total -- the interval endpoints are already even totals,
   # and a mean and SD are linear.
-  added <- if (identical(statistic, "n")) {
+  added <- if (on_lattice(statistic)) {
     c(cell_block("n_total", main_mean, main_sd, main_ci[1L, ], main_ci[2L, ]),
       cell_block("n_per_arm", main_mean / 2, main_sd / 2, main_ci[1L, ] / 2, main_ci[2L, ] / 2))
   } else {
@@ -650,13 +646,10 @@ confint.slope_sample_size_grid_boot <- function(object, parm, level = attr(objec
                                                 ..., per_arm = NULL) {
   context <- "confint()"
   statistic <- attr(object, "statistic")
-  main <- if (on_lattice(statistic)) c("n_total", "n_per_arm") else statistic
   if (missing(parm)) {
-    parm <- if (on_lattice(statistic)) {
-      if (display_basis(object, per_arm, context)) "n_per_arm" else "n_total"
-    } else statistic
+    parm <- main_quantity(statistic, on_lattice(statistic) && display_basis(object, per_arm, context))
   }
-  available <- c(main, "tte")
+  available <- c(stat_quantities(statistic), "tte")
   if (!is.character(parm) || length(parm) != 1L || !parm %in% available) {
     stop(sprintf("%s: `parm` must be one of %s.", context,
                  paste(sQuote(available), collapse = ", ")), call. = FALSE)

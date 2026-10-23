@@ -27,6 +27,22 @@ paper_fit <- function(which) {
   fit
 }
 
+# Ten subjects, a small model that fits quickly and (at ci_method = "bca") needs
+# only ten leave-one-subject-out refits rather than slpower1's two hundred.
+# Built on first use and cached, so it is fitted once for the whole suite
+# rather than once per test, and not at all by files that never ask.
+small_fit <- function() {
+  cache <- sp_fit_cache()
+  if (is.null(cache$small)) {
+    set.seed(4)
+    subj <- data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
+    d <- merge(subj, data.frame(visit = 0:3))
+    d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
+    cache$small <- slope_params(y ~ visit | id, d)
+  }
+  cache$small
+}
+
 # The main bootstrapped quantity of a single-design bootstrap, under short
 # generic names, for tests that check its numbers rather than its field names
 # (test-output-names.R checks those). A sample size is read on its stored

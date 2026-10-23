@@ -3,7 +3,7 @@
 #' Render a numeric vector as the R call that would create it
 #' @noRd
 fmt_call_vec <- function(x) {
-  if (length(x) == 1L) fmt_num(x) else paste0("c(", paste(fmt_num(x), collapse = ", "), ")")
+  if (length(x) == 1L) fmt_num(x) else paste0("c(", label_numeric(x), ")")
 }
 
 # ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ dropout_rate <- function(rate, per = 1, pattern = c("linear", "geometric")) {
   } else {
     check_scalar(rate, "rate", context, lower = 0, upper = Inf, lower_open = FALSE)
   }
-  check_scalar(per, "per", context, lower = 0, upper = Inf, lower_open = TRUE)
+  check_positive(per, "per", context)
   structure(list(rate = as.numeric(rate), per = as.numeric(per), pattern = pattern),
             class = "dropout_rate")
 }
@@ -173,13 +173,12 @@ expand_dropout_rate <- function(spec, visits, ctx) {
 #' @noRd
 build_trial_design <- function(visits, dropout, dropout_scale, ctx) {
   visits <- validate_visits(visits, ctx)
-  n_intervals <- length(visits) - 1L
 
   # A rate puts someone in the baseline-only stratum whenever it is non-zero,
   # so warning would only say that a rate is a rate; see ?dropout_rate. The
   # warning is for a first element the caller wrote.
   from_rate <- inherits(dropout, "dropout_rate")
-  dropout <- validate_dropout(dropout, n_intervals, dropout_scale, visits, ctx)
+  dropout <- validate_dropout(dropout, dropout_scale, visits, ctx)
   if (!from_rate) warn_baseline_dropout(dropout, visits, ctx)
 
   structure(
@@ -271,7 +270,8 @@ validate_visits <- function(visits, ctx) {
 
 #' Validate and normalise the dropout vector to incremental proportions
 #' @noRd
-validate_dropout <- function(dropout, n_intervals, dropout_scale, visits, ctx) {
+validate_dropout <- function(dropout, dropout_scale, visits, ctx) {
+  n_intervals <- length(visits) - 1L
   if (is.null(dropout)) {
     return(rep(0, n_intervals))
   }
@@ -297,9 +297,9 @@ validate_dropout <- function(dropout, n_intervals, dropout_scale, visits, ctx) {
   }
   dropout <- as.numeric(dropout)
 
-  check_dropout_length(dropout, visits, "dropout", ctx)
+  check_dropout_length(dropout, visits, ctx)
 
-  check_dropout_values(dropout, "dropout", ctx)
+  check_dropout_values(dropout, ctx)
 
   if (identical(dropout_scale, "cumulative")) {
     steps <- diff(dropout)
@@ -319,7 +319,7 @@ validate_dropout <- function(dropout, n_intervals, dropout_scale, visits, ctx) {
     }
     dropout <- pmax(diff(c(0, dropout)), 0)
   } else {
-    check_dropout_total(dropout, "dropout", ctx)
+    check_dropout_total(dropout, ctx)
   }
 
   dropout
@@ -331,28 +331,27 @@ validate_dropout <- function(dropout, n_intervals, dropout_scale, visits, ctx) {
 #' the user supplied as incremental -- a cumulative one is bounded by its own
 #' final element instead, before conversion.
 #' @noRd
-check_dropout_values <- function(dropout, name, ctx) {
-  check_finite_vector(dropout, name, ctx)
+check_dropout_values <- function(dropout, ctx) {
+  check_finite_vector(dropout, "dropout", ctx)
   if (any(dropout < 0)) {
-    stop(sprintf("%s: `%s` proportions must be non-negative; element(s) %s are not.",
-                 ctx, name, paste(which(dropout < 0), collapse = ", ")), call. = FALSE)
+    stop(sprintf("%s: `dropout` proportions must be non-negative; element(s) %s are not.",
+                 ctx, paste(which(dropout < 0), collapse = ", ")), call. = FALSE)
   }
   invisible(dropout)
 }
 
-#' The length rule. `name` carries the caller's spelling of the vector so the
-#' message names what the user actually typed.
+#' The length rule.
 #' @rdname check_dropout_values
 #' @noRd
-check_dropout_length <- function(dropout, visits, name, ctx) {
+check_dropout_length <- function(dropout, visits, ctx) {
   n_intervals <- length(visits) - 1L
   if (length(dropout) != n_intervals) {
-    stop(sprintf(paste0("%s: `%s` must have one element per follow-up visit: ",
-                        "length(visits) - 1 = %d, but length(%s) = %d.",
+    stop(sprintf(paste0("%s: `dropout` must have one element per follow-up visit: ",
+                        "length(visits) - 1 = %d, but length(dropout) = %d.",
                         "\n  visits = %s covers %d follow-up visit%s after baseline.",
                         "\n  Use dropout_rate() to express a rate that applies across ",
                         "schedules of different lengths."),
-                 ctx, name, n_intervals, name, length(dropout),
+                 ctx, n_intervals, length(dropout),
                  fmt_call_vec(visits), n_intervals,
                  if (n_intervals == 1L) "" else "s"), call. = FALSE)
   }
@@ -361,15 +360,15 @@ check_dropout_length <- function(dropout, visits, name, ctx) {
 
 #' @rdname check_dropout_values
 #' @noRd
-check_dropout_total <- function(dropout, name, ctx) {
+check_dropout_total <- function(dropout, ctx) {
   total <- sum(dropout)
   if (total > 1 + DROPOUT_TOL) {
-    stop(sprintf(paste0("%s: incremental `%s` proportions sum to %s, which exceeds 1. ",
+    stop(sprintf(paste0("%s: incremental `dropout` proportions sum to %s, which exceeds 1. ",
                         "Each element is the proportion whose last attended visit is that ",
                         "visit, so they partition the randomised sample and cannot total ",
                         "more than 1.\n  If you meant cumulative proportions, pass ",
                         "dropout_scale = \"cumulative\"."),
-                 ctx, name, fmt_num(total)), call. = FALSE)
+                 ctx, fmt_num(total)), call. = FALSE)
   }
   invisible(dropout)
 }

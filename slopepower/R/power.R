@@ -42,9 +42,9 @@ check_param_values <- function(x, context, prefix = "") {
   out <- list(
     slope               = check_scalar(x$slope, nm("slope"), context),
     slope_comparator    = slope_comparator,
-    sigma2_intercept    = check_variance(x$sigma2_intercept, nm("sigma2_intercept"), context),
-    sigma2_slope        = check_variance(x$sigma2_slope, nm("sigma2_slope"), context),
-    sigma2_residual     = check_variance(x$sigma2_residual, nm("sigma2_residual"), context),
+    sigma2_intercept    = check_positive(x$sigma2_intercept, nm("sigma2_intercept"), context),
+    sigma2_slope        = check_positive(x$sigma2_slope, nm("sigma2_slope"), context),
+    sigma2_residual     = check_positive(x$sigma2_residual, nm("sigma2_residual"), context),
     cov_intercept_slope = check_scalar(x$cov_intercept_slope, nm("cov_intercept_slope"), context))
   check_re_covariance(out$sigma2_intercept, out$sigma2_slope, out$cov_intercept_slope, context)
   out
@@ -658,6 +658,22 @@ stage_two_result <- function(comp, n_per_arm, power, alpha, var_tte,
          after = match("reference_slope", names(out)))
 }
 
+#' Solve for whichever of the sample size and the power was not supplied
+#'
+#' The one branch [solve_slope()] and [floor_result()] (floor.R) share, so the
+#' floor's "no design beats this" guarantee rests on one copy of the algebra.
+#' Returns `n_per_arm`, `power`, and -- solving for n -- `z_sum_sq`,
+#' (z_alpha + z_beta)^2, the numerator of the sample-size formula.
+#' @noRd
+solve_n_or_power <- function(scaled_effect, z_a, solving_for_n, n, power) {
+  if (solving_for_n) {
+    sized <- size_per_arm(scaled_effect, z_a, power)
+    list(n_per_arm = sized$n_per_arm, power = power, z_sum_sq = sized$z_sum_sq)
+  } else {
+    power_at_n(scaled_effect, z_a, n)[c("n_per_arm", "power")]
+  }
+}
+
 #' Everything `slope_sample_size()` and `slope_power()` have in common
 #'
 #' Exactly one of `n` and `power` is supplied; the other is solved for. This is
@@ -679,18 +695,9 @@ solve_slope <- function(params, design, effectiveness,
   z_a <- z_alpha(alpha, context)
   scaled_effect <- scale_effect(comp$effect_size, comp$effectiveness)
 
-  if (solving_for_n) {
-    sized <- size_per_arm(scaled_effect, z_a, power)
-    # (z_alpha + z_beta)^2, the numerator of the sample-size formula. Kept
-    # because the var_tte back-solve below divides by this same quantity, and
-    # the two cannot be allowed to drift apart.
-    z_sum_sq <- sized$z_sum_sq
-    n_per_arm <- sized$n_per_arm
-  } else {
-    at_n <- power_at_n(scaled_effect, z_a, n)
-    n_per_arm <- at_n$n_per_arm
-    power <- at_n$power
-  }
+  solved <- solve_n_or_power(scaled_effect, z_a, solving_for_n, n, power)
+  n_per_arm <- solved$n_per_arm
+  power <- solved$power
 
   # With dropout no single s*^2 applies across strata, so report the effective
   # value obtained by inverting the sample-size formula (CONTRACT.md 5.6).
@@ -707,7 +714,9 @@ solve_slope <- function(params, design, effectiveness,
   var_tte <- if (!design$has_dropout) {
     comp$var_full
   } else if (solving_for_n) {
-    n_per_arm * comp$tte^2 / z_sum_sq
+    # Divides by the same (z_alpha + z_beta)^2 the sample size was solved with,
+    # so the two cannot drift apart.
+    n_per_arm * comp$tte^2 / solved$z_sum_sq
   } else {
     comp$tte^2 / scaled_effect^2
   }
@@ -1141,19 +1150,6 @@ print_result_notes <- function(x) {
   invisible(x)
 }
 
-#' The target lines of the "Parameters for planned study" block
-#'
-#' Split from the schedule lines below because the sample-size floor prints
-#' these two and then says it has no schedule at all (CONTRACT.md section 4.3).
-#' It used to re-spell them, so two of the printed labels and their widths
-#' existed in two files with nothing connecting them.
-#' @noRd
-print_target_lines <- function(x) {
-  cat_line("effectiveness", x$effectiveness)
-  cat_line("target treatment difference in slopes", x$tte)
-  invisible(x)
-}
-
 #' The tail of the "Parameters for planned study" block, common to both
 #'
 #' A bound over every design ([slope_sample_size_floor()],
@@ -1166,7 +1162,8 @@ print_target_lines <- function(x) {
 #' @noRd
 print_design_block <- function(x, bound) {
   design <- x$design
-  print_target_lines(x)
+  cat_line("effectiveness", x$effectiveness)
+  cat_line("target treatment difference in slopes", x$tte)
   if (bound) {
     cat_line("visit schedule", "any (the bound holds for all)")
     return(invisible(x))

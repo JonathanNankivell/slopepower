@@ -198,7 +198,14 @@ check_residual_data <- function(spec, time, subject, context, group = NULL) {
 
   key  <- time_key(time)
   grid <- sort(unique(key))
-  seen <- tapply(subject, factor(key, levels = grid), function(s) length(unique(s)))
+  # Participants seen at each grid time; a time nobody in the subset attends
+  # counts zero.
+  n_seen <- function(s, k) {
+    x <- tapply(s, factor(k, levels = grid), function(v) length(unique(v)))
+    x[is.na(x)] <- 0L
+    x
+  }
+  seen <- n_seen(subject, key)
   if (length(grid) < 2L || any(seen < 2L)) {
     stop(sprintf(paste0(
       "%s: %s has a parameter for every distinct visit time, so it needs a visit schedule ",
@@ -216,9 +223,7 @@ check_residual_data <- function(spec, time, subject, context, group = NULL) {
   if (spec$by_visit && !is.null(group)) {
     for (g in c(1, 0)) {
       in_g <- group == g
-      seen_g <- tapply(subject[in_g], factor(key[in_g], levels = grid),
-                       function(s) length(unique(s)))
-      seen_g[is.na(seen_g)] <- 0L
+      seen_g <- n_seen(subject[in_g], key[in_g])
       if (any(seen_g < 2L)) {
         stop(sprintf(paste0(
           "%s: under comparator = \"healthy\", `weights = varIdent()` gives each group its own ",
@@ -238,15 +243,19 @@ check_residual_data <- function(spec, time, subject, context, group = NULL) {
 #' @noRd
 time_key <- function(t) signif(t, 10L)
 
+#' The tolerance for representation noise in visit times and SD ratios
+#' @noRd
+RESIDUAL_TOL <- 1e-8
+
 #' Is each element a whole number, to within representation noise?
 #' @noRd
-is_whole <- function(t) abs(t - round(t)) <= 1e-8 * pmax(1, abs(t))
+is_whole <- function(t) abs(t - round(t)) <= RESIDUAL_TOL * pmax(1, abs(t))
 
 #' Position of each of `x` among `times`, to the same tolerance, or `NA`
 #' @noRd
 match_times <- function(x, times) {
   vapply(x, function(v) {
-    hit <- which(abs(times - v) <= 1e-8 * max(1, abs(v)))
+    hit <- which(abs(times - v) <= RESIDUAL_TOL * max(1, abs(v)))
     if (length(hit)) hit[1L] else NA_integer_
   }, integer(1L))
 }
@@ -424,8 +433,7 @@ residual_manual <- function(correlation, weights, times, context) {
                    context, if (identical(cls, "corSymm")) "corSymm()" else "varIdent()"),
            call. = FALSE)
     }
-    if (!is.numeric(times) || length(times) < 2L || any(!is.finite(times)) ||
-        is.unsorted(times, strictly = TRUE)) {
+    if (!is_time_grid(times)) {
       stop(sprintf("%s: `times` must be a strictly increasing numeric vector of length >= 2.",
                    context), call. = FALSE)
     }
@@ -492,7 +500,7 @@ manual_sd_ratio <- function(weights, times, context) {
   if (anyDuplicated(at)) {
     stop(sprintf("%s: `weights` names the same time more than once.", context), call. = FALSE)
   }
-  if (any(at == 1L) && abs(ratio[at == 1L] - 1) > 1e-8) {
+  if (any(at == 1L) && abs(ratio[at == 1L] - 1) > RESIDUAL_TOL) {
     stop(sprintf(paste0("%s: the first time, %s, is the reference level of `varIdent()`, ",
                         "so its SD ratio is 1 by definition; `sigma2_residual` is the ",
                         "variance there."), context, time_labels(times[1L])), call. = FALSE)
@@ -529,8 +537,7 @@ check_residual <- function(residual, context) {
                 paste(sQuote(RESIDUAL_CORRELATIONS), collapse = ", ")))
   }
   times <- residual$times
-  if (!is.null(times) && (!is.numeric(times) || length(times) < 2L ||
-                          any(!is.finite(times)) || is.unsorted(times, strictly = TRUE))) {
+  if (!is.null(times) && !is_time_grid(times)) {
     bad("`times` must be strictly increasing finite numbers")
   }
   needs_times <- identical(cls, "corSymm") || !is.null(residual$sd_ratio)
@@ -539,7 +546,7 @@ check_residual <- function(residual, context) {
   }
   r <- residual$sd_ratio
   if (!is.null(r) && (!is.numeric(r) || length(r) != length(times) ||
-                      any(!is.finite(r)) || any(r <= 0) || abs(r[1L] - 1) > 1e-8)) {
+                      any(!is.finite(r)) || any(r <= 0) || abs(r[1L] - 1) > RESIDUAL_TOL)) {
     bad("`sd_ratio` must be positive, one per time, and 1 at the first time")
   }
   x <- residual$coef

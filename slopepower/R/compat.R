@@ -150,7 +150,7 @@ slopepower <- function(data, depvar, subject, time, schedule,
   }
 
   # ---- schedule and scale --------------------------------------------------
-  check_scalar(scale, "scale", context, lower = 0, upper = Inf, lower_open = TRUE)
+  check_positive(scale, "scale", context)
   if (!is.numeric(schedule) || length(schedule) < 1L || any(!is.finite(schedule))) {
     stop(sprintf("%s: `schedule` must be a numeric vector of at least one follow-up visit time.",
                  context), call. = FALSE)

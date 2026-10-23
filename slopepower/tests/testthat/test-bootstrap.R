@@ -9,13 +9,16 @@
 # R is kept small throughout; these test the machinery, not the coverage.
 
 # A slope flattened to just under the section 2.6 threshold, so that a handful
-# of replicates genuinely refit a slope of the other sign. Three tests need it;
-# built on demand rather than at load time so that a fit is not paid for by
-# every other test in the file.
+# of replicates genuinely refit a slope of the other sign. Several tests need
+# it; fitted on first use and cached, so it is paid for once.
 flat_fit <- function() {
-  d <- load_paper_data("slpower1")
-  d$sdmt <- d$sdmt + 1.66 * d$time
-  slope_params(sdmt ~ time | id, d)
+  cache <- sp_fit_cache()
+  if (is.null(cache$flat)) {
+    d <- load_paper_data("slpower1")
+    d$sdmt <- d$sdmt + 1.66 * d$time         # flatten the slope, keep the structure
+    cache$flat <- slope_params(sdmt ~ time | id, d)
+  }
+  cache$flat
 }
 
 test_that("a bootstrap returns replicates with a spread, for the slope", {
@@ -229,10 +232,7 @@ test_that("the bootstraps validate R, level and ci_method", {
 test_that("a bootstrap warns when the slope is weak relative to its error", {
   # Paper section 2.6: if |slope| / se(slope) < 2.5 the replicate slopes can
   # straddle zero and the resulting interval is meaningless.
-  d <- load_paper_data("slpower1")
-  d$sdmt <- d$sdmt + 1.66 * d$time         # flatten the slope, keep the structure
-  flat <- slope_params(sdmt ~ time | id, d)
-  expect_warning(slope_params_boot(flat, R = 5, seed = 1))
+  expect_warning(slope_params_boot(flat_fit(), R = 5, seed = 1))
 })
 
 # --- resample_frame() ---------------------------------------------------
@@ -385,7 +385,10 @@ boot_pair_fit <- local({
   d <- data.frame(id = rep(1:2, each = 6), visit = rep(0:5, 2))
   d$y <- rep(c(50, 42), each = 6) +
     rep(c(-2.4, -1.4), each = 6) * d$visit + rnorm(12, 0, 1.2)
-  slope_params(y ~ visit | id, d)
+  # Two subjects leave optim close to its default 200-iteration limit, and
+  # over it on some R/nlme builds; the extra room is only so the fixture fits.
+  slope_params(y ~ visit | id, d,
+               control = slope_lme_control(maxIter = 2000, msMaxIter = 2000))
 })
 
 # The jackknife taken once here and reused across both tests below, exactly as
@@ -449,13 +452,7 @@ test_that("a bootstrap reports a percentile interval when BCa cannot be had", {
 # the accelerated branch, and at 12 replicates plus 10 leave-one-out refits it
 # is the most expensive thing in it -- hence once, at file scope. Its
 # discard warning is asserted on `boot_tiny_fit` above rather than here.
-boot_bca_fit <- local({
-  set.seed(4)
-  subj <- data.frame(id = 1:10, a = rnorm(10, 50, 8), b = rnorm(10, -2, 0.6))
-  d <- merge(subj, data.frame(visit = 0:3))
-  d$y <- d$a + d$b * d$visit + rnorm(nrow(d), 0, 2)
-  slope_params(y ~ visit | id, d)
-})
+boot_bca_fit <- small_fit()
 boot_bca <- suppressWarnings(
   slope_params_boot(boot_bca_fit, R = 12, seed = 2, ci_method = "bca"))
 
@@ -920,9 +917,7 @@ test_that("slope_se() is the denominator of the ratio the bootstraps warn on", {
   expect_gt(abs(strong$slope) / slope_se(strong), 2.5)
   expect_no_warning(slope_params_boot(strong, R = 3, seed = 1, ci_method = "percentile"))
 
-  d <- load_paper_data("slpower1")
-  d$sdmt <- d$sdmt + 1.66 * d$time         # flatten the slope, keep the structure
-  flat <- slope_params(sdmt ~ time | id, d)
+  flat <- flat_fit()
   ratio <- abs(flat$slope) / slope_se(flat)
   expect_lt(ratio, 2.5)
   expect_warning(slope_params_boot(flat, R = 3, seed = 1, ci_method = "percentile"),

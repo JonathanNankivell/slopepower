@@ -144,15 +144,10 @@ floor_result <- function(params, effectiveness, target, alpha, per_arm, context,
   scaled_effect <- scale_effect(effect_size, comp$effectiveness)
   z_a <- z_alpha(alpha, context)
 
-  if (solving_for_n) {
-    n_per_arm <- size_per_arm(scaled_effect, z_a, power)$n_per_arm
-    cls <- "slope_sample_size_floor"
-  } else {
-    at_n <- power_at_n(scaled_effect, z_a, n_total)
-    n_per_arm <- at_n$n_per_arm
-    power <- at_n$power
-    cls <- "slope_power_ceiling"
-  }
+  solved <- solve_n_or_power(scaled_effect, z_a, solving_for_n, n_total, power)
+  n_per_arm <- solved$n_per_arm
+  power <- solved$power
+  cls <- if (solving_for_n) "slope_sample_size_floor" else "slope_power_ceiling"
 
   # No `design` argument, so the field is absent rather than NULL -- the
   # fields of CONTRACT.md section 4.3, from the same assembler that gives
